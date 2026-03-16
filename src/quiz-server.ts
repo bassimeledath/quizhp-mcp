@@ -6,7 +6,7 @@ import {
 } from "@modelcontextprotocol/ext-apps/server";
 import { z } from "zod";
 import { GameStore } from "./game-store.js";
-import { getTemplatesForQuestions } from "./template-store.js";
+import type { Template, QuestionType, Platform } from "./types.js";
 
 const choiceSchema = z.object({
   text: z.string().min(1).describe("The choice text"),
@@ -44,6 +44,7 @@ const questionSchema = z
 export interface QuizServerConfig {
   gameStore: GameStore;
   getWidgetHtml: () => Promise<string>;
+  getTemplates: (types: QuestionType[], platform?: Platform) => Promise<Template[]>;
   /** Domains the widget iframe is allowed to connect to (for CSP) */
   connectDomains?: string[];
 }
@@ -112,11 +113,11 @@ The quiz renders as interactive mini-games (archery, puzzles, switches, etc.) â€
     async ({ questions, title }) => {
       const session = gameStore.createGame(questions, title ?? undefined);
 
-      // Load templates from bundled templates directory
+      // Load templates via injected dependency (Node.js fs or Worker bundle)
       let templates: unknown[] = [];
       try {
         const types = questions.map((q: { question_type: string }) => q.question_type);
-        templates = await getTemplatesForQuestions(types as ("mcq" | "true_false")[], "web");
+        templates = await config.getTemplates(types as QuestionType[], "web");
       } catch (err) {
         log("Template load error", { error: err instanceof Error ? err.message : String(err) });
       }

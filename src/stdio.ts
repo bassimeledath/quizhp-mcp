@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { createQuizServer } from "./quiz-server.js";
 import { GameStore } from "./game-store.js";
+import { getTemplatesForQuestions } from "./template-store.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -38,7 +39,7 @@ async function main(): Promise<void> {
     .map((d) => d.trim())
     .filter(Boolean);
 
-  const server = createQuizServer({ gameStore, getWidgetHtml, connectDomains });
+  const server = createQuizServer({ gameStore, getWidgetHtml, getTemplates: getTemplatesForQuestions, connectDomains });
 
   const transport = new StdioServerTransport();
   await server.connect(transport);

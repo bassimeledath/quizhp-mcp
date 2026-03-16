@@ -1,34 +1,21 @@
 /**
  * Cloudflare Worker entry point for QuizHP MCP Server.
  *
- * Uses the MCP SDK's StreamableHTTPServerTransport with Web Standard
- * Request/Response objects (compatible with Cloudflare Workers).
+ * Uses the shared createQuizServer() factory from quiz-server.ts
+ * with Worker-compatible dependencies (no Node.js fs/path).
  */
 
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
-import {
-  registerAppTool,
-  registerAppResource,
-  RESOURCE_MIME_TYPE,
-} from "@modelcontextprotocol/ext-apps/server";
-import { z } from "zod";
+import { createQuizServer } from "./quiz-server.js";
+import { GameStore } from "./game-store.js";
 import { WIDGET_HTML, WORKER_TEMPLATES } from "./worker-bundle.js";
+import type { Template, QuestionType, Platform } from "./types.js";
 
-// ── Inline types (Worker can't use Node fs) ──────────────────────────
+// ── Module-level state (persists across requests within isolate) ─────
 
-interface GameSession {
-  gameId: string;
-  title: string;
-  questions: unknown[];
-  createdAt: number;
-}
+const gameStore = new GameStore();
 
-// ── Simple in-memory store (per-isolate) ─────────────────────────────
-
-const sessions = new Map<string, GameSession>();
-
-// ── Template helpers ─────────────────────────────────────────────────
+// ── Worker template lookup ───────────────────────────────────────────
 
 // Group bundled templates by question type for fast lookup
 const templatesByType = new Map<string, typeof WORKER_TEMPLATES>();
@@ -37,11 +24,11 @@ for (const t of WORKER_TEMPLATES) {
   templatesByType.get(t.questionType)!.push(t);
 }
 
-function pickTemplates(questionTypes: string[]): unknown[] {
+async function getTemplates(types: QuestionType[], _platform?: Platform): Promise<Template[]> {
   const usedPerType = new Map<string, Set<number>>();
-  const results: unknown[] = [];
+  const results: Template[] = [];
 
-  for (const qType of questionTypes) {
+  for (const qType of types) {
     const candidates = templatesByType.get(qType) ?? [];
     if (candidates.length === 0) continue;
 
@@ -60,65 +47,22 @@ function pickTemplates(questionTypes: string[]): unknown[] {
       id: entry.name,
       name: entry.name,
       code: entry.code,
-      game_controls: entry.controls,
+      game_controls: entry.controls as Template["game_controls"],
       game_instructions: entry.instructions,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
       supported_question_type: entry.questionType,
       is_active: true,
-      platform: entry.platform,
+      platform: entry.platform as Platform,
     });
   }
 
   return results;
 }
 
-function createGame(questions: unknown[], title?: string): GameSession {
-  const gameId = `g_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`;
-  const session: GameSession = {
-    gameId,
-    title: title || "Quiz",
-    questions,
-    createdAt: Date.now(),
-  };
-  sessions.set(gameId, session);
-  return session;
+async function getWidgetHtml(): Promise<string> {
+  return WIDGET_HTML;
 }
-
-// ── Zod schemas ──────────────────────────────────────────────────────
-
-const choiceSchema = z.object({
-  text: z.string().min(1).describe("The choice text"),
-  is_correct: z.boolean().describe("Whether this choice is correct"),
-  explanation: z.string().describe("Explanation for this choice"),
-});
-
-const questionSchema = z
-  .object({
-    question_type: z
-      .enum(["mcq", "true_false"])
-      .describe("Type of question"),
-    question: z.string().min(1).describe("The question text"),
-    choices: z.array(choiceSchema).describe("Array of answer choices"),
-  })
-  .refine(
-    (q) => {
-      if (q.question_type === "true_false") {
-        return (
-          q.choices.length === 2 &&
-          q.choices.every((c) => ["true", "false"].includes(c.text.toLowerCase()))
-        );
-      }
-      if (q.question_type === "mcq") {
-        return q.choices.length === 4;
-      }
-      return true;
-    },
-    {
-      message:
-        "true_false: 2 choices (true/false), mcq: 4 choices",
-    }
-  );
 
 // ── CORS helpers ─────────────────────────────────────────────────────
 
@@ -135,111 +79,9 @@ function corsHeaders(request: Request): HeadersInit {
   return {
     "Access-Control-Allow-Origin": allowOrigin,
     "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, mcp-session-id",
+    "Access-Control-Allow-Headers": "Content-Type, mcp-session-id, mcp-protocol-version",
     "Access-Control-Expose-Headers": "mcp-session-id",
   };
-}
-
-// ── Create MCP server (per-request, stateless) ───────────────────────
-
-function createMcpServer(): McpServer {
-  const server = new McpServer({
-    name: "QuizHP",
-    version: "1.0.0",
-  });
-
-  registerAppTool(
-    server,
-    "play-quiz",
-    {
-      title: "Play Quiz",
-      description: `Display an interactive quiz game. Generate well-crafted quiz questions, then call this tool.
-
-Guidelines:
-- Generate 5-10 questions per quiz (unless the user specifies a count)
-- Mix question types: mostly mcq (4 choices), with some true_false for variety
-- Each answer choice text: concise, under 60 characters
-- Write clear explanations for every choice (correct and incorrect)
-- Exactly one correct answer per question
-- Vary difficulty: start easier, get progressively harder
-- For document-based quizzes: ground questions in specific document facts
-- Avoid "all of the above" or "none of the above" answers
-
-The quiz renders as interactive mini-games (archery, puzzles, switches, etc.) — one unique game per question.`,
-      inputSchema: {
-        questions: z
-          .array(questionSchema)
-          .min(1)
-          .max(50)
-          .describe("Array of quiz questions"),
-        title: z
-          .string()
-          .max(200)
-          .optional()
-          .describe("Optional title for the quiz"),
-      },
-      annotations: {
-        readOnlyHint: true,
-        destructiveHint: false,
-        idempotentHint: true,
-        openWorldHint: false,
-      },
-      _meta: {
-        ui: {
-          resourceUri: "ui://quizhp/quiz-app.html",
-          visibility: ["model"] as const,
-        },
-      },
-    },
-    async ({ questions, title }) => {
-      const session = createGame(questions, title ?? undefined);
-
-      const types = questions.map((q: { question_type: string }) => q.question_type);
-      const templates = pickTemplates(types);
-
-      return {
-        content: [
-          {
-            type: "text" as const,
-            text: `Quiz "${session.title}" with ${questions.length} questions is ready to play!`,
-          },
-        ],
-        structuredContent: {
-          gameId: session.gameId,
-          questions,
-          title: session.title,
-          templates,
-        } as Record<string, unknown>,
-      };
-    }
-  );
-
-  registerAppResource(
-    server,
-    "Quiz App",
-    "ui://quizhp/quiz-app.html",
-    {
-      description: "Interactive quiz game UI",
-      _meta: {
-        ui: {
-          csp: {
-            connectDomains: [],
-          },
-        },
-      },
-    },
-    async () => ({
-      contents: [
-        {
-          uri: "ui://quizhp/quiz-app.html",
-          mimeType: RESOURCE_MIME_TYPE,
-          text: WIDGET_HTML,
-        },
-      ],
-    })
-  );
-
-  return server;
 }
 
 // ── Worker fetch handler ─────────────────────────────────────────────
@@ -276,10 +118,16 @@ export default {
 
       if (request.method === "POST") {
         try {
-          const server = createMcpServer();
+          const server = createQuizServer({
+            gameStore,
+            getWidgetHtml,
+            getTemplates,
+            connectDomains: [],
+          });
 
           const transport = new WebStandardStreamableHTTPServerTransport({
             sessionIdGenerator: undefined,
+            enableJsonResponse: true,
           });
 
           await server.connect(transport);

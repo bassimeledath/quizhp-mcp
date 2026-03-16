@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import type { Question } from "./types.js";
 
 export interface GameSession {
@@ -21,7 +20,7 @@ export class GameStore {
   createGame(questions: Question[], title?: string): GameSession {
     this.cleanup();
 
-    const gameId = `g_${randomUUID().replace(/-/g, "").slice(0, 16)}`;
+    const gameId = `g_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`;
     const session: GameSession = {
       gameId,
       title: title || "Quiz",

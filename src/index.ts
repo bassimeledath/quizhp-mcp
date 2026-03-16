@@ -7,6 +7,7 @@ import express from "express";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { createQuizServer } from "./quiz-server.js";
 import { GameStore } from "./game-store.js";
+import { getTemplatesForQuestions } from "./template-store.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PORT = parseInt(process.env.PORT ?? "3001", 10);
@@ -87,6 +88,7 @@ app.post("/mcp", async (req, res) => {
     const server = createQuizServer({
       gameStore,
       getWidgetHtml,
+      getTemplates: getTemplatesForQuestions,
       connectDomains: CONNECT_DOMAINS,
     });
 
