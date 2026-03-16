@@ -121,7 +121,8 @@ export const useQuizStore = create<QuizStore>((set, get) => ({
   },
 
   handleChoice: (payload) => {
-    const { currentQuestionIndex, attemptRecords } = get();
+    const { currentQuestionIndex, attemptRecords, quizCompleted } = get();
+    if (quizCompleted) return;
     set({
       feedback: {
         isCorrect: payload.isCorrect,
