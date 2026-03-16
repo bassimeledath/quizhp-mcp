@@ -70,6 +70,12 @@ export function QuizContainer({
   // Derive display mode from host context
   const displayMode = hostContext?.displayMode ?? "inline";
 
+  // Clear feedback whenever quizCompleted transitions to true, as a safety net
+  // against any stale postMessage that might set feedback during the transition.
+  useEffect(() => {
+    if (quizCompleted) setFeedback(null);
+  }, [quizCompleted, setFeedback]);
+
   // Wrap handleChoice to ignore stale postMessages from a previous game session.
   // After resetQuiz increments resetGeneration, any callback created with the
   // old generation will see a mismatch and discard the message.

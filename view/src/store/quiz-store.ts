@@ -107,16 +107,24 @@ export const useQuizStore = create<QuizStore>((set, get) => ({
 
   resetQuiz: () => {
     const { questions, resetGeneration } = get();
+    const newGen = resetGeneration + 1;
     set({
       currentQuestionIndex: 0,
       quizCompleted: false,
       feedback: null,
-      resetGeneration: resetGeneration + 1,
+      resetGeneration: newGen,
       attemptRecords: questions.map(() => ({
         wrongAttempts: 0,
         completed: false,
       })),
     });
+    // Clear feedback again after any pending postMessage handlers run.
+    // This catches stale game-iframe messages queued before the reset.
+    setTimeout(() => {
+      if (get().resetGeneration === newGen) {
+        set({ feedback: null });
+      }
+    }, 0);
   },
 
   setFeedback: (feedback) => {

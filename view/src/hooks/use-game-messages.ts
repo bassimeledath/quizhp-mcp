@@ -20,9 +20,11 @@ export function useGameMessages({
 }: UseGameMessagesProps) {
   const handleMessage = useCallback(
     (event: MessageEvent) => {
-      // Guard: ignore messages from stale iframes after navigation
-      if (iframeRef && event.source !== iframeRef.current?.contentWindow) {
-        return;
+      // Guard: ignore messages from stale iframes after navigation.
+      // Also reject when contentWindow is null (iframe not yet loaded).
+      if (iframeRef) {
+        const win = iframeRef.current?.contentWindow;
+        if (!win || event.source !== win) return;
       }
 
       const data = event.data as QuizMessageEvent;
