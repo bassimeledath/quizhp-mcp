@@ -85,6 +85,18 @@ export function QuizApp() {
     }
   }, [isConnected, app, hostContext]);
 
+  // Fallback: respect system dark/light preference when host doesn't provide a theme
+  useEffect(() => {
+    if (hostContext?.theme) return; // host controls the theme
+    const mq = window.matchMedia("(prefers-color-scheme: dark)");
+    applyDocumentTheme(mq.matches ? "dark" : "light");
+    const onChange = (e: MediaQueryListEvent) => {
+      if (!hostContext?.theme) applyDocumentTheme(e.matches ? "dark" : "light");
+    };
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  }, [hostContext?.theme]);
+
   // Fallback: fetch templates from server if not delivered via structuredContent
   useEffect(() => {
     if (!app || !quizData?.questions?.length || quizData.templates?.length || templateFetchAttempted.current) return;
