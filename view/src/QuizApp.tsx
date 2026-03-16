@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import {
   useApp,
   applyHostStyleVariables,
@@ -24,6 +24,7 @@ export function QuizApp() {
   const [quizData, setQuizData] = useState<QuizData | null>(null);
   const [hostContext, setHostContext] = useState<McpUiHostContext | undefined>();
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const templateFetchAttempted = useRef(false);
 
   const onAppCreated = useCallback(
     (app: import("@modelcontextprotocol/ext-apps").App) => {
@@ -83,6 +84,28 @@ export function QuizApp() {
       }
     }
   }, [isConnected, app, hostContext]);
+
+  // Fallback: fetch templates from server if not delivered via structuredContent
+  useEffect(() => {
+    if (!app || !quizData?.questions?.length || quizData.templates?.length || templateFetchAttempted.current) return;
+    templateFetchAttempted.current = true;
+
+    const types = quizData.questions.map((q) => q.question_type).join(".");
+    app
+      .readServerResource({ uri: `quizhp://templates/${types}` })
+      .then((result) => {
+        const text = result.contents?.[0]?.text;
+        if (typeof text === "string") {
+          const templates = JSON.parse(text) as Template[];
+          if (templates.length > 0) {
+            setQuizData((prev) => prev ? { ...prev, templates } : prev);
+          }
+        }
+      })
+      .catch(() => {
+        // Resource fetch failed — host may not support serverResources
+      });
+  }, [app, quizData]);
 
   if (error) return <div style={{ padding: 24, color: "red" }}>{error.message}</div>;
   if (errorMessage) return <div style={{ padding: 24, color: "red" }}>{errorMessage}</div>;

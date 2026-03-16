@@ -1,4 +1,4 @@
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { McpServer, ResourceTemplate } from "@modelcontextprotocol/sdk/server/mcp.js";
 import {
   registerAppTool,
   registerAppResource,
@@ -162,6 +162,33 @@ The quiz renders as interactive mini-games (archery, puzzles, switches, etc.) �
             uri: "ui://quizhp/quiz-app.html",
             mimeType: RESOURCE_MIME_TYPE,
             text: html,
+          },
+        ],
+      };
+    }
+  );
+
+  // ── Template resource (fallback for hosts that don't forward structuredContent) ──
+  // Types are dot-separated: quizhp://templates/mcq.mcq.true_false
+  server.resource(
+    "quiz-templates",
+    new ResourceTemplate("quizhp://templates/{types}", { list: undefined }),
+    async (uri, { types }) => {
+      const typeArr = (types as string).split(".").filter(Boolean) as QuestionType[];
+      let templates: Template[] = [];
+      try {
+        templates = await config.getTemplates(typeArr, "web");
+      } catch (err) {
+        log("Template resource load error", {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+      return {
+        contents: [
+          {
+            uri: uri.href,
+            mimeType: "application/json",
+            text: JSON.stringify(templates),
           },
         ],
       };
