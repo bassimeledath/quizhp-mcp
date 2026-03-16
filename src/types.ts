@@ -65,10 +65,6 @@ export interface Template {
   platform?: Platform;
 }
 
-export interface GeneratedTemplatesResponse {
-  templates: Template[];
-}
-
 // ============================================================================
 // Quiz State Types
 // ============================================================================
@@ -125,20 +121,6 @@ export interface ChoicePayload {
   choiceIndex?: number;
   isCorrect: boolean;
   explanation?: string;
-}
-
-export interface GameShellProps {
-  currentQuestion: Question;
-  hydratedHTML: string;
-  feedback: Feedback | null;
-  onFeedbackChange: (feedback: Feedback | null) => void;
-  onChoice: (payload: ChoicePayload) => void;
-  currentIndex: number;
-  totalQuestions: number;
-  onPrevious: () => void;
-  onNext: () => void;
-  isFirstQuestion: boolean;
-  isLastQuestion: boolean;
 }
 
 // ============================================================================

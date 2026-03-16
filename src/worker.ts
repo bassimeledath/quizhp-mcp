@@ -78,6 +78,7 @@ const questionSchema = z
 
 const ALLOWED_ORIGINS = [
   "https://claude.ai",
+  "https://claude.com",
   "https://chatgpt.com",
   "https://chat.openai.com",
 ];
