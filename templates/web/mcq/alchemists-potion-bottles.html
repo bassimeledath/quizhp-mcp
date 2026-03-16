@@ -1,0 +1,940 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Game Template</title>
+  <link href="https://fonts.googleapis.com/css2?family=Belanosima:wght@400;600;700&family=Nunito+Sans:wght@400;500;600;700&family=Nunito:wght@400;500;600&display=swap" rel="stylesheet">
+  <!--
+  ╔══════════════════════════════════════════════════════════════════════════════╗
+  ║  GAME FACTORY TEMPLATE                                                        ║
+  ║  This template enforces critical invariants. Follow the section markers.      ║
+  ╚══════════════════════════════════════════════════════════════════════════════╝
+  -->
+  <style>
+    /* ═══════════════════════════════════════════════════════════════════════════
+       BASE STYLES - Can be extended, not removed
+       ═══════════════════════════════════════════════════════════════════════════ */
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+    }
+    body {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      background: #1a1a2e;
+      font-family: 'Nunito', system-ui, -apple-system, sans-serif;
+    }
+    #gameCanvas {
+      background: #16213e;
+      border-radius: 8px;
+      display: block;
+    }
+  </style>
+</head>
+<body>
+  <!-- ═══════════════════════════════════════════════════════════════════════════
+       CANVAS - Sized dynamically to fill available space
+       ═══════════════════════════════════════════════════════════════════════════ -->
+  <canvas id="gameCanvas"></canvas>
+
+  <script>
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 1: QUESTION PLACEHOLDER - DO NOT MODIFY FORMAT                    ║
+  // ║  Platform replaces this at runtime. Use these exact 60-char answers.       ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  const QUESTION = {
+    type: "mcq",
+    prompt: "Sample question text",
+    choices: [
+      { text: "This is sample answer A which is long enough to test text overflow", is_correct: true, explanation: "Why A is correct" },
+      { text: "This is sample answer B which is long enough to test text overflow", is_correct: false, explanation: "Why B is wrong" },
+      { text: "This is sample answer C which is long enough to test text overflow", is_correct: false, explanation: "Why C is wrong" },
+      { text: "This is sample answer D which is long enough to test text overflow", is_correct: false, explanation: "Why D is wrong" }
+    ],
+    isLastQuestion: false
+  };
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 2: ENGINE CORE - DO NOT MODIFY                                    ║
+  // ║  Standard engine interface and end screen. This is sacred.                 ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  const canvas = document.getElementById('gameCanvas');
+  const ctx = canvas.getContext('2d');
+
+  // Logical dimensions (game code works in this coordinate space)
+  const W = 720, H = 540;
+
+  // Scaling state (computed on resize)
+  let scale = 1;
+  let dpr = 1;
+
+  let gameState = 'playing'; // 'playing' | 'ended'
+  let gameResult = null;     // true (correct) | false (wrong)
+  let gameExplanation = '';
+  let endScreenTime = 0;
+  let confettiParticles = [];
+
+  // End screen button bounds (logical coordinates)
+  const restartButton = { x: W / 2 - 170, y: H / 2 + 60, w: 150, h: 48 };
+  const nextButton = { x: W / 2 + 20, y: H / 2 + 60, w: 150, h: 48 };
+
+  /** Check if point is inside rectangle */
+  function pointInRect(px, py, rect) {
+    return px >= rect.x && px <= rect.x + rect.w &&
+           py >= rect.y && py <= rect.y + rect.h;
+  }
+
+  /** Draw a styled button */
+  function drawButton(rect, label, color, pulse) {
+    const p = pulse ? 1 + Math.sin(endScreenTime * 4) * 0.03 : 1;
+    ctx.save();
+    ctx.translate(rect.x + rect.w / 2, rect.y + rect.h / 2);
+    ctx.scale(p, p);
+    ctx.translate(-(rect.x + rect.w / 2), -(rect.y + rect.h / 2));
+
+    // Button background
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.roundRect(rect.x, rect.y, rect.w, rect.h, 12);
+    ctx.fill();
+
+    // Button text
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = 'bold 18px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, rect.x + rect.w / 2, rect.y + rect.h / 2);
+
+    ctx.restore();
+  }
+
+  /**
+   * Resize canvas to fill available space with proper DPR scaling.
+   * Maintains logical coordinate system (720×540).
+   */
+  function resizeCanvas() {
+    dpr = window.devicePixelRatio || 1;
+
+    // Get available space
+    const availW = window.innerWidth;
+    const availH = window.innerHeight;
+
+    // Calculate scale to fit logical space (720×540) in available space
+    const scaleX = availW / W;
+    const scaleY = availH / H;
+    scale = Math.min(scaleX, scaleY);
+
+    // Physical canvas buffer (DPR-scaled for crisp rendering)
+    canvas.width = W * scale * dpr;
+    canvas.height = H * scale * dpr;
+
+    // CSS display size
+    canvas.style.width = (W * scale) + 'px';
+    canvas.style.height = (H * scale) + 'px';
+  }
+
+  /**
+   * Convert screen coordinates to logical coordinates.
+   * Use this for mouse/click events to get positions in 720×540 space.
+   */
+  function screenToLogical(screenX, screenY) {
+    const rect = canvas.getBoundingClientRect();
+    return {
+      x: (screenX - rect.left) * (W / rect.width),
+      y: (screenY - rect.top) * (H / rect.height)
+    };
+  }
+
+  const engine = {
+    /** Call this to end the game. DO NOT draw your own end screen. */
+    end(isCorrect, explanation) {
+      if (gameState === 'ended') return;
+      gameState = 'ended';
+      gameResult = isCorrect;
+      gameExplanation = explanation || '';
+      endScreenTime = 0;
+
+      // Spawn confetti for correct answers
+      if (isCorrect) {
+        for (let i = 0; i < 50; i++) {
+          confettiParticles.push({
+            x: W / 2,
+            y: H / 2,
+            vx: (Math.random() - 0.5) * 600,
+            vy: -Math.random() * 400 - 100,
+            size: 4 + Math.random() * 6,
+            color: ['#FFD700', '#FF6B6B', '#4ECDC4', '#95E1D3', '#F38181'][Math.floor(Math.random() * 5)],
+            rotation: Math.random() * Math.PI * 2,
+            rotationSpeed: (Math.random() - 0.5) * 10
+          });
+        }
+      }
+
+      // Notify parent frame
+      if (window.parent && window.parent !== window) {
+        window.parent.postMessage({
+          type: 'quiz-end',
+          isCorrect: isCorrect,
+          explanation: explanation || ''
+        }, '*');
+      }
+    }
+  };
+
+  /** STANDARD END SCREEN - DO NOT MODIFY */
+  function drawEndScreen(dt) {
+    endScreenTime += dt;
+
+    // Update confetti
+    confettiParticles = confettiParticles.filter(p => {
+      p.vy += 800 * dt; // gravity
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.rotation += p.rotationSpeed * dt;
+      p.vx *= 0.99;
+      return p.y < H + 50;
+    });
+
+    // Dark overlay
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
+    ctx.fillRect(0, 0, W, H);
+
+    // Draw confetti
+    confettiParticles.forEach(p => {
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rotation);
+      ctx.fillStyle = p.color;
+      ctx.fillRect(-p.size / 2, -p.size / 4, p.size, p.size / 2);
+      ctx.restore();
+    });
+
+    // Result emoji
+    ctx.font = '72px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(gameResult ? '🎉' : '😢', W / 2, H / 2 - 50);
+
+    // Result text
+    ctx.fillStyle = gameResult ? '#4ADE80' : '#F87171';
+    ctx.font = 'bold 36px system-ui, sans-serif';
+    ctx.fillText(gameResult ? 'Correct!' : 'Wrong!', W / 2, H / 2 + 20);
+
+    // Buttons
+    if (gameResult) {
+      // Correct: show both Restart and Next/Finish
+      drawButton(restartButton, 'Restart', '#E87A3E', true);
+      const nextLabel = QUESTION.isLastQuestion ? 'Finish' : 'Next';
+      drawButton(nextButton, nextLabel, '#4ECDC4', true);
+    } else {
+      // Wrong: show only centered Restart button
+      const centeredRestart = { x: W / 2 - 75, y: H / 2 + 60, w: 150, h: 48 };
+      drawButton(centeredRestart, 'Restart', '#E87A3E', true);
+    }
+  }
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 3: YOUR GAME CODE - IMPLEMENT THESE FUNCTIONS                     ║
+  // ║  This is where your game logic goes. See requirements below.               ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+
+  // === COLORS ===
+  const COLORS = {
+    bgPrimary: '#FAFAF7',
+    bgSurface: '#FFFFFF',
+    textPrimary: '#2B2B28',
+    textSecondary: '#5A5A54',
+    orange: '#E87A3E',
+    orangeHover: '#D66B31',
+    amber: '#F5A742',
+    cyan: '#4ECDC4',
+    success: '#6BBF59',
+    error: '#E85D4A',
+    borderSubtle: '#E6E6E0',
+    borderStrong: '#D4D4CC'
+  };
+
+  // Potion colors (glowing magical colors)
+  const POTION_COLORS = [
+    { fill: '#E85D4A', glow: '#FF7A6A', liquid: '#C04030', label: '1' }, // Red
+    { fill: '#4ECDC4', glow: '#7EEEE6', liquid: '#3AA89F', label: '2' }, // Cyan
+    { fill: '#F5A742', glow: '#FFD080', liquid: '#D08A2A', label: '3' }, // Amber
+    { fill: '#9B59B6', glow: '#C89DD8', liquid: '#7D3F98', label: '4' }  // Purple
+  ];
+
+  // === GAME STATE ===
+  let bottles = [];
+  let selectedIndex = -1;
+  let selectionTime = 0;
+  let gameTime = 0;
+  let bubbles = [];
+  let particles = [];
+  let hoveredIndex = -1;
+  let shelfY = 0;
+
+  // Sound effects via Web Audio API
+  const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+  function playSound(type) {
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+
+    if (type === 'correct') {
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(523, audioCtx.currentTime);
+      osc.frequency.setValueAtTime(659, audioCtx.currentTime + 0.1);
+      osc.frequency.setValueAtTime(784, audioCtx.currentTime + 0.2);
+      gain.gain.setValueAtTime(0.15, audioCtx.currentTime);
+      gain.gain.exponentialDecayToValueAtTime?.(0.001, audioCtx.currentTime + 0.5) ||
+        gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.5);
+      osc.start(); osc.stop(audioCtx.currentTime + 0.5);
+    } else if (type === 'wrong') {
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(200, audioCtx.currentTime);
+      osc.frequency.setValueAtTime(150, audioCtx.currentTime + 0.15);
+      gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.4);
+      osc.start(); osc.stop(audioCtx.currentTime + 0.4);
+    } else if (type === 'click') {
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(880, audioCtx.currentTime);
+      gain.gain.setValueAtTime(0.08, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.1);
+      osc.start(); osc.stop(audioCtx.currentTime + 0.1);
+    } else if (type === 'bubble') {
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(600 + Math.random() * 400, audioCtx.currentTime);
+      gain.gain.setValueAtTime(0.03, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.08);
+      osc.start(); osc.stop(audioCtx.currentTime + 0.08);
+    }
+  }
+
+  // Word-wrap text into lines
+  function wrapText(text, maxWidth, font) {
+    ctx.font = font;
+    const words = text.split(' ');
+    const lines = [];
+    let currentLine = words[0];
+
+    for (let i = 1; i < words.length; i++) {
+      const testLine = currentLine + ' ' + words[i];
+      if (ctx.measureText(testLine).width <= maxWidth) {
+        currentLine = testLine;
+      } else {
+        lines.push(currentLine);
+        currentLine = words[i];
+      }
+    }
+    lines.push(currentLine);
+    return lines;
+  }
+
+  function initGame() {
+    bottles = [];
+    selectedIndex = -1;
+    selectionTime = 0;
+    gameTime = 0;
+    bubbles = [];
+    particles = [];
+    hoveredIndex = -1;
+
+    // Shelf position
+    shelfY = 340;
+
+    // Create 4 potion bottles positioned on a shelf
+    const bottleSpacing = 155;
+    const totalWidth = bottleSpacing * 3;
+    const startX = (W - totalWidth) / 2;
+
+    QUESTION.choices.forEach((choice, i) => {
+      bottles.push({
+        x: startX + i * bottleSpacing,
+        y: shelfY - 90,
+        width: 70,
+        height: 120,
+        neckWidth: 24,
+        neckHeight: 30,
+        choice: choice,
+        index: i,
+        color: POTION_COLORS[i],
+        scale: 0,
+        alpha: 0,
+        entranceDelay: i * 80,
+        entranceStart: -1,
+        bobPhase: Math.random() * Math.PI * 2,
+        glowIntensity: 0.5,
+        liquidLevel: 0.65 + Math.random() * 0.15,
+        shakeX: 0,
+        popScale: 1
+      });
+    });
+  }
+
+  function spawnBubble(bottle) {
+    const bx = bottle.x + (Math.random() - 0.5) * 30;
+    const by = bottle.y + bottle.height * 0.2;
+    bubbles.push({
+      x: bx,
+      y: by,
+      size: 2 + Math.random() * 4,
+      alpha: 0.6,
+      vy: -20 - Math.random() * 30,
+      vx: (Math.random() - 0.5) * 10,
+      color: bottle.color.glow,
+      life: 1
+    });
+  }
+
+  function spawnSelectParticles(bottle) {
+    for (let i = 0; i < 20; i++) {
+      const angle = (Math.PI * 2 / 20) * i;
+      particles.push({
+        x: bottle.x,
+        y: bottle.y - 20,
+        vx: Math.cos(angle) * (80 + Math.random() * 60),
+        vy: Math.sin(angle) * (80 + Math.random() * 60) - 40,
+        size: 3 + Math.random() * 5,
+        color: bottle.color.glow,
+        alpha: 1,
+        life: 1,
+        gravity: 120
+      });
+    }
+  }
+
+  function updateGame(dt) {
+    if (gameState !== 'playing') return;
+
+    gameTime += dt;
+
+    // Entrance animations
+    bottles.forEach(b => {
+      if (b.entranceStart < 0 && gameTime * 1000 >= b.entranceDelay) {
+        b.entranceStart = gameTime;
+      }
+      if (b.entranceStart >= 0) {
+        const elapsed = gameTime - b.entranceStart;
+        const t = Math.min(elapsed / 0.35, 1);
+        // Spring easing
+        const spring = 1 + Math.sin(t * Math.PI * 2) * 0.2 * (1 - t);
+        b.scale = t * spring;
+        b.alpha = Math.min(t * 2, 1);
+      }
+    });
+
+    // Glow pulsing
+    bottles.forEach(b => {
+      b.glowIntensity = 0.4 + Math.sin(gameTime * 2 + b.bobPhase) * 0.2;
+      if (hoveredIndex === b.index) {
+        b.glowIntensity = 0.8 + Math.sin(gameTime * 4) * 0.15;
+      }
+    });
+
+    // Spawn bubbles occasionally
+    bottles.forEach(b => {
+      if (b.scale >= 0.9 && Math.random() < dt * 1.5) {
+        spawnBubble(b);
+      }
+    });
+
+    // Update bubbles
+    bubbles.forEach(bub => {
+      bub.y += bub.vy * dt;
+      bub.x += bub.vx * dt;
+      bub.life -= dt * 0.8;
+      bub.alpha = bub.life * 0.6;
+      bub.size *= (1 - dt * 0.3);
+    });
+    bubbles = bubbles.filter(b => b.life > 0);
+
+    // Update particles
+    particles.forEach(p => {
+      p.vy += p.gravity * dt;
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.life -= dt * 1.5;
+      p.alpha = Math.max(0, p.life);
+    });
+    particles = particles.filter(p => p.life > 0);
+
+    // Selection animation
+    if (selectedIndex >= 0) {
+      selectionTime += dt;
+      const b = bottles[selectedIndex];
+
+      // Pop animation
+      if (selectionTime < 0.15) {
+        b.popScale = 1 + 0.2 * Math.sin((selectionTime / 0.15) * Math.PI);
+      } else {
+        b.popScale = 1;
+      }
+
+      // Shake for wrong, celebrate for correct after delay
+      if (selectionTime > 0.4) {
+        const choice = b.choice;
+        if (choice.is_correct) {
+          playSound('correct');
+        } else {
+          playSound('wrong');
+        }
+        engine.end(choice.is_correct, choice.explanation);
+      }
+    }
+
+    // Wrong shake animation
+    bottles.forEach(b => {
+      if (b.shakeX !== 0) {
+        b.shakeX *= 0.85;
+        if (Math.abs(b.shakeX) < 0.5) b.shakeX = 0;
+      }
+    });
+  }
+
+  function drawBottle(b) {
+    if (b.alpha <= 0) return;
+
+    ctx.save();
+    ctx.globalAlpha = b.alpha;
+    ctx.translate(b.x + b.shakeX, b.y);
+    ctx.scale(b.scale * b.popScale, b.scale * b.popScale);
+
+    const hw = b.width / 2;
+    const hh = b.height / 2;
+    const nhw = b.neckWidth / 2;
+    const nh = b.neckHeight;
+
+    // Glow effect
+    const glowRadius = 60 + b.glowIntensity * 30;
+    const glowGrad = ctx.createRadialGradient(0, 0, 10, 0, 0, glowRadius);
+    glowGrad.addColorStop(0, b.color.glow + '40');
+    glowGrad.addColorStop(0.5, b.color.glow + '15');
+    glowGrad.addColorStop(1, b.color.glow + '00');
+    ctx.fillStyle = glowGrad;
+    ctx.fillRect(-glowRadius, -glowRadius, glowRadius * 2, glowRadius * 2);
+
+    // Bottle body (rounded flask shape)
+    ctx.beginPath();
+    // Start from neck top left
+    ctx.moveTo(-nhw, -hh - nh);
+    // Neck left side
+    ctx.lineTo(-nhw, -hh);
+    // Curve out to body left
+    ctx.quadraticCurveTo(-hw - 5, -hh + 15, -hw, -hh / 2 + 10);
+    // Body left side
+    ctx.lineTo(-hw, hh - 15);
+    // Bottom left curve
+    ctx.quadraticCurveTo(-hw, hh, -hw + 15, hh);
+    // Bottom
+    ctx.lineTo(hw - 15, hh);
+    // Bottom right curve
+    ctx.quadraticCurveTo(hw, hh, hw, hh - 15);
+    // Body right side
+    ctx.lineTo(hw, -hh / 2 + 10);
+    // Curve in to neck right
+    ctx.quadraticCurveTo(hw + 5, -hh + 15, nhw, -hh);
+    // Neck right side
+    ctx.lineTo(nhw, -hh - nh);
+    ctx.closePath();
+
+    // Glass fill
+    const glassFill = ctx.createLinearGradient(-hw, 0, hw, 0);
+    glassFill.addColorStop(0, 'rgba(200, 210, 220, 0.25)');
+    glassFill.addColorStop(0.3, 'rgba(220, 230, 240, 0.15)');
+    glassFill.addColorStop(0.7, 'rgba(200, 210, 220, 0.2)');
+    glassFill.addColorStop(1, 'rgba(180, 190, 200, 0.3)');
+    ctx.fillStyle = glassFill;
+    ctx.fill();
+
+    // Glass outline
+    ctx.strokeStyle = 'rgba(200, 210, 220, 0.5)';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    // Liquid inside bottle (clip to bottle shape)
+    ctx.save();
+    ctx.clip();
+    const liquidTop = hh - b.liquidLevel * b.height;
+    const wobble = Math.sin(gameTime * 2.5 + b.bobPhase) * 3;
+
+    // Liquid fill
+    const liquidGrad = ctx.createLinearGradient(0, liquidTop, 0, hh);
+    liquidGrad.addColorStop(0, b.color.fill);
+    liquidGrad.addColorStop(1, b.color.liquid);
+    ctx.fillStyle = liquidGrad;
+
+    ctx.beginPath();
+    ctx.moveTo(-hw - 5, liquidTop + wobble);
+    // Wavy surface
+    for (let lx = -hw - 5; lx <= hw + 5; lx += 5) {
+      const wavey = liquidTop + Math.sin(gameTime * 3 + lx * 0.05 + b.bobPhase) * 3 + wobble;
+      ctx.lineTo(lx, wavey);
+    }
+    ctx.lineTo(hw + 5, hh + 5);
+    ctx.lineTo(-hw - 5, hh + 5);
+    ctx.closePath();
+    ctx.fill();
+
+    // Liquid glow
+    const lGlow = ctx.createRadialGradient(0, liquidTop + 20, 5, 0, liquidTop + 20, hw);
+    lGlow.addColorStop(0, b.color.glow + '60');
+    lGlow.addColorStop(1, b.color.glow + '00');
+    ctx.fillStyle = lGlow;
+    ctx.fill();
+
+    ctx.restore();
+
+    // Glass highlight
+    ctx.beginPath();
+    ctx.moveTo(-hw + 10, -hh / 2 + 15);
+    ctx.quadraticCurveTo(-hw + 8, hh * 0.3, -hw + 15, hh - 20);
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.35)';
+    ctx.lineWidth = 3;
+    ctx.stroke();
+
+    // Cork/stopper
+    ctx.fillStyle = '#8B6914';
+    ctx.beginPath();
+    ctx.roundRect(-nhw - 2, -hh - nh - 8, b.neckWidth + 4, 12, 3);
+    ctx.fill();
+    ctx.fillStyle = '#A67C1A';
+    ctx.beginPath();
+    ctx.roundRect(-nhw + 1, -hh - nh - 6, b.neckWidth - 2, 4, 2);
+    ctx.fill();
+
+    // Number label on bottle
+    ctx.font = "700 22px 'Belanosima', sans-serif";
+    ctx.fillStyle = '#FFFFFF';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.shadowColor = b.color.fill;
+    ctx.shadowBlur = 8;
+    ctx.fillText(b.color.label, 0, 10);
+    ctx.shadowBlur = 0;
+
+    ctx.restore();
+  }
+
+  function drawShelf() {
+    // Stone shelf
+    const shelfHeight = 24;
+    const shelfWidth = W - 80;
+    const sx = (W - shelfWidth) / 2;
+
+    // Shelf shadow
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
+    ctx.beginPath();
+    ctx.roundRect(sx + 4, shelfY + 4, shelfWidth, shelfHeight, 4);
+    ctx.fill();
+
+    // Shelf body
+    const shelfGrad = ctx.createLinearGradient(0, shelfY, 0, shelfY + shelfHeight);
+    shelfGrad.addColorStop(0, '#6B6B68');
+    shelfGrad.addColorStop(0.3, '#7A7A76');
+    shelfGrad.addColorStop(1, '#555552');
+    ctx.fillStyle = shelfGrad;
+    ctx.beginPath();
+    ctx.roundRect(sx, shelfY, shelfWidth, shelfHeight, 4);
+    ctx.fill();
+
+    // Shelf edge highlight
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(sx + 4, shelfY + 1);
+    ctx.lineTo(sx + shelfWidth - 4, shelfY + 1);
+    ctx.stroke();
+
+    // Stone bracket details
+    const bracketW = 16;
+    const bracketH = 30;
+    [sx + 60, sx + shelfWidth - 60].forEach(bx => {
+      ctx.fillStyle = '#5A5A56';
+      ctx.fillRect(bx - bracketW / 2, shelfY + shelfHeight, bracketW, bracketH);
+      ctx.fillStyle = '#6B6B68';
+      ctx.fillRect(bx - bracketW / 2 + 2, shelfY + shelfHeight, bracketW - 4, bracketH - 2);
+    });
+  }
+
+  function drawBackground() {
+    // Dark workshop background
+    const bgGrad = ctx.createLinearGradient(0, 0, 0, H);
+    bgGrad.addColorStop(0, '#1C1C1A');
+    bgGrad.addColorStop(0.5, '#252523');
+    bgGrad.addColorStop(1, '#1C1C1A');
+    ctx.fillStyle = bgGrad;
+    ctx.fillRect(0, 0, W, H);
+
+    // Stone wall texture (subtle lines)
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.03)';
+    ctx.lineWidth = 1;
+    for (let row = 0; row < 12; row++) {
+      const y = row * 48 + 10;
+      ctx.beginPath();
+      ctx.moveTo(0, y);
+      ctx.lineTo(W, y);
+      ctx.stroke();
+
+      // Brick offset pattern
+      const offset = row % 2 === 0 ? 0 : 60;
+      for (let col = 0; col < 8; col++) {
+        const x = col * 120 + offset;
+        ctx.beginPath();
+        ctx.moveTo(x, y);
+        ctx.lineTo(x, y + 48);
+        ctx.stroke();
+      }
+    }
+
+    // Ambient glow from potions area
+    const ambientGlow = ctx.createRadialGradient(W / 2, shelfY - 60, 50, W / 2, shelfY - 60, 300);
+    ambientGlow.addColorStop(0, 'rgba(232, 122, 62, 0.08)');
+    ambientGlow.addColorStop(0.5, 'rgba(245, 167, 66, 0.04)');
+    ambientGlow.addColorStop(1, 'rgba(0, 0, 0, 0)');
+    ctx.fillStyle = ambientGlow;
+    ctx.fillRect(0, 0, W, H);
+  }
+
+  function drawAnswerLabels() {
+    const labelY = shelfY + 70;
+    const labelWidth = 130;
+    const labelSpacing = 155;
+    const totalWidth = labelSpacing * 3;
+    const startX = (W - totalWidth) / 2;
+    const font = "400 14px 'Nunito', sans-serif";
+
+    bottles.forEach((b, i) => {
+      if (b.alpha <= 0) return;
+
+      ctx.globalAlpha = b.alpha;
+      const cx = startX + i * labelSpacing;
+
+      // Wrap text for the answer label below the bottle
+      const lines = wrapText(b.choice.text, labelWidth, font);
+      const lineHeight = 17;
+      const totalTextHeight = lines.length * lineHeight;
+      const textStartY = labelY;
+
+      // Background for text area
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.06)';
+      ctx.beginPath();
+      ctx.roundRect(cx - labelWidth / 2 - 6, textStartY - 12, labelWidth + 12, totalTextHeight + 16, 6);
+      ctx.fill();
+
+      // Draw each line
+      ctx.font = font;
+      ctx.fillStyle = '#C2C2B8';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'top';
+      lines.forEach((line, li) => {
+        ctx.fillText(line, cx, textStartY - 4 + li * lineHeight);
+      });
+
+      // Key number hint
+      ctx.font = "600 14px 'Nunito Sans', sans-serif";
+      ctx.fillStyle = b.color.fill;
+      ctx.fillText('[' + (i + 1) + ']', cx, textStartY - 22);
+
+      ctx.globalAlpha = 1;
+    });
+  }
+
+  function drawBubbles() {
+    bubbles.forEach(bub => {
+      ctx.globalAlpha = bub.alpha;
+      ctx.fillStyle = bub.color;
+      ctx.beginPath();
+      ctx.arc(bub.x, bub.y, bub.size, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Highlight on bubble
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+      ctx.beginPath();
+      ctx.arc(bub.x - bub.size * 0.3, bub.y - bub.size * 0.3, bub.size * 0.3, 0, Math.PI * 2);
+      ctx.fill();
+    });
+    ctx.globalAlpha = 1;
+  }
+
+  function drawParticles() {
+    particles.forEach(p => {
+      ctx.globalAlpha = p.alpha;
+      ctx.fillStyle = p.color;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+      ctx.fill();
+    });
+    ctx.globalAlpha = 1;
+  }
+
+  function drawGame() {
+    drawBackground();
+    drawShelf();
+
+    // Draw bubbles behind bottles
+    drawBubbles();
+
+    // Draw bottles
+    bottles.forEach(b => drawBottle(b));
+
+    // Draw particles on top
+    drawParticles();
+
+    // Draw answer text labels below shelf
+    drawAnswerLabels();
+  }
+
+  function handleInput(e) {
+    if (gameState !== 'playing') return;
+    if (selectedIndex >= 0) return;
+
+    const key = e.key;
+    let index = -1;
+    if (key === '1') index = 0;
+    else if (key === '2') index = 1;
+    else if (key === '3') index = 2;
+    else if (key === '4') index = 3;
+
+    if (index >= 0 && index < bottles.length && bottles[index].scale >= 0.9) {
+      selectedIndex = index;
+      selectionTime = 0;
+      playSound('click');
+      spawnSelectParticles(bottles[index]);
+
+      // Set hovered to selected for visual glow boost
+      hoveredIndex = index;
+    }
+  }
+
+  // Mouse hover for glow effect
+  canvas.addEventListener('mousemove', (e) => {
+    if (gameState !== 'playing' || selectedIndex >= 0) return;
+    const { x, y } = screenToLogical(e.clientX, e.clientY);
+    hoveredIndex = -1;
+    bottles.forEach((b, i) => {
+      if (b.scale < 0.9) return;
+      const dx = x - b.x;
+      const dy = y - b.y;
+      if (Math.abs(dx) < b.width / 2 + 10 && Math.abs(dy) < b.height / 2 + b.neckHeight + 10) {
+        hoveredIndex = i;
+      }
+    });
+  });
+
+  // Click to select bottle
+  canvas.addEventListener('click', (e) => {
+    if (gameState !== 'playing' || selectedIndex >= 0) return;
+    const { x, y } = screenToLogical(e.clientX, e.clientY);
+
+    bottles.forEach((b, i) => {
+      if (b.scale < 0.9) return;
+      const dx = x - b.x;
+      const dy = y - b.y;
+      if (Math.abs(dx) < b.width / 2 + 10 && Math.abs(dy) < b.height / 2 + b.neckHeight + 10) {
+        selectedIndex = i;
+        selectionTime = 0;
+        playSound('click');
+        spawnSelectParticles(b);
+        hoveredIndex = i;
+      }
+    });
+  });
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 4: GAME LOOP - DO NOT MODIFY                                      ║
+  // ║  Standard loop with responsive scaling and DPR support.                    ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  let lastTime = performance.now();
+
+  function gameLoop(now) {
+    const dt = Math.min((now - lastTime) / 1000, 0.05); // Cap at 50ms
+    lastTime = now;
+
+    // Apply transform for logical coordinate system
+    ctx.setTransform(scale * dpr, 0, 0, scale * dpr, 0, 0);
+
+    if (gameState === 'playing') {
+      updateGame(dt);
+      drawGame();
+    } else {
+      drawGame(); // Draw game state behind overlay
+      drawEndScreen(dt);
+    }
+
+    // Reset transform for next frame
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+    requestAnimationFrame(gameLoop);
+  }
+
+  // Input handlers
+  document.addEventListener('keydown', (e) => {
+    if (gameState === 'ended' && (e.code === 'KeyR')) {
+      // Restart game
+      gameState = 'playing';
+      gameResult = null;
+      gameExplanation = '';
+      confettiParticles = [];
+      initGame();
+      return;
+    }
+    handleInput(e);
+  });
+
+  document.addEventListener('keyup', (e) => {
+    // Optional: handle key release in your handleInput
+  });
+
+  // Canvas click handler for end screen buttons
+  canvas.addEventListener('click', (e) => {
+    if (gameState !== 'ended') return;
+
+    const { x, y } = screenToLogical(e.clientX, e.clientY);
+
+    if (gameResult) {
+      // Correct answer: check both buttons
+      if (pointInRect(x, y, restartButton)) {
+        gameState = 'playing';
+        gameResult = null;
+        gameExplanation = '';
+        confettiParticles = [];
+        initGame();
+        return;
+      }
+      if (pointInRect(x, y, nextButton)) {
+        // Notify parent to go to next question
+        if (window.parent && window.parent !== window) {
+          window.parent.postMessage({ type: 'quiz-next' }, '*');
+        }
+        return;
+      }
+    } else {
+      // Wrong answer: check centered restart button
+      const centeredRestart = { x: W / 2 - 75, y: H / 2 + 60, w: 150, h: 48 };
+      if (pointInRect(x, y, centeredRestart)) {
+        gameState = 'playing';
+        gameResult = null;
+        gameExplanation = '';
+        confettiParticles = [];
+        initGame();
+        return;
+      }
+    }
+  });
+
+  // Handle resize
+  window.addEventListener('resize', resizeCanvas);
+
+  // Initialize
+  resizeCanvas();
+  initGame();
+  requestAnimationFrame(gameLoop);
+  </script>
+</body>
+</html>

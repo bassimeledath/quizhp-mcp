@@ -1,0 +1,1161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <title>Obsidian Ice Floe Tilt</title>
+  <link href="https://fonts.googleapis.com/css2?family=Belanosima:wght@400;600;700&family=Nunito+Sans:wght@400;500;600;700&family=Nunito:wght@400;500;600&display=swap" rel="stylesheet">
+  <!--
+  ╔══════════════════════════════════════════════════════════════════════════════╗
+  ║  GAME FACTORY TEMPLATE - MOBILE                                              ║
+  ║  Fills 100% of container, non-uniform scaling, touch input.                  ║
+  ║  Logical dimensions: 360×640 (use aspectRatio for proportional shapes)       ║
+  ╚══════════════════════════════════════════════════════════════════════════════╝
+  -->
+  <style>
+    /* ═══════════════════════════════════════════════════════════════════════════
+       BASE STYLES - Can be extended, not removed
+       ═══════════════════════════════════════════════════════════════════════════ */
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      touch-action: none; /* Prevent default touch behaviors */
+      -webkit-touch-callout: none;
+      -webkit-user-select: none;
+      user-select: none;
+    }
+    body {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      background: #1a1a2e;
+      font-family: 'Nunito Sans', system-ui, -apple-system, sans-serif;
+    }
+    #gameCanvas {
+      background: #16213e;
+      /* Canvas fills viewport via JS, these are fallbacks */
+      width: 100vw;
+      height: 100vh;
+    }
+  </style>
+</head>
+<body>
+  <!-- ═══════════════════════════════════════════════════════════════════════════
+       CANVAS - Sized dynamically to fill viewport
+       ═══════════════════════════════════════════════════════════════════════════ -->
+  <canvas id="gameCanvas"></canvas>
+
+  <script>
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 1: QUESTION PLACEHOLDER - DO NOT MODIFY FORMAT                    ║
+  // ║  Platform replaces this at runtime. Use these exact 60-char answers.       ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  const QUESTION = {
+    type: "mcq",
+    prompt: "Sample question text",
+    choices: [
+      { text: "This is sample answer A which is long enough to test text overflow", is_correct: true, explanation: "Why A is correct" },
+      { text: "This is sample answer B which is long enough to test text overflow", is_correct: false, explanation: "Why B is wrong" },
+      { text: "This is sample answer C which is long enough to test text overflow", is_correct: false, explanation: "Why C is wrong" },
+      { text: "This is sample answer D which is long enough to test text overflow", is_correct: false, explanation: "Why D is wrong" }
+    ],
+    isLastQuestion: false
+  };
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 2: ENGINE CORE (MOBILE) - DO NOT MODIFY                           ║
+  // ║  Non-uniform scaling (fills container), touch input, tap-to-restart.       ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  const canvas = document.getElementById('gameCanvas');
+  const ctx = canvas.getContext('2d');
+
+  // Logical dimensions (game code works in this coordinate space)
+  const W = 360, H = 640;
+
+  // Scaling state (computed on resize)
+  let scaleX = 1;
+  let scaleY = 1;
+  let aspectRatio = 1;  // scaleX/scaleY - use for proportional shapes
+
+  // Game state
+  let gameState = 'playing'; // 'playing' | 'ended'
+  let gameResult = null;     // true (correct) | false (wrong)
+  let gameExplanation = '';
+  let endScreenTime = 0;
+  let confettiParticles = [];
+
+  // End screen button bounds (logical coordinates)
+  const restartButton = { x: 20, y: H / 2 + 50, w: 155, h: 56 };
+  const nextButton = { x: 185, y: H / 2 + 50, w: 155, h: 56 };
+  // Centered restart button for wrong answers
+  const centeredRestartButton = { x: W / 2 - 100, y: H / 2 + 50, w: 200, h: 56 };
+
+  /** Draw a styled button with aspect-ratio aware text */
+  function drawMobileButton(rect, label, color, pulse) {
+    const textAdj = getTextScaleAdjustment();
+    const p = pulse ? 1 + Math.sin(endScreenTime * 4) * 0.03 : 1;
+
+    ctx.save();
+    ctx.translate(rect.x + rect.w / 2, rect.y + rect.h / 2);
+    ctx.scale(p, p);
+    ctx.translate(-(rect.x + rect.w / 2), -(rect.y + rect.h / 2));
+
+    // Button background
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.roundRect(rect.x, rect.y, rect.w, rect.h, 12);
+    ctx.fill();
+
+    // Button text (aspect-ratio aware)
+    ctx.save();
+    ctx.translate(rect.x + rect.w / 2, rect.y + rect.h / 2);
+    ctx.scale(textAdj / aspectRatio, textAdj);
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = 'bold 18px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, 0, 0);
+    ctx.restore();
+
+    ctx.restore();
+  }
+
+  /**
+   * Resize canvas to fill viewport completely (no letterboxing).
+   * Uses non-uniform scaling - game code works in 360×640 logical space.
+   * Use aspectRatio to draw proportionally correct shapes.
+   */
+  function resizeCanvas() {
+    const dpr = window.devicePixelRatio || 1;
+
+    // Physical canvas size (actual pixels)
+    canvas.width = window.innerWidth * dpr;
+    canvas.height = window.innerHeight * dpr;
+
+    // CSS size (fills viewport)
+    canvas.style.width = window.innerWidth + 'px';
+    canvas.style.height = window.innerHeight + 'px';
+
+    // Non-uniform scaling to fill entire canvas
+    scaleX = canvas.width / W;
+    scaleY = canvas.height / H;
+
+    // Aspect ratio for proportional shape drawing
+    // >1 means container is wider than logical space
+    // <1 means container is taller than logical space
+    aspectRatio = scaleX / scaleY;
+
+    // Recalculate text sizing on resize (implement this in SECTION 3)
+    if (typeof recalculateTextSizing === 'function') {
+      recalculateTextSizing();
+    }
+  }
+
+  // === ASPECT-RATIO-AWARE TEXT WITH CLAMPED SCALING ===
+  // Text gets stretched by non-uniform scaling, so we compensate.
+  // Also clamp the effective scale to keep text legible at all sizes.
+  const TEXT_SCALE_MIN = 0.75;
+  const TEXT_SCALE_MAX = 1.4;
+
+  function getTextScaleAdjustment() {
+    const baseScale = window.innerHeight / H;
+    const clampedScale = Math.min(TEXT_SCALE_MAX, Math.max(TEXT_SCALE_MIN, baseScale));
+    return clampedScale / baseScale;
+  }
+
+  /**
+   * Draw text with aspect-ratio compensation and clamped scaling.
+   * Use this instead of raw ctx.fillText() to prevent text stretching.
+   * Default font is 16px (minimum for answer text). Use 18-20px for better readability.
+   */
+  function drawText(text, x, y, options = {}) {
+    const { font = "500 16px system-ui, sans-serif", color = '#F5F5F0', align = 'center', baseline = 'middle' } = options;
+    ctx.save();
+    ctx.translate(x, y);
+    const adj = getTextScaleAdjustment();
+    ctx.scale(adj / aspectRatio, adj);
+    ctx.font = font;
+    ctx.fillStyle = color;
+    ctx.textAlign = align;
+    ctx.textBaseline = baseline;
+    ctx.fillText(text, 0, 0);
+    ctx.restore();
+  }
+
+  /**
+   * Convert screen coordinates to logical coordinates.
+   * Use this in handleTouch to get positions in 360×640 space.
+   */
+  function screenToLogical(screenX, screenY) {
+    const dpr = window.devicePixelRatio || 1;
+    const rect = canvas.getBoundingClientRect();
+    const canvasX = (screenX - rect.left) * dpr;
+    const canvasY = (screenY - rect.top) * dpr;
+    return {
+      x: canvasX / scaleX,
+      y: canvasY / scaleY
+    };
+  }
+
+  /**
+   * Check if a point is inside a rectangle (logical coordinates).
+   */
+  function pointInRect(px, py, rect) {
+    return px >= rect.x && px <= rect.x + rect.w &&
+           py >= rect.y && py <= rect.y + rect.h;
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // TEXT UTILITIES - Dynamic wrapping and font sizing
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  /**
+   * Wrap text to fit within a maximum width (in logical coordinates).
+   * Accounts for canvas transforms applied by drawText().
+   */
+  function wrapText(text, maxWidth, font, maxLines = 3) {
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.font = font;
+    const adj = getTextScaleAdjustment();
+    const maxRawWidth = maxWidth * aspectRatio / adj;
+    const words = text.split(' ');
+    const lines = [];
+    let currentLine = '';
+    words.forEach(word => {
+      const testLine = currentLine ? currentLine + ' ' + word : word;
+      if (ctx.measureText(testLine).width > maxRawWidth && currentLine) {
+        lines.push(currentLine);
+        currentLine = word;
+      } else {
+        currentLine = testLine;
+      }
+    });
+    if (currentLine) lines.push(currentLine);
+    ctx.restore();
+    return lines.slice(0, maxLines);
+  }
+
+  /**
+   * Find the optimal font size to fit content in available space.
+   */
+  function findOptimalFontSize(options) {
+    const {
+      texts,
+      maxWidth,
+      availableHeight,
+      minFont = 12,
+      maxFont = 18,
+      itemPadding = 4,
+      fontFamily = "'Nunito Sans', sans-serif"
+    } = options;
+
+    let bestFontSize = minFont;
+    let bestWrappedTexts = [];
+
+    for (let fontSize = maxFont; fontSize >= minFont; fontSize -= 0.5) {
+      const font = `${fontSize}px ${fontFamily}`;
+      const lineHeight = fontSize + 2;
+
+      let totalHeight = 0;
+      const wrappedTexts = [];
+
+      for (const text of texts) {
+        const lines = wrapText(text, maxWidth, font);
+        wrappedTexts.push(lines);
+        totalHeight += itemPadding + lines.length * lineHeight;
+      }
+
+      if (totalHeight <= availableHeight) {
+        bestFontSize = fontSize;
+        bestWrappedTexts = wrappedTexts;
+        break;
+      }
+
+      bestWrappedTexts = wrappedTexts;
+    }
+
+    return { fontSize: bestFontSize, wrappedTexts: bestWrappedTexts };
+  }
+
+  const engine = {
+    /** Call this to end the game. DO NOT draw your own end screen. */
+    end(isCorrect, explanation) {
+      if (gameState === 'ended') return;
+      gameState = 'ended';
+      gameResult = isCorrect;
+      gameExplanation = explanation || '';
+      endScreenTime = 0;
+
+      // Spawn confetti for correct answers
+      if (isCorrect) {
+        for (let i = 0; i < 50; i++) {
+          confettiParticles.push({
+            x: W / 2,
+            y: H / 2,
+            vx: (Math.random() - 0.5) * 400,
+            vy: -Math.random() * 300 - 80,
+            size: 4 + Math.random() * 6,
+            color: ['#FFD700', '#FF6B6B', '#4ECDC4', '#95E1D3', '#F38181'][Math.floor(Math.random() * 5)],
+            rotation: Math.random() * Math.PI * 2,
+            rotationSpeed: (Math.random() - 0.5) * 10
+          });
+        }
+      }
+
+      // Notify parent frame
+      if (window.parent && window.parent !== window) {
+        window.parent.postMessage({
+          type: 'quiz-end',
+          isCorrect: isCorrect,
+          explanation: explanation || ''
+        }, '*');
+      }
+    }
+  };
+
+  /** STANDARD END SCREEN (MOBILE) - DO NOT MODIFY */
+  function drawEndScreen(dt) {
+    endScreenTime += dt;
+
+    // Update confetti
+    confettiParticles = confettiParticles.filter(p => {
+      p.vy += 600 * dt; // gravity
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.rotation += p.rotationSpeed * dt;
+      p.vx *= 0.99;
+      return p.y < H + 50;
+    });
+
+    // Dark overlay
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
+    ctx.fillRect(0, 0, W, H);
+
+    // Draw confetti
+    confettiParticles.forEach(p => {
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rotation);
+      ctx.fillStyle = p.color;
+      ctx.fillRect(-p.size / 2, -p.size / 4, p.size, p.size / 2);
+      ctx.restore();
+    });
+
+    // Result emoji (aspect-ratio aware)
+    const textAdj = getTextScaleAdjustment();
+    ctx.save();
+    ctx.translate(W / 2, H / 2 - 80);
+    ctx.scale(textAdj / aspectRatio, textAdj);
+    ctx.font = '64px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(gameResult ? '🎉' : '😢', 0, 0);
+    ctx.restore();
+
+    // Result text (aspect-ratio aware)
+    ctx.save();
+    ctx.translate(W / 2, H / 2 - 10);
+    ctx.scale(textAdj / aspectRatio, textAdj);
+    ctx.fillStyle = gameResult ? '#4ADE80' : '#F87171';
+    ctx.font = 'bold 32px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(gameResult ? 'Correct!' : 'Wrong!', 0, 0);
+    ctx.restore();
+
+    // Buttons
+    if (gameResult) {
+      // Correct: show both Restart and Next/Finish
+      drawMobileButton(restartButton, 'Restart', '#E87A3E', true);
+      const nextLabel = QUESTION.isLastQuestion ? 'Finish' : 'Next';
+      drawMobileButton(nextButton, nextLabel, '#4ECDC4', true);
+    } else {
+      // Wrong: show only centered Restart button
+      drawMobileButton(centeredRestartButton, 'Restart', '#E87A3E', true);
+    }
+  }
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 3: YOUR GAME CODE - IMPLEMENT THESE FUNCTIONS                     ║
+  // ║  Obsidian Ice Floe Tilt — Tilt to guide brass bead into ice holes          ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+
+  // === COLORS ===
+  const C = {
+    bgDeep: '#0A1628',
+    seaTurquoise: '#1A3A4A',
+    seaLight: '#2A5A6A',
+    iceBase: '#1C2E3E',
+    iceSurface: '#243848',
+    iceHighlight: '#3A6070',
+    obsidianDark: '#0E1E2E',
+    obsidianShine: '#1E3E52',
+    brassGold: '#C8A040',
+    brassHighlight: '#E8C868',
+    brassShadow: '#8A6820',
+    holeRim: '#4ECDC4',
+    holeDark: '#0A1820',
+    auroraGreen: '#3AE890',
+    auroraCyan: '#4ECDC4',
+    auroraPurple: '#8A60D8',
+    textLight: '#F5F5F0',
+    textDim: '#8C8C84',
+    crackWhite: '#D0E8F0',
+    orange: '#E87A3E',
+    success: '#6BBF59',
+    error: '#E85D4A',
+  };
+
+  // === SOUND ENGINE ===
+  let audioCtx = null;
+  function getAudioCtx() {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    return audioCtx;
+  }
+
+  function playSlideSound() {
+    try {
+      const ac = getAudioCtx();
+      const osc = ac.createOscillator();
+      const gain = ac.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(220, ac.currentTime);
+      osc.frequency.linearRampToValueAtTime(180, ac.currentTime + 0.1);
+      gain.gain.setValueAtTime(0.05, ac.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ac.currentTime + 0.15);
+      osc.connect(gain).connect(ac.destination);
+      osc.start(); osc.stop(ac.currentTime + 0.15);
+    } catch(e) {}
+  }
+
+  function playDropSound() {
+    try {
+      const ac = getAudioCtx();
+      const osc = ac.createOscillator();
+      const gain = ac.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(400, ac.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(100, ac.currentTime + 0.4);
+      gain.gain.setValueAtTime(0.15, ac.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ac.currentTime + 0.4);
+      osc.connect(gain).connect(ac.destination);
+      osc.start(); osc.stop(ac.currentTime + 0.4);
+    } catch(e) {}
+  }
+
+  function playCorrectSound() {
+    try {
+      const ac = getAudioCtx();
+      [523, 659, 784].forEach((freq, i) => {
+        const osc = ac.createOscillator();
+        const gain = ac.createGain();
+        osc.type = 'sine';
+        osc.frequency.value = freq;
+        gain.gain.setValueAtTime(0.12, ac.currentTime + i * 0.1);
+        gain.gain.exponentialRampToValueAtTime(0.001, ac.currentTime + i * 0.1 + 0.3);
+        osc.connect(gain).connect(ac.destination);
+        osc.start(ac.currentTime + i * 0.1);
+        osc.stop(ac.currentTime + i * 0.1 + 0.3);
+      });
+    } catch(e) {}
+  }
+
+  function playWrongSound() {
+    try {
+      const ac = getAudioCtx();
+      const osc = ac.createOscillator();
+      const gain = ac.createGain();
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(200, ac.currentTime);
+      osc.frequency.linearRampToValueAtTime(120, ac.currentTime + 0.3);
+      gain.gain.setValueAtTime(0.1, ac.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ac.currentTime + 0.3);
+      osc.connect(gain).connect(ac.destination);
+      osc.start(); osc.stop(ac.currentTime + 0.3);
+    } catch(e) {}
+  }
+
+  function playCrackSound() {
+    try {
+      const ac = getAudioCtx();
+      const buf = ac.createBuffer(1, ac.sampleRate * 0.15, ac.sampleRate);
+      const data = buf.getChannelData(0);
+      for (let i = 0; i < data.length; i++) {
+        data[i] = (Math.random() * 2 - 1) * Math.exp(-i / (ac.sampleRate * 0.04));
+      }
+      const src = ac.createBufferSource();
+      const gain = ac.createGain();
+      src.buffer = buf;
+      gain.gain.setValueAtTime(0.2, ac.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ac.currentTime + 0.15);
+      src.connect(gain).connect(ac.destination);
+      src.start();
+    } catch(e) {}
+  }
+
+  // === GAME STATE ===
+  let bead = null;
+  let holes = [];
+  let iceBlocks = [];
+  let auroraWaves = [];
+  let cracks = [];
+  let gameParticles = [];
+  let tiltX = 0, tiltY = 0;
+  let touchStart = null;
+  let touchCurrent = null;
+  let gameTime = 0;
+  let settled = false;
+  let settledHole = null;
+  let settledTimer = 0;
+  let cracking = false;
+  let crackTimer = 0;
+  let sinking = false;
+  let sinkTimer = 0;
+  let entranceTimer = 0;
+  let slideTimer = 0;
+  let hasDeviceOrientation = false;
+  let deviceTiltX = 0, deviceTiltY = 0;
+
+  // Hole layout — 2x2 grid positioned in the lower area
+  const HOLE_RADIUS = 36;
+  const HOLE_POSITIONS = [
+    { x: 95,  y: 280 },
+    { x: 265, y: 280 },
+    { x: 95,  y: 460 },
+    { x: 265, y: 460 },
+  ];
+
+  function initGame() {
+    bead = {
+      x: W / 2,
+      y: 120,
+      vx: 0,
+      vy: 0,
+      radius: 14,
+      scale: 0,
+      alpha: 0,
+    };
+
+    holes = QUESTION.choices.map((choice, i) => ({
+      x: HOLE_POSITIONS[i].x,
+      y: HOLE_POSITIONS[i].y,
+      radius: HOLE_RADIUS,
+      choice: choice,
+      scale: 0,
+      alpha: 0,
+      glowPhase: Math.random() * Math.PI * 2,
+      wrappedText: [],
+      fontSize: 16,
+      crackLines: [],
+      crackAlpha: 0,
+    }));
+
+    iceBlocks = [];
+    for (let i = 0; i < 8; i++) {
+      iceBlocks.push({
+        x: Math.random() * W,
+        y: Math.random() * H,
+        w: 30 + Math.random() * 60,
+        h: 15 + Math.random() * 30,
+        alpha: 0.1 + Math.random() * 0.15,
+        rotation: Math.random() * 0.3 - 0.15,
+      });
+    }
+
+    auroraWaves = [];
+    for (let i = 0; i < 5; i++) {
+      auroraWaves.push({
+        y: 20 + i * 25,
+        amplitude: 15 + Math.random() * 20,
+        frequency: 0.008 + Math.random() * 0.006,
+        phase: Math.random() * Math.PI * 2,
+        speed: 0.3 + Math.random() * 0.4,
+        color: [C.auroraGreen, C.auroraCyan, C.auroraPurple, C.auroraGreen, C.auroraCyan][i],
+        alpha: 0.15 + Math.random() * 0.15,
+      });
+    }
+
+    cracks = [];
+    gameParticles = [];
+    tiltX = 0; tiltY = 0;
+    touchStart = null; touchCurrent = null;
+    gameTime = 0;
+    settled = false; settledHole = null; settledTimer = 0;
+    cracking = false; crackTimer = 0;
+    sinking = false; sinkTimer = 0;
+    entranceTimer = 0;
+    slideTimer = 0;
+
+    recalculateTextSizing();
+  }
+
+  function recalculateTextSizing() {
+    if (!holes || holes.length === 0) return;
+
+    const maxTextWidth = 130;
+    const availablePerHole = 60;
+
+    const { fontSize, wrappedTexts } = findOptimalFontSize({
+      texts: QUESTION.choices.map(c => c.text),
+      maxWidth: maxTextWidth,
+      availableHeight: availablePerHole * 4,
+      minFont: 12,
+      maxFont: 16,
+      itemPadding: 2,
+      fontFamily: "'Nunito', sans-serif"
+    });
+
+    holes.forEach((hole, i) => {
+      hole.wrappedText = wrappedTexts[i];
+      hole.fontSize = fontSize;
+    });
+  }
+
+  // Device orientation for tilt
+  function handleDeviceOrientation(e) {
+    if (e.gamma !== null && e.beta !== null) {
+      hasDeviceOrientation = true;
+      deviceTiltX = Math.max(-30, Math.min(30, e.gamma)) / 30;
+      deviceTiltY = Math.max(-30, Math.min(30, e.beta - 30)) / 30;
+    }
+  }
+
+  if (window.DeviceOrientationEvent) {
+    if (typeof DeviceOrientationEvent.requestPermission === 'function') {
+      // iOS 13+ needs permission
+      document.addEventListener('touchstart', function requestPerm() {
+        DeviceOrientationEvent.requestPermission().then(state => {
+          if (state === 'granted') {
+            window.addEventListener('deviceorientation', handleDeviceOrientation);
+          }
+        }).catch(() => {});
+        document.removeEventListener('touchstart', requestPerm);
+      }, { once: true });
+    } else {
+      window.addEventListener('deviceorientation', handleDeviceOrientation);
+    }
+  }
+
+  function updateGame(dt) {
+    if (gameState !== 'playing') return;
+
+    gameTime += dt;
+    entranceTimer += dt;
+
+    // Entrance animations
+    holes.forEach((hole, i) => {
+      const delay = 0.1 + i * 0.12;
+      const t = Math.max(0, Math.min(1, (entranceTimer - delay) / 0.4));
+      const spring = 1 + Math.sin(t * Math.PI * 2) * 0.2 * (1 - t);
+      hole.scale = t * spring;
+      hole.alpha = t;
+    });
+
+    const beadDelay = 0.6;
+    const bt = Math.max(0, Math.min(1, (entranceTimer - beadDelay) / 0.35));
+    const bSpring = 1 + Math.sin(bt * Math.PI * 2) * 0.15 * (1 - bt);
+    bead.scale = bt * bSpring;
+    bead.alpha = bt;
+
+    if (entranceTimer < 0.8) return;
+
+    // Handle sinking animation
+    if (sinking) {
+      sinkTimer += dt;
+      if (sinkTimer > 0.8) {
+        const choice = settledHole.choice;
+        if (choice.is_correct) {
+          playCorrectSound();
+        } else {
+          playWrongSound();
+        }
+        engine.end(choice.is_correct, choice.explanation);
+      }
+      return;
+    }
+
+    // Handle cracking animation
+    if (cracking) {
+      crackTimer += dt;
+      settledHole.crackAlpha = Math.min(1, crackTimer / 0.3);
+
+      if (crackTimer > 0.5) {
+        cracking = false;
+        sinking = true;
+        sinkTimer = 0;
+        playDropSound();
+      }
+      return;
+    }
+
+    // Determine tilt from device orientation or touch drag
+    if (hasDeviceOrientation) {
+      tiltX = deviceTiltX;
+      tiltY = deviceTiltY;
+    } else if (touchStart && touchCurrent) {
+      const dx = touchCurrent.x - touchStart.x;
+      const dy = touchCurrent.y - touchStart.y;
+      const maxDrag = 80;
+      tiltX = Math.max(-1, Math.min(1, dx / maxDrag));
+      tiltY = Math.max(-1, Math.min(1, dy / maxDrag));
+    } else {
+      tiltX *= 0.92;
+      tiltY *= 0.92;
+    }
+
+    // Physics — icy / slippery
+    const accel = 420;
+    const friction = 0.97;
+    const bounceDecay = 0.4;
+
+    bead.vx += tiltX * accel * dt;
+    bead.vy += tiltY * accel * dt;
+
+    bead.vx *= friction;
+    bead.vy *= friction;
+
+    bead.x += bead.vx * dt;
+    bead.y += bead.vy * dt;
+
+    // Sound for sliding
+    const speed = Math.sqrt(bead.vx * bead.vx + bead.vy * bead.vy);
+    slideTimer += dt;
+    if (speed > 50 && slideTimer > 0.3) {
+      slideTimer = 0;
+      playSlideSound();
+    }
+
+    // Wall bounces
+    if (bead.x < bead.radius) { bead.x = bead.radius; bead.vx = -bead.vx * bounceDecay; }
+    if (bead.x > W - bead.radius) { bead.x = W - bead.radius; bead.vx = -bead.vx * bounceDecay; }
+    if (bead.y < bead.radius + 30) { bead.y = bead.radius + 30; bead.vy = -bead.vy * bounceDecay; }
+    if (bead.y > H - bead.radius - 20) { bead.y = H - bead.radius - 20; bead.vy = -bead.vy * bounceDecay; }
+
+    // Check if bead is inside any hole
+    for (const hole of holes) {
+      const dx = bead.x - hole.x;
+      const dy = bead.y - hole.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+
+      if (dist < hole.radius * 0.55) {
+        if (!settled) {
+          settled = true;
+          settledHole = hole;
+          settledTimer = 0;
+          bead.vx = 0; bead.vy = 0;
+
+          // Generate cracks for wrong answers
+          if (!hole.choice.is_correct) {
+            hole.crackLines = [];
+            const numCracks = 6 + Math.floor(Math.random() * 4);
+            for (let c = 0; c < numCracks; c++) {
+              const angle = Math.random() * Math.PI * 2;
+              const len = 20 + Math.random() * 35;
+              hole.crackLines.push({
+                sx: hole.x + Math.cos(angle) * (hole.radius * 0.3),
+                sy: hole.y + Math.sin(angle) * (hole.radius * 0.3),
+                ex: hole.x + Math.cos(angle) * (hole.radius * 0.3 + len),
+                ey: hole.y + Math.sin(angle) * (hole.radius * 0.3 + len),
+              });
+            }
+            playCrackSound();
+            cracking = true;
+            crackTimer = 0;
+          } else {
+            // Correct answer: just settle and end
+            setTimeout(() => {
+              playCorrectSound();
+              engine.end(true, hole.choice.explanation);
+            }, 300);
+          }
+        }
+      }
+    }
+
+    // Update aurora
+    auroraWaves.forEach(w => {
+      w.phase += w.speed * dt;
+    });
+
+    // Update game particles (ice sparkle)
+    if (Math.random() < 0.3) {
+      gameParticles.push({
+        x: Math.random() * W,
+        y: Math.random() * H,
+        life: 0,
+        maxLife: 0.5 + Math.random() * 0.8,
+        size: 1 + Math.random() * 2,
+      });
+    }
+    gameParticles.forEach(p => p.life += dt);
+    gameParticles = gameParticles.filter(p => p.life < p.maxLife);
+  }
+
+  function drawGame() {
+    // Background — deep dark sea
+    const grad = ctx.createLinearGradient(0, 0, 0, H);
+    grad.addColorStop(0, '#0A0E1A');
+    grad.addColorStop(0.3, '#0E1E30');
+    grad.addColorStop(1, '#081018');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, W, H);
+
+    // Aurora borealis
+    auroraWaves.forEach(wave => {
+      ctx.save();
+      ctx.globalAlpha = wave.alpha;
+      ctx.beginPath();
+      ctx.moveTo(0, wave.y);
+      for (let x = 0; x <= W; x += 4) {
+        const y = wave.y + Math.sin(x * wave.frequency + wave.phase) * wave.amplitude;
+        ctx.lineTo(x, y);
+      }
+      ctx.lineTo(W, 0);
+      ctx.lineTo(0, 0);
+      ctx.closePath();
+
+      const aGrad = ctx.createLinearGradient(0, wave.y - wave.amplitude, 0, wave.y + wave.amplitude);
+      aGrad.addColorStop(0, 'transparent');
+      aGrad.addColorStop(0.5, wave.color);
+      aGrad.addColorStop(1, 'transparent');
+      ctx.fillStyle = aGrad;
+      ctx.fill();
+      ctx.restore();
+    });
+
+    // Ice surface — subtle texture
+    ctx.save();
+    ctx.globalAlpha = 0.06;
+    for (let y = 0; y < H; y += 40) {
+      ctx.strokeStyle = '#4ECDC4';
+      ctx.lineWidth = 0.5;
+      ctx.beginPath();
+      ctx.moveTo(0, y);
+      for (let x = 0; x < W; x += 10) {
+        ctx.lineTo(x, y + Math.sin(x * 0.05 + gameTime * 0.5) * 3);
+      }
+      ctx.stroke();
+    }
+    ctx.restore();
+
+    // Obsidian ice blocks scattered
+    iceBlocks.forEach(block => {
+      ctx.save();
+      ctx.translate(block.x + block.w / 2, block.y + block.h / 2);
+      ctx.rotate(block.rotation);
+      ctx.globalAlpha = block.alpha;
+      ctx.fillStyle = C.obsidianDark;
+      ctx.fillRect(-block.w / 2, -block.h / 2, block.w, block.h * aspectRatio * 0.6);
+      // Shine line
+      ctx.strokeStyle = C.obsidianShine;
+      ctx.lineWidth = 0.8;
+      ctx.beginPath();
+      ctx.moveTo(-block.w / 2 + 4, -block.h / 4);
+      ctx.lineTo(block.w / 2 - 4, -block.h / 4);
+      ctx.stroke();
+      ctx.restore();
+    });
+
+    // Draw holes
+    holes.forEach((hole, i) => {
+      if (hole.alpha <= 0) return;
+
+      ctx.save();
+      ctx.globalAlpha = hole.alpha;
+
+      // Glow ring
+      const glowPulse = 0.5 + 0.5 * Math.sin(gameTime * 2.5 + hole.glowPhase);
+      ctx.save();
+      ctx.globalAlpha = hole.alpha * (0.15 + glowPulse * 0.15);
+      ctx.beginPath();
+      ctx.ellipse(hole.x, hole.y, hole.radius + 8, (hole.radius + 8) * aspectRatio, 0, 0, Math.PI * 2);
+      ctx.fillStyle = C.holeRim;
+      ctx.fill();
+      ctx.restore();
+
+      // Hole dark center
+      ctx.beginPath();
+      ctx.ellipse(hole.x, hole.y, hole.radius, hole.radius * aspectRatio, 0, 0, Math.PI * 2);
+      ctx.fillStyle = C.holeDark;
+      ctx.fill();
+
+      // Rim
+      ctx.strokeStyle = C.holeRim;
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      ctx.ellipse(hole.x, hole.y, hole.radius, hole.radius * aspectRatio, 0, 0, Math.PI * 2);
+      ctx.stroke();
+
+      // Crack lines for wrong answer
+      if (hole.crackAlpha > 0) {
+        ctx.save();
+        ctx.globalAlpha = hole.crackAlpha;
+        ctx.strokeStyle = C.crackWhite;
+        ctx.lineWidth = 1.5;
+        hole.crackLines.forEach(crack => {
+          ctx.beginPath();
+          ctx.moveTo(crack.sx, crack.sy);
+          ctx.lineTo(crack.ex, crack.ey);
+          ctx.stroke();
+        });
+        ctx.restore();
+      }
+
+      // Label text below hole
+      const lines = hole.wrappedText || [hole.choice.text];
+      const fs = hole.fontSize || 14;
+      const lineHeight = fs + 3;
+      const textStartY = hole.y + hole.radius * aspectRatio + 14;
+
+      lines.forEach((line, li) => {
+        drawText(line, hole.x, textStartY + li * lineHeight, {
+          font: `500 ${fs}px 'Nunito', sans-serif`,
+          color: C.textLight,
+          align: 'center',
+        });
+      });
+
+      // Letter label (A/B/C/D) inside hole
+      const letter = String.fromCharCode(65 + i);
+      drawText(letter, hole.x, hole.y, {
+        font: "700 20px 'Belanosima', sans-serif",
+        color: C.holeRim,
+        align: 'center',
+      });
+
+      ctx.restore();
+    });
+
+    // Draw ice sparkle particles
+    gameParticles.forEach(p => {
+      const t = p.life / p.maxLife;
+      const fade = t < 0.3 ? t / 0.3 : (1 - t) / 0.7;
+      ctx.save();
+      ctx.globalAlpha = fade * 0.6;
+      ctx.fillStyle = '#D0E8F0';
+      ctx.beginPath();
+      ctx.ellipse(p.x, p.y, p.size, p.size * aspectRatio, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    });
+
+    // Draw bead (brass compass bead)
+    if (bead.alpha > 0) {
+      ctx.save();
+
+      let drawX = bead.x;
+      let drawY = bead.y;
+      let drawScale = bead.scale;
+      let drawAlpha = bead.alpha;
+
+      if (sinking && settledHole) {
+        const t = Math.min(1, sinkTimer / 0.8);
+        drawScale = bead.scale * (1 - t * 0.7);
+        drawAlpha = bead.alpha * (1 - t);
+        drawX = settledHole.x;
+        drawY = settledHole.y;
+      }
+
+      ctx.globalAlpha = drawAlpha;
+      ctx.translate(drawX, drawY);
+      ctx.scale(drawScale, drawScale);
+
+      // Shadow
+      ctx.beginPath();
+      ctx.ellipse(2, 3 * aspectRatio, bead.radius + 2, (bead.radius + 2) * aspectRatio, 0, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(0,0,0,0.3)';
+      ctx.fill();
+
+      // Main brass body
+      const bGrad = ctx.createRadialGradient(-3, -3 * aspectRatio, 2, 0, 0, bead.radius);
+      bGrad.addColorStop(0, C.brassHighlight);
+      bGrad.addColorStop(0.5, C.brassGold);
+      bGrad.addColorStop(1, C.brassShadow);
+
+      ctx.beginPath();
+      ctx.ellipse(0, 0, bead.radius, bead.radius * aspectRatio, 0, 0, Math.PI * 2);
+      ctx.fillStyle = bGrad;
+      ctx.fill();
+
+      // Specular highlight
+      ctx.beginPath();
+      ctx.ellipse(-3, -4 * aspectRatio, 4, 3 * aspectRatio, 0, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(255,255,230,0.5)';
+      ctx.fill();
+
+      // Compass cross marks
+      ctx.strokeStyle = C.brassShadow;
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.moveTo(0, -bead.radius * 0.5 * aspectRatio);
+      ctx.lineTo(0, bead.radius * 0.5 * aspectRatio);
+      ctx.moveTo(-bead.radius * 0.5, 0);
+      ctx.lineTo(bead.radius * 0.5, 0);
+      ctx.stroke();
+
+      // North dot
+      ctx.beginPath();
+      ctx.ellipse(0, -bead.radius * 0.35 * aspectRatio, 2, 2 * aspectRatio, 0, 0, Math.PI * 2);
+      ctx.fillStyle = C.error;
+      ctx.fill();
+
+      ctx.restore();
+    }
+
+    // Tilt indicator (small arrow showing tilt direction)
+    if ((touchStart || hasDeviceOrientation) && !settled) {
+      const indicatorX = W / 2;
+      const indicatorY = 20;
+      const arrowLen = 12;
+      ctx.save();
+      ctx.globalAlpha = 0.5;
+      ctx.translate(indicatorX, indicatorY);
+      ctx.strokeStyle = C.auroraCyan;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.ellipse(0, 0, 4, 4 * aspectRatio, 0, 0, Math.PI * 2);
+      ctx.stroke();
+      if (Math.abs(tiltX) > 0.05 || Math.abs(tiltY) > 0.05) {
+        const angle = Math.atan2(tiltY, tiltX);
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.lineTo(Math.cos(angle) * arrowLen, Math.sin(angle) * arrowLen * aspectRatio);
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+  }
+
+  function handleTouch(e, type) {
+    if (gameState !== 'playing') return;
+    if (settled) return;
+
+    const touch = e.touches[0] || e.changedTouches[0];
+    if (!touch) return;
+    const { x, y } = screenToLogical(touch.clientX, touch.clientY);
+
+    if (type === 'start') {
+      touchStart = { x, y };
+      touchCurrent = { x, y };
+    } else if (type === 'move') {
+      if (touchStart) {
+        touchCurrent = { x, y };
+      }
+    } else if (type === 'end') {
+      touchStart = null;
+      touchCurrent = null;
+    }
+  }
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 4: GAME LOOP - DO NOT MODIFY                                      ║
+  // ║  Standard loop with responsive scaling and touch handling.                 ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  let lastTime = performance.now();
+
+  function gameLoop(now) {
+    const dt = Math.min((now - lastTime) / 1000, 0.05); // Cap at 50ms
+    lastTime = now;
+
+    // Apply transform for logical coordinate system (non-uniform scaling)
+    ctx.setTransform(scaleX, 0, 0, scaleY, 0, 0);
+
+    if (gameState === 'playing') {
+      updateGame(dt);
+      drawGame();
+    } else {
+      drawGame(); // Draw game state behind overlay
+      drawEndScreen(dt);
+    }
+
+    // Reset transform for next frame
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+    requestAnimationFrame(gameLoop);
+  }
+
+  // Touch handlers
+  function onTouchStart(e) {
+    e.preventDefault();
+    if (gameState === 'ended') {
+      const touch = e.touches[0];
+      const { x, y } = screenToLogical(touch.clientX, touch.clientY);
+
+      if (gameResult) {
+        // Correct answer: check both buttons
+        if (pointInRect(x, y, restartButton)) {
+          gameState = 'playing';
+          gameResult = null;
+          gameExplanation = '';
+          confettiParticles = [];
+          initGame();
+          return;
+        }
+        if (pointInRect(x, y, nextButton)) {
+          // Notify parent to go to next question
+          if (window.parent && window.parent !== window) {
+            window.parent.postMessage({ type: 'quiz-next' }, '*');
+          }
+          return;
+        }
+      } else {
+        // Wrong answer: check centered restart button
+        if (pointInRect(x, y, centeredRestartButton)) {
+          gameState = 'playing';
+          gameResult = null;
+          gameExplanation = '';
+          confettiParticles = [];
+          initGame();
+          return;
+        }
+      }
+    }
+    handleTouch(e, 'start');
+  }
+
+  function onTouchMove(e) {
+    e.preventDefault();
+    handleTouch(e, 'move');
+  }
+
+  function onTouchEnd(e) {
+    e.preventDefault();
+    handleTouch(e, 'end');
+  }
+
+  canvas.addEventListener('touchstart', onTouchStart, { passive: false });
+  canvas.addEventListener('touchmove', onTouchMove, { passive: false });
+  canvas.addEventListener('touchend', onTouchEnd, { passive: false });
+
+  // Also support mouse for testing in browser
+  canvas.addEventListener('mousedown', (e) => {
+    const fakeTouch = { touches: [{ clientX: e.clientX, clientY: e.clientY }], changedTouches: [{ clientX: e.clientX, clientY: e.clientY }] };
+    onTouchStart(fakeTouch);
+  });
+
+  canvas.addEventListener('mouseup', (e) => {
+    const fakeTouch = { touches: [], changedTouches: [{ clientX: e.clientX, clientY: e.clientY }] };
+    onTouchEnd(fakeTouch);
+  });
+
+  // Handle resize
+  window.addEventListener('resize', resizeCanvas);
+  window.addEventListener('orientationchange', () => {
+    setTimeout(resizeCanvas, 100); // Delay for orientation change to complete
+  });
+
+  // Prevent pull-to-refresh and overscroll
+  document.body.addEventListener('touchmove', (e) => e.preventDefault(), { passive: false });
+
+  // Initialize
+  resizeCanvas();
+  initGame();
+  requestAnimationFrame(gameLoop);
+  </script>
+</body>
+</html>

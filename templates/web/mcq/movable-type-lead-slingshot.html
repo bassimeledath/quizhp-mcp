@@ -1,0 +1,1060 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Game Template</title>
+  <link href="https://fonts.googleapis.com/css2?family=Belanosima:wght@400;600;700&family=Nunito+Sans:wght@400;500;600;700&family=Nunito:wght@400;500;600&display=swap" rel="stylesheet">
+  <!--
+  ╔══════════════════════════════════════════════════════════════════════════════╗
+  ║  GAME FACTORY TEMPLATE                                                        ║
+  ║  This template enforces critical invariants. Follow the section markers.      ║
+  ╚══════════════════════════════════════════════════════════════════════════════╝
+  -->
+  <style>
+    /* ═══════════════════════════════════════════════════════════════════════════
+       BASE STYLES - Can be extended, not removed
+       ═══════════════════════════════════════════════════════════════════════════ */
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+    }
+    body {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      background: #1a1a2e;
+      font-family: 'Nunito Sans', system-ui, -apple-system, sans-serif;
+    }
+    #gameCanvas {
+      background: #16213e;
+      border-radius: 8px;
+      display: block;
+    }
+  </style>
+</head>
+<body>
+  <!-- ═══════════════════════════════════════════════════════════════════════════
+       CANVAS - Sized dynamically to fill available space
+       ═══════════════════════════════════════════════════════════════════════════ -->
+  <canvas id="gameCanvas"></canvas>
+
+  <script>
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 1: QUESTION PLACEHOLDER - DO NOT MODIFY FORMAT                    ║
+  // ║  Platform replaces this at runtime. Use these exact 60-char answers.       ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  const QUESTION = {
+    type: "mcq",
+    prompt: "Sample question text",
+    choices: [
+      { text: "This is sample answer A which is long enough to test text overflow", is_correct: true, explanation: "Why A is correct" },
+      { text: "This is sample answer B which is long enough to test text overflow", is_correct: false, explanation: "Why B is wrong" },
+      { text: "This is sample answer C which is long enough to test text overflow", is_correct: false, explanation: "Why C is wrong" },
+      { text: "This is sample answer D which is long enough to test text overflow", is_correct: false, explanation: "Why D is wrong" }
+    ],
+    isLastQuestion: false
+  };
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 2: ENGINE CORE - DO NOT MODIFY                                    ║
+  // ║  Standard engine interface and end screen. This is sacred.                 ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  const canvas = document.getElementById('gameCanvas');
+  const ctx = canvas.getContext('2d');
+
+  // Logical dimensions (game code works in this coordinate space)
+  const W = 720, H = 540;
+
+  // Scaling state (computed on resize)
+  let scale = 1;
+  let dpr = 1;
+
+  let gameState = 'playing'; // 'playing' | 'ended'
+  let gameResult = null;     // true (correct) | false (wrong)
+  let gameExplanation = '';
+  let endScreenTime = 0;
+  let confettiParticles = [];
+
+  // End screen button bounds (logical coordinates)
+  const restartButton = { x: W / 2 - 170, y: H / 2 + 60, w: 150, h: 48 };
+  const nextButton = { x: W / 2 + 20, y: H / 2 + 60, w: 150, h: 48 };
+
+  /** Check if point is inside rectangle */
+  function pointInRect(px, py, rect) {
+    return px >= rect.x && px <= rect.x + rect.w &&
+           py >= rect.y && py <= rect.y + rect.h;
+  }
+
+  /** Draw a styled button */
+  function drawButton(rect, label, color, pulse) {
+    const p = pulse ? 1 + Math.sin(endScreenTime * 4) * 0.03 : 1;
+    ctx.save();
+    ctx.translate(rect.x + rect.w / 2, rect.y + rect.h / 2);
+    ctx.scale(p, p);
+    ctx.translate(-(rect.x + rect.w / 2), -(rect.y + rect.h / 2));
+
+    // Button background
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.roundRect(rect.x, rect.y, rect.w, rect.h, 12);
+    ctx.fill();
+
+    // Button text
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = 'bold 18px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, rect.x + rect.w / 2, rect.y + rect.h / 2);
+
+    ctx.restore();
+  }
+
+  /**
+   * Resize canvas to fill available space with proper DPR scaling.
+   * Maintains logical coordinate system (720×540).
+   */
+  function resizeCanvas() {
+    dpr = window.devicePixelRatio || 1;
+
+    // Get available space
+    const availW = window.innerWidth;
+    const availH = window.innerHeight;
+
+    // Calculate scale to fit logical space (720×540) in available space
+    const scaleX = availW / W;
+    const scaleY = availH / H;
+    scale = Math.min(scaleX, scaleY);
+
+    // Physical canvas buffer (DPR-scaled for crisp rendering)
+    canvas.width = W * scale * dpr;
+    canvas.height = H * scale * dpr;
+
+    // CSS display size
+    canvas.style.width = (W * scale) + 'px';
+    canvas.style.height = (H * scale) + 'px';
+  }
+
+  /**
+   * Convert screen coordinates to logical coordinates.
+   * Use this for mouse/click events to get positions in 720×540 space.
+   */
+  function screenToLogical(screenX, screenY) {
+    const rect = canvas.getBoundingClientRect();
+    return {
+      x: (screenX - rect.left) * (W / rect.width),
+      y: (screenY - rect.top) * (H / rect.height)
+    };
+  }
+
+  const engine = {
+    /** Call this to end the game. DO NOT draw your own end screen. */
+    end(isCorrect, explanation) {
+      if (gameState === 'ended') return;
+      gameState = 'ended';
+      gameResult = isCorrect;
+      gameExplanation = explanation || '';
+      endScreenTime = 0;
+
+      // Spawn confetti for correct answers
+      if (isCorrect) {
+        for (let i = 0; i < 50; i++) {
+          confettiParticles.push({
+            x: W / 2,
+            y: H / 2,
+            vx: (Math.random() - 0.5) * 600,
+            vy: -Math.random() * 400 - 100,
+            size: 4 + Math.random() * 6,
+            color: ['#FFD700', '#FF6B6B', '#4ECDC4', '#95E1D3', '#F38181'][Math.floor(Math.random() * 5)],
+            rotation: Math.random() * Math.PI * 2,
+            rotationSpeed: (Math.random() - 0.5) * 10
+          });
+        }
+      }
+
+      // Notify parent frame
+      if (window.parent && window.parent !== window) {
+        window.parent.postMessage({
+          type: 'quiz-end',
+          isCorrect: isCorrect,
+          explanation: explanation || ''
+        }, '*');
+      }
+    }
+  };
+
+  /** STANDARD END SCREEN - DO NOT MODIFY */
+  function drawEndScreen(dt) {
+    endScreenTime += dt;
+
+    // Update confetti
+    confettiParticles = confettiParticles.filter(p => {
+      p.vy += 800 * dt; // gravity
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.rotation += p.rotationSpeed * dt;
+      p.vx *= 0.99;
+      return p.y < H + 50;
+    });
+
+    // Dark overlay
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
+    ctx.fillRect(0, 0, W, H);
+
+    // Draw confetti
+    confettiParticles.forEach(p => {
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rotation);
+      ctx.fillStyle = p.color;
+      ctx.fillRect(-p.size / 2, -p.size / 4, p.size, p.size / 2);
+      ctx.restore();
+    });
+
+    // Result emoji
+    ctx.font = '72px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(gameResult ? '🎉' : '😢', W / 2, H / 2 - 50);
+
+    // Result text
+    ctx.fillStyle = gameResult ? '#4ADE80' : '#F87171';
+    ctx.font = 'bold 36px system-ui, sans-serif';
+    ctx.fillText(gameResult ? 'Correct!' : 'Wrong!', W / 2, H / 2 + 20);
+
+    // Buttons
+    if (gameResult) {
+      // Correct: show both Restart and Next/Finish
+      drawButton(restartButton, 'Restart', '#E87A3E', true);
+      const nextLabel = QUESTION.isLastQuestion ? 'Finish' : 'Next';
+      drawButton(nextButton, nextLabel, '#4ECDC4', true);
+    } else {
+      // Wrong: show only centered Restart button
+      const centeredRestart = { x: W / 2 - 75, y: H / 2 + 60, w: 150, h: 48 };
+      drawButton(centeredRestart, 'Restart', '#E87A3E', true);
+    }
+  }
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 3: YOUR GAME CODE - IMPLEMENT THESE FUNCTIONS                     ║
+  // ║  This is where your game logic goes. See requirements below.               ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+
+  // === COLORS ===
+  const COLORS = {
+    bgDark: '#1C1C1A',
+    bgWarm: '#2A2218',
+    woodLight: '#A0784C',
+    woodMid: '#7A5A36',
+    woodDark: '#5A3E22',
+    leather: '#6B4226',
+    leatherLight: '#8B5E3C',
+    leadBlock: '#6E6E72',
+    leadHighlight: '#9A9A9E',
+    leadDark: '#4A4A4E',
+    lampGlow: '#F5A742',
+    lampWarm: 'rgba(245, 167, 66, 0.15)',
+    textLight: '#F5F5F0',
+    textDark: '#2B2B28',
+    orange: '#E87A3E',
+    cyan: '#4ECDC4',
+    success: '#6BBF59',
+    error: '#E85D4A',
+    amber: '#F5A742',
+    shelfColor: '#5A3E22',
+  };
+
+  // === GAME STATE ===
+  let slingshot = { x: 100, y: 420, angle: -Math.PI / 4, power: 0.5 };
+  let leadBlock = null;
+  let boxes = [];
+  let splinters = [];
+  let leadLetters = [];
+  let oilLamps = [];
+  let aimDir = { left: false, right: false, up: false, down: false };
+  let launched = false;
+  let hitBox = null;
+  let hitTimer = 0;
+  let entranceTimer = 0;
+  let shakeTarget = null;
+  let shakeTimer = 0;
+  let shakeIntensity = 0;
+  let celebrateTimer = 0;
+  let celebrateTarget = null;
+  let gameParticles = [];
+  let flickerTime = 0;
+
+  // Audio context for sound effects
+  let audioCtx = null;
+  function getAudioCtx() {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    return audioCtx;
+  }
+
+  function playSound(type) {
+    try {
+      const ac = getAudioCtx();
+      const osc = ac.createOscillator();
+      const gain = ac.createGain();
+      osc.connect(gain);
+      gain.connect(ac.destination);
+
+      if (type === 'launch') {
+        osc.frequency.setValueAtTime(200, ac.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(80, ac.currentTime + 0.2);
+        gain.gain.setValueAtTime(0.3, ac.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, ac.currentTime + 0.25);
+        osc.type = 'sawtooth';
+        osc.start(ac.currentTime);
+        osc.stop(ac.currentTime + 0.25);
+      } else if (type === 'correct') {
+        osc.frequency.setValueAtTime(523, ac.currentTime);
+        osc.frequency.setValueAtTime(659, ac.currentTime + 0.1);
+        osc.frequency.setValueAtTime(784, ac.currentTime + 0.2);
+        gain.gain.setValueAtTime(0.25, ac.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, ac.currentTime + 0.4);
+        osc.type = 'triangle';
+        osc.start(ac.currentTime);
+        osc.stop(ac.currentTime + 0.4);
+      } else if (type === 'wrong') {
+        osc.frequency.setValueAtTime(300, ac.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(100, ac.currentTime + 0.3);
+        gain.gain.setValueAtTime(0.3, ac.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, ac.currentTime + 0.35);
+        osc.type = 'square';
+        osc.start(ac.currentTime);
+        osc.stop(ac.currentTime + 0.35);
+      } else if (type === 'aim') {
+        osc.frequency.setValueAtTime(150, ac.currentTime);
+        gain.gain.setValueAtTime(0.05, ac.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, ac.currentTime + 0.05);
+        osc.type = 'sine';
+        osc.start(ac.currentTime);
+        osc.stop(ac.currentTime + 0.05);
+      }
+    } catch (e) {}
+  }
+
+  // Word-wrap text into lines fitting maxWidth
+  function wrapText(text, maxWidth, font) {
+    ctx.font = font;
+    const words = text.split(' ');
+    const lines = [];
+    let currentLine = words[0];
+    for (let i = 1; i < words.length; i++) {
+      const test = currentLine + ' ' + words[i];
+      if (ctx.measureText(test).width <= maxWidth) {
+        currentLine = test;
+      } else {
+        lines.push(currentLine);
+        currentLine = words[i];
+      }
+    }
+    lines.push(currentLine);
+    return lines;
+  }
+
+  function initGame() {
+    slingshot = { x: 100, y: 400, angle: -Math.PI / 4, power: 0.5 };
+    leadBlock = null;
+    launched = false;
+    hitBox = null;
+    hitTimer = 0;
+    entranceTimer = 0;
+    shakeTarget = null;
+    shakeTimer = 0;
+    celebrateTimer = 0;
+    celebrateTarget = null;
+    splinters = [];
+    leadLetters = [];
+    gameParticles = [];
+    flickerTime = 0;
+    aimDir = { left: false, right: false, up: false, down: false };
+
+    // Four catch-boxes on a distant shelf
+    const boxW = 155;
+    const boxH = 120;
+    const shelfY = 50;
+    const totalW = boxW * 4 + 12 * 3;
+    const startX = (W - totalW) / 2;
+
+    boxes = QUESTION.choices.map((choice, i) => ({
+      x: startX + i * (boxW + 12),
+      y: shelfY,
+      w: boxW,
+      h: boxH,
+      choice: choice,
+      scale: 0,
+      alpha: 0,
+      offsetX: 0,
+      shattered: false,
+    }));
+
+    // Oil lamps for atmosphere
+    oilLamps = [
+      { x: 50, y: 80 },
+      { x: 670, y: 80 },
+      { x: 360, y: 30 },
+    ];
+  }
+
+  function updateGame(dt) {
+    if (gameState !== 'playing') return;
+
+    entranceTimer += dt;
+    flickerTime += dt;
+
+    // Animate box entrance
+    boxes.forEach((box, i) => {
+      const delay = i * 0.1;
+      const t = Math.max(0, Math.min(1, (entranceTimer - delay) / 0.35));
+      if (t > 0) {
+        const spring = 1 + Math.sin(t * Math.PI * 2) * 0.2 * (1 - t);
+        box.scale = t * spring;
+        box.alpha = t;
+      }
+    });
+
+    // Aiming
+    if (!launched) {
+      const aimSpeed = 1.5 * dt;
+      const powerSpeed = 0.8 * dt;
+      if (aimDir.left) slingshot.angle -= aimSpeed;
+      if (aimDir.right) slingshot.angle += aimSpeed;
+      if (aimDir.up) slingshot.power = Math.min(1, slingshot.power + powerSpeed);
+      if (aimDir.down) slingshot.power = Math.max(0.2, slingshot.power - powerSpeed);
+
+      // Clamp angle
+      slingshot.angle = Math.max(-Math.PI * 0.85, Math.min(-Math.PI * 0.15, slingshot.angle));
+    }
+
+    // Update lead block in flight
+    if (leadBlock && !hitBox) {
+      leadBlock.vy += 380 * dt; // gravity
+      leadBlock.x += leadBlock.vx * dt;
+      leadBlock.y += leadBlock.vy * dt;
+      leadBlock.rotation += leadBlock.rotSpeed * dt;
+
+      // Check collision with boxes
+      for (const box of boxes) {
+        if (box.shattered) continue;
+        if (leadBlock.x > box.x && leadBlock.x < box.x + box.w &&
+            leadBlock.y > box.y && leadBlock.y < box.y + box.h) {
+          hitBox = box;
+          hitTimer = 0;
+
+          if (box.choice.is_correct) {
+            playSound('correct');
+            celebrateTarget = box;
+            celebrateTimer = 0;
+            // Spawn celebration particles
+            for (let p = 0; p < 20; p++) {
+              gameParticles.push({
+                x: box.x + box.w / 2,
+                y: box.y + box.h / 2,
+                vx: (Math.random() - 0.5) * 300,
+                vy: -Math.random() * 200 - 50,
+                color: [COLORS.orange, COLORS.amber, COLORS.cyan, COLORS.success][Math.floor(Math.random() * 4)],
+                size: 3 + Math.random() * 5,
+                life: 1,
+                rotation: Math.random() * Math.PI * 2,
+                rotSpeed: (Math.random() - 0.5) * 8,
+              });
+            }
+          } else {
+            playSound('wrong');
+            shakeTarget = box;
+            shakeTimer = 0;
+            shakeIntensity = 10;
+            box.shattered = true;
+            // Spawn splinters
+            for (let s = 0; s < 15; s++) {
+              splinters.push({
+                x: box.x + Math.random() * box.w,
+                y: box.y + Math.random() * box.h,
+                vx: (Math.random() - 0.5) * 250,
+                vy: Math.random() * 200 + 50,
+                size: 2 + Math.random() * 6,
+                color: Math.random() > 0.5 ? COLORS.woodLight : COLORS.woodMid,
+                rotation: Math.random() * Math.PI * 2,
+                rotSpeed: (Math.random() - 0.5) * 12,
+                life: 1,
+              });
+            }
+            // Scatter lead letters
+            const letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+            for (let l = 0; l < 12; l++) {
+              leadLetters.push({
+                x: box.x + Math.random() * box.w,
+                y: box.y + box.h,
+                vx: (Math.random() - 0.5) * 180,
+                vy: Math.random() * 150 + 80,
+                char: letters[Math.floor(Math.random() * letters.length)],
+                size: 8 + Math.random() * 6,
+                rotation: Math.random() * Math.PI * 2,
+                rotSpeed: (Math.random() - 0.5) * 6,
+                life: 1,
+              });
+            }
+          }
+          break;
+        }
+      }
+
+      // Out of bounds - reset
+      if (leadBlock.x < -50 || leadBlock.x > W + 50 || leadBlock.y > H + 50) {
+        leadBlock = null;
+        launched = false;
+      }
+    }
+
+    // Post-hit timer
+    if (hitBox) {
+      hitTimer += dt;
+
+      // Shake animation for wrong answer
+      if (shakeTarget && shakeTimer < 0.4) {
+        shakeTimer += dt;
+        const decay = 1 - shakeTimer / 0.4;
+        shakeTarget.offsetX = Math.sin(shakeTimer * Math.PI * 10) * shakeIntensity * decay;
+      }
+
+      // Celebrate animation for correct answer
+      if (celebrateTarget) {
+        celebrateTimer += dt;
+      }
+
+      if (hitTimer > 0.8) {
+        const choice = hitBox.choice;
+        engine.end(choice.is_correct, choice.explanation);
+      }
+    }
+
+    // Update splinters
+    splinters.forEach(s => {
+      s.vy += 400 * dt;
+      s.x += s.vx * dt;
+      s.y += s.vy * dt;
+      s.rotation += s.rotSpeed * dt;
+      s.life -= dt * 0.6;
+    });
+    splinters = splinters.filter(s => s.life > 0 && s.y < H + 20);
+
+    // Update lead letters
+    leadLetters.forEach(l => {
+      l.vy += 300 * dt;
+      l.x += l.vx * dt;
+      l.y += l.vy * dt;
+      l.rotation += l.rotSpeed * dt;
+      l.life -= dt * 0.4;
+      // Bounce off floor
+      if (l.y > H - 30) {
+        l.y = H - 30;
+        l.vy *= -0.4;
+        l.vx *= 0.7;
+      }
+    });
+    leadLetters = leadLetters.filter(l => l.life > 0);
+
+    // Update game particles
+    gameParticles.forEach(p => {
+      p.vy += 300 * dt;
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.rotation += p.rotSpeed * dt;
+      p.life -= dt * 1.2;
+    });
+    gameParticles = gameParticles.filter(p => p.life > 0);
+  }
+
+  function drawGame() {
+    // Dark workshop background
+    ctx.fillStyle = COLORS.bgDark;
+    ctx.fillRect(0, 0, W, H);
+
+    // Warm wooden floor
+    const floorGrad = ctx.createLinearGradient(0, H - 80, 0, H);
+    floorGrad.addColorStop(0, '#3A2A18');
+    floorGrad.addColorStop(1, '#2A1E12');
+    ctx.fillStyle = floorGrad;
+    ctx.fillRect(0, H - 80, W, 80);
+
+    // Floor planks
+    ctx.strokeStyle = '#4A3622';
+    ctx.lineWidth = 1;
+    for (let px = 0; px < W; px += 90) {
+      ctx.beginPath();
+      ctx.moveTo(px, H - 80);
+      ctx.lineTo(px, H);
+      ctx.stroke();
+    }
+
+    // Oil lamp glow (ambient light)
+    oilLamps.forEach(lamp => {
+      const flicker = 0.8 + Math.sin(flickerTime * 3 + lamp.x) * 0.1 + Math.sin(flickerTime * 7 + lamp.y) * 0.1;
+      const glowRadius = 120 * flicker;
+      const glow = ctx.createRadialGradient(lamp.x, lamp.y, 0, lamp.x, lamp.y, glowRadius);
+      glow.addColorStop(0, `rgba(245, 167, 66, ${0.25 * flicker})`);
+      glow.addColorStop(0.5, `rgba(245, 167, 66, ${0.08 * flicker})`);
+      glow.addColorStop(1, 'rgba(245, 167, 66, 0)');
+      ctx.fillStyle = glow;
+      ctx.fillRect(lamp.x - glowRadius, lamp.y - glowRadius, glowRadius * 2, glowRadius * 2);
+
+      // Lamp body
+      ctx.fillStyle = '#8B6914';
+      ctx.beginPath();
+      ctx.roundRect(lamp.x - 8, lamp.y - 5, 16, 14, 3);
+      ctx.fill();
+
+      // Flame
+      ctx.fillStyle = COLORS.lampGlow;
+      ctx.beginPath();
+      ctx.ellipse(lamp.x, lamp.y - 8, 4 * flicker, 7 * flicker, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#FFF4ED';
+      ctx.beginPath();
+      ctx.ellipse(lamp.x, lamp.y - 7, 2, 4 * flicker, 0, 0, Math.PI * 2);
+      ctx.fill();
+    });
+
+    // Shelf behind boxes
+    const shelfY = 170;
+    ctx.fillStyle = COLORS.shelfColor;
+    ctx.fillRect(30, shelfY, W - 60, 8);
+    // Shelf brackets
+    ctx.fillStyle = COLORS.woodDark;
+    ctx.fillRect(80, shelfY, 6, 20);
+    ctx.fillRect(W - 86, shelfY, 6, 20);
+    ctx.fillRect(W / 2 - 3, shelfY, 6, 20);
+
+    // Draw wooden trays in background
+    ctx.fillStyle = '#3A2A1A';
+    ctx.globalAlpha = 0.3;
+    for (let ty = 200; ty < 360; ty += 50) {
+      for (let tx = 300; tx < W - 30; tx += 60) {
+        ctx.fillRect(tx, ty, 50, 35);
+        ctx.strokeStyle = '#4A3A2A';
+        ctx.strokeRect(tx, ty, 50, 35);
+      }
+    }
+    ctx.globalAlpha = 1;
+
+    // Tiny lead characters scattered in background
+    ctx.fillStyle = '#5A5A5E';
+    ctx.font = "400 8px 'Nunito', sans-serif";
+    ctx.globalAlpha = 0.2;
+    const bgLetters = 'AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZz';
+    for (let i = 0; i < 40; i++) {
+      const bx = 280 + Math.sin(i * 7.3) * 200;
+      const by = 210 + Math.cos(i * 5.1) * 130;
+      ctx.fillText(bgLetters[i % bgLetters.length], bx, by);
+    }
+    ctx.globalAlpha = 1;
+
+    // Draw catch-boxes
+    boxes.forEach((box, i) => {
+      if (box.shattered) return;
+
+      ctx.save();
+      ctx.translate(box.x + box.w / 2, box.y + box.h / 2);
+      ctx.scale(box.scale, box.scale);
+      ctx.globalAlpha = box.alpha;
+
+      // Offset for shake
+      const ox = box.offsetX || 0;
+
+      // Box shadow
+      ctx.fillStyle = 'rgba(0,0,0,0.3)';
+      ctx.beginPath();
+      ctx.roundRect(-box.w / 2 + ox + 3, -box.h / 2 + 3, box.w, box.h, 6);
+      ctx.fill();
+
+      // Box body (wooden)
+      const boxGrad = ctx.createLinearGradient(-box.w / 2, -box.h / 2, -box.w / 2, box.h / 2);
+      boxGrad.addColorStop(0, COLORS.woodLight);
+      boxGrad.addColorStop(0.5, COLORS.woodMid);
+      boxGrad.addColorStop(1, COLORS.woodDark);
+      ctx.fillStyle = boxGrad;
+      ctx.beginPath();
+      ctx.roundRect(-box.w / 2 + ox, -box.h / 2, box.w, box.h, 6);
+      ctx.fill();
+
+      // Wood grain lines
+      ctx.strokeStyle = 'rgba(90, 62, 34, 0.4)';
+      ctx.lineWidth = 0.5;
+      for (let g = -box.w / 2 + 10 + ox; g < box.w / 2 + ox; g += 18) {
+        ctx.beginPath();
+        ctx.moveTo(g, -box.h / 2 + 4);
+        ctx.lineTo(g + 3, box.h / 2 - 4);
+        ctx.stroke();
+      }
+
+      // Border
+      ctx.strokeStyle = '#8B6914';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.roundRect(-box.w / 2 + ox, -box.h / 2, box.w, box.h, 6);
+      ctx.stroke();
+
+      // Highlight correct box with celebrate animation
+      if (celebrateTarget === box && celebrateTimer > 0) {
+        const cScale = 1 + 0.08 * Math.sin(celebrateTimer * Math.PI * 4) * Math.max(0, 1 - celebrateTimer);
+        ctx.scale(cScale, cScale);
+        ctx.strokeStyle = COLORS.success;
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.roundRect(-box.w / 2 + ox, -box.h / 2, box.w, box.h, 6);
+        ctx.stroke();
+      }
+
+      // Answer text (bold serif)
+      ctx.fillStyle = COLORS.textLight;
+      const answerFont = "500 16px 'Nunito', sans-serif";
+      const lines = wrapText(box.choice.text, box.w - 16, answerFont);
+      ctx.font = answerFont;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      const lineHeight = 19;
+      const totalTextH = lines.length * lineHeight;
+      const textStartY = -totalTextH / 2 + lineHeight / 2;
+      lines.forEach((line, li) => {
+        ctx.fillText(line, ox, textStartY + li * lineHeight);
+      });
+
+      // Letter label (A, B, C, D)
+      ctx.fillStyle = COLORS.amber;
+      ctx.font = "700 16px 'Belanosima', sans-serif";
+      ctx.textAlign = 'left';
+      ctx.fillText(String.fromCharCode(65 + i), -box.w / 2 + 8 + ox, -box.h / 2 + 14);
+
+      ctx.globalAlpha = 1;
+      ctx.restore();
+    });
+
+    // Draw splinters
+    splinters.forEach(s => {
+      ctx.save();
+      ctx.translate(s.x, s.y);
+      ctx.rotate(s.rotation);
+      ctx.globalAlpha = s.life;
+      ctx.fillStyle = s.color;
+      ctx.fillRect(-s.size / 2, -s.size / 4, s.size, s.size / 2);
+      ctx.globalAlpha = 1;
+      ctx.restore();
+    });
+
+    // Draw scattered lead letters
+    leadLetters.forEach(l => {
+      ctx.save();
+      ctx.translate(l.x, l.y);
+      ctx.rotate(l.rotation);
+      ctx.globalAlpha = l.life;
+      ctx.fillStyle = COLORS.leadBlock;
+      ctx.font = `400 ${l.size}px 'Nunito', sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(l.char, 0, 0);
+      ctx.globalAlpha = 1;
+      ctx.restore();
+    });
+
+    // Draw game particles (celebration)
+    gameParticles.forEach(p => {
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rotation);
+      ctx.globalAlpha = p.life;
+      ctx.fillStyle = p.color;
+      ctx.fillRect(-p.size / 2, -p.size / 4, p.size, p.size / 2);
+      ctx.globalAlpha = 1;
+      ctx.restore();
+    });
+
+    // Draw slingshot
+    const sx = slingshot.x;
+    const sy = slingshot.y;
+
+    // Y-fork posts
+    ctx.fillStyle = COLORS.woodMid;
+    ctx.fillRect(sx - 3, sy - 40, 6, 55);
+    // Left prong
+    ctx.save();
+    ctx.translate(sx - 3, sy - 40);
+    ctx.rotate(-0.3);
+    ctx.fillRect(-3, -25, 6, 25);
+    ctx.restore();
+    // Right prong
+    ctx.save();
+    ctx.translate(sx + 3, sy - 40);
+    ctx.rotate(0.3);
+    ctx.fillRect(-3, -25, 6, 25);
+    ctx.restore();
+
+    // Leather band (elastic)
+    const prongLX = sx - 3 + Math.sin(-0.3) * -25;
+    const prongLY = sy - 40 + Math.cos(-0.3) * -25;
+    const prongRX = sx + 3 + Math.sin(0.3) * -25;
+    const prongRY = sy - 40 + Math.cos(0.3) * -25;
+
+    if (!launched) {
+      // Draw aim line and block in sling
+      const pullDist = 30 + slingshot.power * 40;
+      const blockX = sx + Math.cos(slingshot.angle + Math.PI) * pullDist;
+      const blockY = sy - 40 + Math.sin(slingshot.angle + Math.PI) * pullDist;
+
+      // Leather bands to block
+      ctx.strokeStyle = COLORS.leather;
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(prongLX, prongLY);
+      ctx.lineTo(blockX, blockY);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(prongRX, prongRY);
+      ctx.lineTo(blockX, blockY);
+      ctx.stroke();
+
+      // Leather pouch
+      ctx.fillStyle = COLORS.leatherLight;
+      ctx.beginPath();
+      ctx.ellipse(blockX, blockY, 12, 8, slingshot.angle, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Lead block in pouch
+      ctx.fillStyle = COLORS.leadBlock;
+      ctx.fillRect(blockX - 7, blockY - 7, 14, 14);
+      ctx.fillStyle = COLORS.leadHighlight;
+      ctx.fillRect(blockX - 7, blockY - 7, 14, 3);
+      ctx.fillStyle = COLORS.leadDark;
+      ctx.fillRect(blockX - 7, blockY + 4, 14, 3);
+
+      // Tiny letter on block
+      ctx.fillStyle = COLORS.textLight;
+      ctx.font = "700 9px 'Belanosima', sans-serif";
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('A', blockX, blockY);
+
+      // Aim trajectory (dotted line)
+      ctx.setLineDash([4, 6]);
+      ctx.strokeStyle = 'rgba(245, 167, 66, 0.4)';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      const speed = 350 + slingshot.power * 350;
+      let tx = sx;
+      let ty = sy - 60;
+      let tvx = Math.cos(slingshot.angle) * speed;
+      let tvy = Math.sin(slingshot.angle) * speed;
+      ctx.moveTo(tx, ty);
+      for (let step = 0; step < 20; step++) {
+        tx += tvx * 0.025;
+        ty += tvy * 0.025;
+        tvy += 380 * 0.025;
+        ctx.lineTo(tx, ty);
+        if (ty < -20 || tx > W + 20) break;
+      }
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      // Power bar
+      const barX = 20;
+      const barY = H - 30;
+      const barW = 80;
+      const barH = 10;
+      ctx.fillStyle = 'rgba(0,0,0,0.4)';
+      ctx.beginPath();
+      ctx.roundRect(barX, barY, barW, barH, 4);
+      ctx.fill();
+      const powerGrad = ctx.createLinearGradient(barX, 0, barX + barW, 0);
+      powerGrad.addColorStop(0, COLORS.cyan);
+      powerGrad.addColorStop(1, COLORS.orange);
+      ctx.fillStyle = powerGrad;
+      ctx.beginPath();
+      ctx.roundRect(barX, barY, barW * slingshot.power, barH, 4);
+      ctx.fill();
+
+      ctx.fillStyle = COLORS.textLight;
+      ctx.font = "500 14px 'Nunito Sans', sans-serif";
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'bottom';
+      ctx.fillText('Power', barX, barY - 4);
+    } else {
+      // Bands relaxed
+      ctx.strokeStyle = COLORS.leather;
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(prongLX, prongLY);
+      ctx.quadraticCurveTo(sx, sy - 30, prongRX, prongRY);
+      ctx.stroke();
+    }
+
+    // Draw lead block in flight
+    if (leadBlock && !hitBox) {
+      ctx.save();
+      ctx.translate(leadBlock.x, leadBlock.y);
+      ctx.rotate(leadBlock.rotation);
+      // Block shadow
+      ctx.fillStyle = 'rgba(0,0,0,0.3)';
+      ctx.fillRect(-6, -6, 16, 16);
+      // Block
+      ctx.fillStyle = COLORS.leadBlock;
+      ctx.fillRect(-8, -8, 16, 16);
+      ctx.fillStyle = COLORS.leadHighlight;
+      ctx.fillRect(-8, -8, 16, 4);
+      ctx.fillStyle = COLORS.leadDark;
+      ctx.fillRect(-8, 4, 16, 4);
+      // Letter
+      ctx.fillStyle = COLORS.textLight;
+      ctx.font = "700 10px 'Belanosima', sans-serif";
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('A', 0, 0);
+      ctx.restore();
+
+      // Trail particles
+      gameParticles.push({
+        x: leadBlock.x + (Math.random() - 0.5) * 6,
+        y: leadBlock.y + (Math.random() - 0.5) * 6,
+        vx: (Math.random() - 0.5) * 20,
+        vy: (Math.random() - 0.5) * 20,
+        color: COLORS.leadHighlight,
+        size: 2 + Math.random() * 2,
+        life: 0.4,
+        rotation: 0,
+        rotSpeed: 0,
+      });
+    }
+
+    // Vignette overlay for atmosphere
+    const vigGrad = ctx.createRadialGradient(W / 2, H / 2, 150, W / 2, H / 2, 400);
+    vigGrad.addColorStop(0, 'rgba(0,0,0,0)');
+    vigGrad.addColorStop(1, 'rgba(0,0,0,0.4)');
+    ctx.fillStyle = vigGrad;
+    ctx.fillRect(0, 0, W, H);
+  }
+
+  function handleInput(e) {
+    if (gameState !== 'playing') return;
+
+    if (e.type === 'keydown') {
+      if (e.code === 'ArrowLeft' || e.code === 'KeyA') { aimDir.left = true; e.preventDefault(); }
+      if (e.code === 'ArrowRight' || e.code === 'KeyD') { aimDir.right = true; e.preventDefault(); }
+      if (e.code === 'ArrowUp' || e.code === 'KeyW') { aimDir.up = true; e.preventDefault(); }
+      if (e.code === 'ArrowDown' || e.code === 'KeyS') { aimDir.down = true; e.preventDefault(); }
+
+      if ((e.code === 'Space' || e.code === 'Enter') && !launched && !hitBox) {
+        e.preventDefault();
+        launched = true;
+        playSound('launch');
+        const speed = 350 + slingshot.power * 350;
+        leadBlock = {
+          x: slingshot.x,
+          y: slingshot.y - 60,
+          vx: Math.cos(slingshot.angle) * speed,
+          vy: Math.sin(slingshot.angle) * speed,
+          rotation: 0,
+          rotSpeed: (Math.random() - 0.5) * 8,
+        };
+      }
+    } else if (e.type === 'keyup') {
+      if (e.code === 'ArrowLeft' || e.code === 'KeyA') aimDir.left = false;
+      if (e.code === 'ArrowRight' || e.code === 'KeyD') aimDir.right = false;
+      if (e.code === 'ArrowUp' || e.code === 'KeyW') aimDir.up = false;
+      if (e.code === 'ArrowDown' || e.code === 'KeyS') aimDir.down = false;
+    }
+  }
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 4: GAME LOOP - DO NOT MODIFY                                      ║
+  // ║  Standard loop with responsive scaling and DPR support.                    ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  let lastTime = performance.now();
+
+  function gameLoop(now) {
+    const dt = Math.min((now - lastTime) / 1000, 0.05); // Cap at 50ms
+    lastTime = now;
+
+    // Apply transform for logical coordinate system
+    ctx.setTransform(scale * dpr, 0, 0, scale * dpr, 0, 0);
+
+    if (gameState === 'playing') {
+      updateGame(dt);
+      drawGame();
+    } else {
+      drawGame(); // Draw game state behind overlay
+      drawEndScreen(dt);
+    }
+
+    // Reset transform for next frame
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+    requestAnimationFrame(gameLoop);
+  }
+
+  // Input handlers
+  document.addEventListener('keydown', (e) => {
+    if (gameState === 'ended' && (e.code === 'KeyR')) {
+      // Restart game
+      gameState = 'playing';
+      gameResult = null;
+      gameExplanation = '';
+      confettiParticles = [];
+      initGame();
+      return;
+    }
+    handleInput(e);
+  });
+
+  document.addEventListener('keyup', (e) => {
+    handleInput(e);
+  });
+
+  // Canvas click handler for end screen buttons
+  canvas.addEventListener('click', (e) => {
+    if (gameState !== 'ended') return;
+
+    const { x, y } = screenToLogical(e.clientX, e.clientY);
+
+    if (gameResult) {
+      // Correct answer: check both buttons
+      if (pointInRect(x, y, restartButton)) {
+        gameState = 'playing';
+        gameResult = null;
+        gameExplanation = '';
+        confettiParticles = [];
+        initGame();
+        return;
+      }
+      if (pointInRect(x, y, nextButton)) {
+        // Notify parent to go to next question
+        if (window.parent && window.parent !== window) {
+          window.parent.postMessage({ type: 'quiz-next' }, '*');
+        }
+        return;
+      }
+    } else {
+      // Wrong answer: check centered restart button
+      const centeredRestart = { x: W / 2 - 75, y: H / 2 + 60, w: 150, h: 48 };
+      if (pointInRect(x, y, centeredRestart)) {
+        gameState = 'playing';
+        gameResult = null;
+        gameExplanation = '';
+        confettiParticles = [];
+        initGame();
+        return;
+      }
+    }
+  });
+
+  // Handle resize
+  window.addEventListener('resize', resizeCanvas);
+
+  // Initialize
+  resizeCanvas();
+  initGame();
+  requestAnimationFrame(gameLoop);
+  </script>
+</body>
+</html>

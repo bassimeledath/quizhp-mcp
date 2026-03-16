@@ -1,0 +1,1070 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Flower Waterer</title>
+  <link href="https://fonts.googleapis.com/css2?family=Belanosima:wght@400;600;700&family=Nunito+Sans:wght@400;500;600;700&family=Nunito:wght@400;500;600&display=swap" rel="stylesheet">
+  <!--
+  ╔══════════════════════════════════════════════════════════════════════════════╗
+  ║  GAME FACTORY TEMPLATE                                                        ║
+  ║  This template enforces critical invariants. Follow the section markers.      ║
+  ╚══════════════════════════════════════════════════════════════════════════════╝
+  -->
+  <style>
+    /* ═══════════════════════════════════════════════════════════════════════════
+       BASE STYLES - Can be extended, not removed
+       ═══════════════════════════════════════════════════════════════════════════ */
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+    }
+    body {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      background: #1C1C1A;
+      font-family: 'Nunito Sans', system-ui, -apple-system, sans-serif;
+    }
+    #gameCanvas {
+      background: #FAFAF7;
+      border-radius: 12px;
+      display: block;
+      cursor: none;
+    }
+  </style>
+</head>
+<body>
+  <!-- ═══════════════════════════════════════════════════════════════════════════
+       CANVAS - Sized dynamically to fill available space
+       ═══════════════════════════════════════════════════════════════════════════ -->
+  <canvas id="gameCanvas"></canvas>
+
+  <script>
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 1: QUESTION PLACEHOLDER - DO NOT MODIFY FORMAT                    ║
+  // ║  Platform replaces this at runtime. Use these exact 60-char answers.       ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  const QUESTION = {
+    type: "mcq",
+    prompt: "Sample question text",
+    choices: [
+      { text: "This is sample answer A which is long enough to test text overflow", is_correct: true, explanation: "Why A is correct" },
+      { text: "This is sample answer B which is long enough to test text overflow", is_correct: false, explanation: "Why B is wrong" },
+      { text: "This is sample answer C which is long enough to test text overflow", is_correct: false, explanation: "Why C is wrong" },
+      { text: "This is sample answer D which is long enough to test text overflow", is_correct: false, explanation: "Why D is wrong" }
+    ],
+    isLastQuestion: false
+  };
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 2: ENGINE CORE - DO NOT MODIFY                                    ║
+  // ║  Standard engine interface and end screen. This is sacred.                 ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  const canvas = document.getElementById('gameCanvas');
+  const ctx = canvas.getContext('2d');
+
+  // Logical dimensions (game code works in this coordinate space)
+  const W = 720, H = 540;
+
+  // Scaling state (computed on resize)
+  let scale = 1;
+  let dpr = 1;
+
+  let gameState = 'playing'; // 'playing' | 'ended'
+  let gameResult = null;     // true (correct) | false (wrong)
+  let gameExplanation = '';
+  let endScreenTime = 0;
+  let confettiParticles = [];
+
+  // End screen button bounds (logical coordinates)
+  const restartButton = { x: W / 2 - 170, y: H / 2 + 60, w: 150, h: 48 };
+  const nextButton = { x: W / 2 + 20, y: H / 2 + 60, w: 150, h: 48 };
+
+  /** Check if point is inside rectangle */
+  function pointInRect(px, py, rect) {
+    return px >= rect.x && px <= rect.x + rect.w &&
+           py >= rect.y && py <= rect.y + rect.h;
+  }
+
+  /** Draw a styled button */
+  function drawButton(rect, label, color, pulse) {
+    const p = pulse ? 1 + Math.sin(endScreenTime * 4) * 0.03 : 1;
+    ctx.save();
+    ctx.translate(rect.x + rect.w / 2, rect.y + rect.h / 2);
+    ctx.scale(p, p);
+    ctx.translate(-(rect.x + rect.w / 2), -(rect.y + rect.h / 2));
+
+    // Button background
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.roundRect(rect.x, rect.y, rect.w, rect.h, 12);
+    ctx.fill();
+
+    // Button text
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = 'bold 18px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, rect.x + rect.w / 2, rect.y + rect.h / 2);
+
+    ctx.restore();
+  }
+
+  /**
+   * Resize canvas to fill available space with proper DPR scaling.
+   * Maintains logical coordinate system (720×540).
+   */
+  function resizeCanvas() {
+    dpr = window.devicePixelRatio || 1;
+
+    // Get available space
+    const availW = window.innerWidth;
+    const availH = window.innerHeight;
+
+    // Calculate scale to fit logical space (720×540) in available space
+    const scaleX = availW / W;
+    const scaleY = availH / H;
+    scale = Math.min(scaleX, scaleY);
+
+    // Physical canvas buffer (DPR-scaled for crisp rendering)
+    canvas.width = W * scale * dpr;
+    canvas.height = H * scale * dpr;
+
+    // CSS display size
+    canvas.style.width = (W * scale) + 'px';
+    canvas.style.height = (H * scale) + 'px';
+  }
+
+  /**
+   * Convert screen coordinates to logical coordinates.
+   * Use this for mouse/click events to get positions in 720×540 space.
+   */
+  function screenToLogical(screenX, screenY) {
+    const rect = canvas.getBoundingClientRect();
+    return {
+      x: (screenX - rect.left) * (W / rect.width),
+      y: (screenY - rect.top) * (H / rect.height)
+    };
+  }
+
+  const engine = {
+    /** Call this to end the game. DO NOT draw your own end screen. */
+    end(isCorrect, explanation) {
+      if (gameState === 'ended') return;
+      gameState = 'ended';
+      gameResult = isCorrect;
+      gameExplanation = explanation || '';
+      canvas.style.cursor = 'default'; // Show cursor on end screen
+      endScreenTime = 0;
+
+      // Spawn confetti for correct answers
+      if (isCorrect) {
+        for (let i = 0; i < 50; i++) {
+          confettiParticles.push({
+            x: W / 2,
+            y: H / 2,
+            vx: (Math.random() - 0.5) * 600,
+            vy: -Math.random() * 400 - 100,
+            size: 4 + Math.random() * 6,
+            color: ['#FFD700', '#FF6B6B', '#4ECDC4', '#95E1D3', '#F38181'][Math.floor(Math.random() * 5)],
+            rotation: Math.random() * Math.PI * 2,
+            rotationSpeed: (Math.random() - 0.5) * 10
+          });
+        }
+      }
+
+      // Notify parent frame
+      if (window.parent && window.parent !== window) {
+        window.parent.postMessage({
+          type: 'quiz-end',
+          isCorrect: isCorrect,
+          explanation: explanation || ''
+        }, '*');
+      }
+    }
+  };
+
+  /** STANDARD END SCREEN - DO NOT MODIFY */
+  function drawEndScreen(dt) {
+    endScreenTime += dt;
+
+    // Update confetti
+    confettiParticles = confettiParticles.filter(p => {
+      p.vy += 800 * dt; // gravity
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.rotation += p.rotationSpeed * dt;
+      p.vx *= 0.99;
+      return p.y < H + 50;
+    });
+
+    // Dark overlay
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
+    ctx.fillRect(0, 0, W, H);
+
+    // Draw confetti
+    confettiParticles.forEach(p => {
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rotation);
+      ctx.fillStyle = p.color;
+      ctx.fillRect(-p.size / 2, -p.size / 4, p.size, p.size / 2);
+      ctx.restore();
+    });
+
+    // Result emoji
+    ctx.font = '72px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(gameResult ? '🎉' : '😢', W / 2, H / 2 - 50);
+
+    // Result text
+    ctx.fillStyle = gameResult ? '#4ADE80' : '#F87171';
+    ctx.font = 'bold 36px system-ui, sans-serif';
+    ctx.fillText(gameResult ? 'Correct!' : 'Wrong!', W / 2, H / 2 + 20);
+
+    // Buttons
+    if (gameResult) {
+      // Correct: show both Restart and Next/Finish
+      drawButton(restartButton, 'Restart', '#E87A3E', true);
+      const nextLabel = QUESTION.isLastQuestion ? 'Finish' : 'Next';
+      drawButton(nextButton, nextLabel, '#4ECDC4', true);
+    } else {
+      // Wrong: show only centered Restart button
+      const centeredRestart = { x: W / 2 - 75, y: H / 2 + 60, w: 150, h: 48 };
+      drawButton(centeredRestart, 'Restart', '#E87A3E', true);
+    }
+  }
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 3: YOUR GAME CODE - IMPLEMENT THESE FUNCTIONS                     ║
+  // ║  This is where your game logic goes. See requirements below.               ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+
+  // === QUIZHP COLOR PALETTE ===
+  const COLORS = {
+    bgPrimary: '#FAFAF7',
+    bgSurface: '#FFFFFF',
+    textPrimary: '#2B2B28',
+    textSecondary: '#5A5A54',
+    orange: '#E87A3E',
+    orangeHover: '#D66B31',
+    amber: '#F5A742',
+    cyan: '#4ECDC4',
+    success: '#6BBF59',
+    error: '#E85D4A',
+    borderSubtle: '#E6E6E0',
+    borderStrong: '#D4D4CC'
+  };
+
+  // === REDUCED MOTION CHECK ===
+  const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  // === AUDIO SYSTEM ===
+  let audioCtx = null;
+  function getAudioContext() {
+    if (!audioCtx) {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    return audioCtx;
+  }
+
+  function playSound(type) {
+    if (prefersReducedMotion) return;
+    try {
+      const ctx = getAudioContext();
+      if (ctx.state === 'suspended') ctx.resume();
+
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+
+      if (type === 'splash') {
+        // Water splash sound - quick descending tone
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(600, ctx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(200, ctx.currentTime + 0.15);
+        gain.gain.setValueAtTime(0.15, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.15);
+        osc.start();
+        osc.stop(ctx.currentTime + 0.15);
+      } else if (type === 'growth') {
+        // Growth sparkle - ascending cheerful tone
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(400, ctx.currentTime);
+        osc.frequency.setValueAtTime(600, ctx.currentTime + 0.05);
+        osc.frequency.setValueAtTime(800, ctx.currentTime + 0.1);
+        gain.gain.setValueAtTime(0.1, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.2);
+        osc.start();
+        osc.stop(ctx.currentTime + 0.2);
+      } else if (type === 'correct') {
+        // Correct answer - celebratory ascending
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(523, ctx.currentTime);
+        osc.frequency.setValueAtTime(659, ctx.currentTime + 0.1);
+        osc.frequency.setValueAtTime(784, ctx.currentTime + 0.2);
+        gain.gain.setValueAtTime(0.3, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.4);
+        osc.start();
+        osc.stop(ctx.currentTime + 0.4);
+      } else if (type === 'wrong') {
+        // Wrong answer - sympathetic buzz
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(180, ctx.currentTime);
+        osc.frequency.setValueAtTime(150, ctx.currentTime + 0.15);
+        gain.gain.setValueAtTime(0.15, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.25);
+        osc.start();
+        osc.stop(ctx.currentTime + 0.25);
+      }
+    } catch (e) {
+      // Audio not supported, ignore
+    }
+  }
+
+  // === PARTICLE SYSTEMS ===
+  let splashParticles = [];
+  let sparkleParticles = [];
+  let celebrationParticles = [];
+
+  function spawnSplash(x, y) {
+    if (prefersReducedMotion) return;
+    for (let i = 0; i < 8; i++) {
+      splashParticles.push({
+        x, y,
+        vx: (Math.random() - 0.5) * 150,
+        vy: -Math.random() * 100 - 50,
+        size: Math.random() * 4 + 2,
+        color: COLORS.cyan,
+        gravity: 400,
+        alpha: 1
+      });
+    }
+  }
+
+  function spawnSparkle(x, y) {
+    if (prefersReducedMotion) return;
+    for (let i = 0; i < 5; i++) {
+      sparkleParticles.push({
+        x: x + (Math.random() - 0.5) * 40,
+        y: y + (Math.random() - 0.5) * 40,
+        vx: (Math.random() - 0.5) * 60,
+        vy: -Math.random() * 80 - 20,
+        size: Math.random() * 6 + 3,
+        color: COLORS.amber,
+        alpha: 1,
+        rotation: Math.random() * Math.PI * 2
+      });
+    }
+  }
+
+  function spawnCelebration(x, y) {
+    if (prefersReducedMotion) return;
+    const colors = [COLORS.orange, COLORS.amber, COLORS.cyan, COLORS.success];
+    for (let i = 0; i < 40; i++) {
+      celebrationParticles.push({
+        x, y,
+        vx: (Math.random() - 0.5) * 500,
+        vy: -Math.random() * 400 - 100,
+        size: Math.random() * 8 + 4,
+        color: colors[Math.floor(Math.random() * colors.length)],
+        gravity: 600,
+        alpha: 1,
+        rotation: Math.random() * Math.PI * 2,
+        rotationSpeed: (Math.random() - 0.5) * 10
+      });
+    }
+  }
+
+  function updateParticles(particles, dt, hasGravity = true, fadeRate = 2) {
+    return particles.filter(p => {
+      if (hasGravity) p.vy += (p.gravity || 600) * dt;
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      if (p.rotationSpeed) p.rotation += p.rotationSpeed * dt;
+      p.alpha -= dt * fadeRate;
+      return p.alpha > 0 && p.y < H + 50;
+    });
+  }
+
+  function drawParticles(particles, isCircle = true) {
+    particles.forEach(p => {
+      ctx.globalAlpha = p.alpha;
+      ctx.fillStyle = p.color;
+      if (isCircle) {
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+        ctx.fill();
+      } else {
+        ctx.save();
+        ctx.translate(p.x, p.y);
+        ctx.rotate(p.rotation || 0);
+        ctx.fillRect(-p.size / 2, -p.size / 4, p.size, p.size / 2);
+        ctx.restore();
+      }
+    });
+    ctx.globalAlpha = 1;
+  }
+
+  // === GAME STATE ===
+  let flowers = [];
+  let droplets = [];
+  let mouseX = -100;
+  let mouseY = -100;
+  let mouseDown = false;
+  let gameStartTime = 0;
+  let entranceAnimComplete = false;
+  let lastGrowthSoundTime = 0;
+  let selectedFlower = null;
+  let selectionTime = 0;
+
+  function initGame() {
+    const choices = QUESTION.choices;
+    const spacing = W / choices.length;
+
+    gameStartTime = performance.now();
+    entranceAnimComplete = false;
+    lastGrowthSoundTime = 0;
+    selectedFlower = null;
+    selectionTime = 0;
+
+    // Create flowers for each answer choice with entrance animation properties
+    flowers = choices.map((choice, i) => ({
+      x: spacing * i + spacing / 2,
+      y: H - 180,
+      growth: 0, // 0-100
+      choice: choice,
+      index: i,
+      watering: false,
+      // Entrance animation properties
+      scale: prefersReducedMotion ? 1 : 0,
+      alpha: prefersReducedMotion ? 1 : 0,
+      entranceDelay: i * 100,
+      textBoxAlpha: prefersReducedMotion ? 1 : 0,
+      textBoxY: prefersReducedMotion ? 0 : 20
+    }));
+
+    droplets = [];
+    splashParticles = [];
+    sparkleParticles = [];
+    celebrationParticles = [];
+    mouseDown = false;
+  }
+
+  function updateGame(dt) {
+    if (gameState !== 'playing') return;
+
+    const elapsed = performance.now() - gameStartTime;
+
+    // Update entrance animations
+    if (!entranceAnimComplete && !prefersReducedMotion) {
+      let allComplete = true;
+      flowers.forEach(flower => {
+        const animTime = elapsed - flower.entranceDelay;
+        if (animTime > 0 && animTime < 350) {
+          const t = animTime / 350;
+          // Spring easing for scale
+          const spring = 1 + Math.sin(t * Math.PI * 2) * 0.2 * (1 - t);
+          flower.scale = t * spring;
+          flower.alpha = t;
+          allComplete = false;
+        } else if (animTime >= 350) {
+          flower.scale = 1;
+          flower.alpha = 1;
+        } else {
+          allComplete = false;
+        }
+
+        // Text box fade in (delayed)
+        const textAnimTime = elapsed - flower.entranceDelay - 200;
+        if (textAnimTime > 0 && textAnimTime < 300) {
+          const t = textAnimTime / 300;
+          flower.textBoxAlpha = t;
+          flower.textBoxY = 20 * (1 - t);
+          allComplete = false; // Also wait for text box animation
+        } else if (textAnimTime >= 300) {
+          flower.textBoxAlpha = 1;
+          flower.textBoxY = 0;
+        } else {
+          allComplete = false; // Text animation hasn't started yet
+        }
+      });
+      if (allComplete) entranceAnimComplete = true;
+    }
+
+    // Handle selection animation (when flower reaches 100%)
+    if (selectedFlower !== null) {
+      selectionTime += dt;
+      if (selectionTime > 0.4) {
+        const flower = flowers[selectedFlower];
+        if (flower.choice.is_correct) {
+          playSound('correct');
+          spawnCelebration(flower.x, flower.y - 50);
+        } else {
+          playSound('wrong');
+        }
+        setTimeout(() => {
+          engine.end(flower.choice.is_correct, flower.choice.explanation);
+        }, 300);
+        selectedFlower = null;
+      }
+      return; // Pause other updates during selection
+    }
+
+    // Check if mouse is over any flower while mouse is down
+    if (mouseDown) {
+      const spacing = W / flowers.length;
+      flowers.forEach(flower => {
+        const flowerWidth = spacing * 0.8;
+        const flowerLeft = flower.x - flowerWidth / 2;
+        const flowerRight = flower.x + flowerWidth / 2;
+        const flowerTop = flower.y - 100;
+        const flowerBottom = H - 20;
+
+        if (mouseX >= flowerLeft && mouseX <= flowerRight &&
+            mouseY >= flowerTop && mouseY <= flowerBottom) {
+          if (!flower.watering) {
+            // Just started watering this flower
+            playSound('splash');
+          }
+          flower.watering = true;
+          // Spawn water droplets occasionally
+          if (Math.random() < 0.3) {
+            droplets.push({
+              x: flower.x + (Math.random() - 0.5) * 30,
+              y: flower.y - 60,
+              vy: 100 + Math.random() * 50,
+              life: 1.0
+            });
+            // Spawn splash particles
+            if (Math.random() < 0.5) {
+              spawnSplash(flower.x + (Math.random() - 0.5) * 20, flower.y + 20);
+            }
+          }
+        } else {
+          flower.watering = false;
+        }
+      });
+    } else {
+      flowers.forEach(f => f.watering = false);
+    }
+
+    // Update flower growth
+    flowers.forEach(flower => {
+      if (flower.watering && flower.growth < 100) {
+        const prevGrowth = flower.growth;
+        flower.growth = Math.min(100, flower.growth + dt * 25);
+
+        // Play growth sound and spawn sparkles at milestones
+        const now = performance.now();
+        if (Math.floor(flower.growth / 20) > Math.floor(prevGrowth / 20)) {
+          if (now - lastGrowthSoundTime > 200) {
+            playSound('growth');
+            lastGrowthSoundTime = now;
+          }
+          spawnSparkle(flower.x, flower.y - 30);
+        }
+      }
+    });
+
+    // Update water droplets
+    droplets = droplets.filter(drop => {
+      drop.y += drop.vy * dt;
+      drop.life -= dt * 2;
+      return drop.life > 0;
+    });
+
+    // Update particle systems
+    splashParticles = updateParticles(splashParticles, dt, true, 3);
+    sparkleParticles = updateParticles(sparkleParticles, dt, false, 1.5);
+    celebrationParticles = updateParticles(celebrationParticles, dt, true, 0.8);
+
+    // Check if any flower reached full growth
+    flowers.forEach((flower, i) => {
+      if (flower.growth >= 100 && selectedFlower === null) {
+        selectedFlower = i;
+        selectionTime = 0;
+      }
+    });
+  }
+
+  function drawGame() {
+    // Clear canvas with garden background
+    ctx.fillStyle = '#6BBF59';
+    ctx.fillRect(0, 0, W, H);
+
+    // Draw sky gradient with QuizHP colors
+    const skyGradient = ctx.createLinearGradient(0, 0, 0, H * 0.5);
+    skyGradient.addColorStop(0, '#E8F9F8'); // Cyan light
+    skyGradient.addColorStop(1, '#F5F5F0'); // Surface secondary
+    ctx.fillStyle = skyGradient;
+    ctx.fillRect(0, 0, W, H * 0.5);
+
+    // Draw ground
+    ctx.fillStyle = '#5AAF4A';
+    ctx.fillRect(0, H - 50, W, 50);
+
+    // Draw soil patches under each flower
+    const spacing = W / flowers.length;
+    flowers.forEach(flower => {
+      ctx.globalAlpha = flower.alpha;
+      ctx.fillStyle = '#8B6914';
+      ctx.beginPath();
+      ctx.ellipse(flower.x, H - 35, spacing * 0.35, 20, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.globalAlpha = 1;
+    });
+
+    // Draw flowers
+    flowers.forEach((flower, i) => {
+      const flowerWidth = spacing * 0.85;
+
+      // Calculate flower size based on growth
+      const minSize = 24;
+      const maxSize = 64;
+      const size = minSize + (maxSize - minSize) * (flower.growth / 100);
+
+      // Apply entrance animation
+      ctx.globalAlpha = flower.alpha;
+      ctx.save();
+      ctx.translate(flower.x, flower.y);
+      ctx.scale(flower.scale, flower.scale);
+      ctx.translate(-flower.x, -flower.y);
+
+      // Draw stem
+      ctx.strokeStyle = COLORS.success;
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.moveTo(flower.x, flower.y);
+      ctx.quadraticCurveTo(flower.x + 5, flower.y + 40, flower.x, H - 50);
+      ctx.stroke();
+
+      // Draw leaves on stem if growth > 30%
+      if (flower.growth > 30) {
+        ctx.fillStyle = '#7ED471';
+        ctx.save();
+        ctx.translate(flower.x - 8, flower.y + 40);
+        ctx.rotate(-0.5);
+        ctx.beginPath();
+        ctx.ellipse(0, 0, 12, 6, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+
+        ctx.save();
+        ctx.translate(flower.x + 8, flower.y + 60);
+        ctx.rotate(0.5);
+        ctx.beginPath();
+        ctx.ellipse(0, 0, 12, 6, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      }
+
+      // Draw flower emoji (grows with progress)
+      ctx.font = `${Math.floor(size)}px sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+
+      // Use different flower emojis based on growth stages
+      let flowerEmoji = '🌱';
+      if (flower.growth > 25) flowerEmoji = '🌿';
+      if (flower.growth > 50) flowerEmoji = '🌸';
+      if (flower.growth > 80) flowerEmoji = '🌺';
+
+      ctx.fillText(flowerEmoji, flower.x, flower.y - size / 3);
+
+      ctx.restore();
+      ctx.globalAlpha = 1;
+
+      // Draw growth progress bar
+      const barWidth = 60;
+      const barHeight = 8;
+      const barX = flower.x - barWidth / 2;
+      const barY = flower.y - size - 25;
+
+      // Background
+      ctx.globalAlpha = flower.alpha;
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.2)';
+      ctx.beginPath();
+      ctx.roundRect(barX, barY, barWidth, barHeight, 4);
+      ctx.fill();
+
+      // Progress
+      const progressWidth = (flower.growth / 100) * barWidth;
+      ctx.fillStyle = flower.growth > 80 ? COLORS.amber : COLORS.success;
+      ctx.beginPath();
+      ctx.roundRect(barX, barY, progressWidth, barHeight, 4);
+      ctx.fill();
+
+      // Draw number label
+      ctx.font = "600 18px 'Nunito Sans', sans-serif";
+      ctx.fillStyle = COLORS.bgSurface;
+      ctx.strokeStyle = COLORS.textPrimary;
+      ctx.lineWidth = 3;
+      ctx.strokeText(`${i + 1}`, flower.x, barY - 12);
+      ctx.fillText(`${i + 1}`, flower.x, barY - 12);
+
+      // Draw watering indicator with animation
+      if (flower.watering) {
+        ctx.font = '28px sans-serif';
+        const wobble = Math.sin(performance.now() / 100) * 3;
+        ctx.fillText('💧', flower.x + wobble, flower.y - size - 50);
+      }
+      ctx.globalAlpha = 1;
+
+      // Draw answer text below in box with entrance animation
+      const textBoxWidth = flowerWidth - 10;
+      const textBoxHeight = 80;
+      const textBoxX = flower.x - textBoxWidth / 2;
+      const textBoxY = H - 145 + flower.textBoxY;
+
+      ctx.globalAlpha = flower.textBoxAlpha;
+
+      // Text box background
+      ctx.fillStyle = COLORS.bgSurface;
+      ctx.beginPath();
+      ctx.roundRect(textBoxX, textBoxY, textBoxWidth, textBoxHeight, 12);
+      ctx.fill();
+
+      // Border with QuizHP colors
+      ctx.strokeStyle = flower.watering ? COLORS.cyan : COLORS.borderSubtle;
+      ctx.lineWidth = flower.watering ? 3 : 2;
+      ctx.stroke();
+
+      // Glow effect when watering
+      if (flower.watering) {
+        ctx.shadowColor = COLORS.cyan;
+        ctx.shadowBlur = 10;
+        ctx.stroke();
+        ctx.shadowBlur = 0;
+      }
+
+      // Word wrap the text
+      ctx.font = "400 14px 'Nunito', sans-serif";
+      ctx.fillStyle = COLORS.textPrimary;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'top';
+
+      const words = flower.choice.text.split(' ');
+      let line = '';
+      let lineY = textBoxY + 10;
+      const lineHeight = 17;
+      const maxWidth = textBoxWidth - 16;
+
+      for (let w = 0; w < words.length; w++) {
+        const testLine = line + (line ? ' ' : '') + words[w];
+        const metrics = ctx.measureText(testLine);
+
+        if (metrics.width > maxWidth && line !== '') {
+          ctx.fillText(line, flower.x, lineY);
+          line = words[w];
+          lineY += lineHeight;
+        } else {
+          line = testLine;
+        }
+      }
+      ctx.fillText(line, flower.x, lineY);
+      ctx.globalAlpha = 1;
+    });
+
+    // Draw water droplets
+    droplets.forEach(drop => {
+      ctx.globalAlpha = drop.life;
+      ctx.fillStyle = COLORS.cyan;
+      ctx.beginPath();
+      ctx.arc(Math.floor(drop.x), Math.floor(drop.y), 4, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.globalAlpha = 1;
+    });
+
+    // Draw splash particles
+    drawParticles(splashParticles, true);
+
+    // Draw sparkle particles (stars)
+    sparkleParticles.forEach(p => {
+      ctx.globalAlpha = p.alpha;
+      ctx.fillStyle = p.color;
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rotation);
+      // Draw a star shape
+      ctx.beginPath();
+      for (let i = 0; i < 5; i++) {
+        const angle = (i * 4 * Math.PI) / 5 - Math.PI / 2;
+        const r = i === 0 ? p.size : p.size;
+        if (i === 0) ctx.moveTo(Math.cos(angle) * r, Math.sin(angle) * r);
+        else ctx.lineTo(Math.cos(angle) * r, Math.sin(angle) * r);
+      }
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+    });
+    ctx.globalAlpha = 1;
+
+    // Draw celebration particles
+    drawParticles(celebrationParticles, false);
+
+    // Draw custom watering can cursor (only during gameplay)
+    if (mouseX >= 0 && mouseY >= 0 && gameState === 'playing') {
+      ctx.save();
+      ctx.translate(mouseX, mouseY);
+
+      // Tilt when watering
+      if (mouseDown) {
+        ctx.rotate(0.4);
+      }
+
+      // Scale for size
+      const s = 1.2;
+      ctx.scale(s, s);
+
+      // Watering can body
+      ctx.fillStyle = '#5B9BD5'; // Light blue metal
+      ctx.beginPath();
+      ctx.roundRect(-12, -8, 24, 20, 4);
+      ctx.fill();
+
+      // Body highlight
+      ctx.fillStyle = '#7AB8E8';
+      ctx.beginPath();
+      ctx.roundRect(-10, -6, 8, 16, 2);
+      ctx.fill();
+
+      // Spout
+      ctx.fillStyle = '#5B9BD5';
+      ctx.beginPath();
+      ctx.moveTo(12, -4);
+      ctx.lineTo(28, -14);
+      ctx.lineTo(30, -10);
+      ctx.lineTo(14, 2);
+      ctx.closePath();
+      ctx.fill();
+
+      // Spout holes (rose)
+      ctx.fillStyle = '#4A8AC4';
+      ctx.beginPath();
+      ctx.ellipse(29, -12, 4, 3, 0.4, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#7AB8E8';
+      for (let i = 0; i < 5; i++) {
+        const angle = (i / 5) * Math.PI * 2;
+        const hx = 29 + Math.cos(angle) * 2;
+        const hy = -12 + Math.sin(angle) * 1.5;
+        ctx.beginPath();
+        ctx.arc(hx, hy, 0.8, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      // Handle
+      ctx.strokeStyle = '#4A8AC4';
+      ctx.lineWidth = 3;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.arc(-2, -16, 10, Math.PI * 0.2, Math.PI * 0.8);
+      ctx.stroke();
+
+      // Water droplets when pouring
+      if (mouseDown) {
+        ctx.fillStyle = COLORS.cyan;
+        for (let i = 0; i < 3; i++) {
+          const dropY = -8 + i * 6 + (performance.now() / 50 + i * 20) % 18;
+          const dropX = 32 + i * 2;
+          ctx.globalAlpha = 1 - (dropY + 8) / 20;
+          ctx.beginPath();
+          ctx.ellipse(dropX, dropY, 2, 3, 0.4, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        ctx.globalAlpha = 1;
+      }
+
+      ctx.restore();
+    }
+  }
+
+  function handleInput(e) {
+    if (gameState !== 'playing') return;
+    if (selectedFlower !== null) return; // Don't allow input during selection
+
+    // Number keys 1-4 to water flowers (hold to water)
+    const key = e.key;
+    if (key >= '1' && key <= '4') {
+      const index = parseInt(key) - 1;
+      if (index < flowers.length) {
+        const flower = flowers[index];
+
+        // Play splash sound when starting to water
+        if (!flower.watering) {
+          playSound('splash');
+        }
+        flower.watering = true;
+
+        // Add water droplets
+        for (let i = 0; i < 3; i++) {
+          droplets.push({
+            x: flower.x + (Math.random() - 0.5) * 30,
+            y: flower.y - 60,
+            vy: 100 + Math.random() * 50,
+            life: 1.0
+          });
+        }
+
+        // Spawn splash particles
+        spawnSplash(flower.x, flower.y + 20);
+
+        // Stop watering after a short delay
+        setTimeout(() => {
+          flower.watering = false;
+        }, 150);
+      }
+    }
+  }
+
+  // Mouse event handlers for click-and-hold watering
+  canvas.addEventListener('mousedown', (e) => {
+    if (gameState !== 'playing') return;
+    const pos = screenToLogical(e.clientX, e.clientY);
+    mouseX = pos.x;
+    mouseY = pos.y;
+    mouseDown = true;
+  });
+
+  canvas.addEventListener('mouseup', () => {
+    mouseDown = false;
+    flowers.forEach(f => f.watering = false);
+  });
+
+  canvas.addEventListener('mousemove', (e) => {
+    const pos = screenToLogical(e.clientX, e.clientY);
+    mouseX = pos.x;
+    mouseY = pos.y;
+  });
+
+  canvas.addEventListener('mouseleave', () => {
+    mouseX = -100;
+    mouseY = -100;
+    mouseDown = false;
+    flowers.forEach(f => f.watering = false);
+  });
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 4: GAME LOOP - DO NOT MODIFY                                      ║
+  // ║  Standard loop with responsive scaling and DPR support.                    ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  let lastTime = performance.now();
+
+  function gameLoop(now) {
+    const dt = Math.min((now - lastTime) / 1000, 0.05); // Cap at 50ms
+    lastTime = now;
+
+    // Apply transform for logical coordinate system
+    ctx.setTransform(scale * dpr, 0, 0, scale * dpr, 0, 0);
+
+    if (gameState === 'playing') {
+      updateGame(dt);
+      drawGame();
+    } else {
+      drawGame(); // Draw game state behind overlay
+      drawEndScreen(dt);
+    }
+
+    // Reset transform for next frame
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+    requestAnimationFrame(gameLoop);
+  }
+
+  // Input handlers
+  document.addEventListener('keydown', (e) => {
+    if (gameState === 'ended' && (e.code === 'KeyR')) {
+      // Restart game
+      gameState = 'playing';
+      gameResult = null;
+      gameExplanation = '';
+      confettiParticles = [];
+      canvas.style.cursor = 'none'; // Hide cursor during gameplay
+      initGame();
+      return;
+    }
+    handleInput(e);
+  });
+
+  document.addEventListener('keyup', (e) => {
+    // Optional: handle key release in your handleInput
+  });
+
+  // Canvas click handler for end screen buttons
+  canvas.addEventListener('click', (e) => {
+    if (gameState !== 'ended') return;
+
+    const { x, y } = screenToLogical(e.clientX, e.clientY);
+
+    if (gameResult) {
+      // Correct answer: check both buttons
+      if (pointInRect(x, y, restartButton)) {
+        gameState = 'playing';
+        gameResult = null;
+        gameExplanation = '';
+        confettiParticles = [];
+        canvas.style.cursor = 'none'; // Hide cursor during gameplay
+        initGame();
+        return;
+      }
+      if (pointInRect(x, y, nextButton)) {
+        // Notify parent to go to next question
+        if (window.parent && window.parent !== window) {
+          window.parent.postMessage({ type: 'quiz-next' }, '*');
+        }
+        return;
+      }
+    } else {
+      // Wrong answer: check centered restart button
+      const centeredRestart = { x: W / 2 - 75, y: H / 2 + 60, w: 150, h: 48 };
+      if (pointInRect(x, y, centeredRestart)) {
+        gameState = 'playing';
+        gameResult = null;
+        gameExplanation = '';
+        confettiParticles = [];
+        canvas.style.cursor = 'none'; // Hide cursor during gameplay
+        initGame();
+        return;
+      }
+    }
+  });
+
+
+  // Cursor change handler for end screen buttons
+  canvas.addEventListener('mousemove', (e) => {
+    if (gameState !== 'ended') {
+      canvas.style.cursor = 'default';
+      return;
+    }
+    const { x, y } = screenToLogical(e.clientX, e.clientY);
+    if (gameResult) {
+      if (pointInRect(x, y, restartButton) || pointInRect(x, y, nextButton)) {
+        canvas.style.cursor = 'pointer';
+        return;
+      }
+    } else {
+      const centeredRestart = { x: W / 2 - 75, y: H / 2 + 60, w: 150, h: 48 };
+      if (pointInRect(x, y, centeredRestart)) {
+        canvas.style.cursor = 'pointer';
+        return;
+      }
+    }
+    canvas.style.cursor = 'default';
+  });
+
+  // Handle resize
+  window.addEventListener('resize', resizeCanvas);
+
+  // Initialize
+  resizeCanvas();
+  initGame();
+  requestAnimationFrame(gameLoop);
+  </script>
+</body>
+</html>

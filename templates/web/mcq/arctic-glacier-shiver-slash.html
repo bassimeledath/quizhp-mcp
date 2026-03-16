@@ -1,0 +1,917 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Arctic Glacier Shiver Slash</title>
+  <link href="https://fonts.googleapis.com/css2?family=Belanosima:wght@400;600;700&family=Nunito+Sans:wght@400;500;600;700&family=Nunito:wght@400;500;600&display=swap" rel="stylesheet">
+  <!--
+  ╔══════════════════════════════════════════════════════════════════════════════╗
+  ║  GAME FACTORY TEMPLATE                                                        ║
+  ║  This template enforces critical invariants. Follow the section markers.      ║
+  ╚══════════════════════════════════════════════════════════════════════════════╝
+  -->
+  <style>
+    /* ═══════════════════════════════════════════════════════════════════════════
+       BASE STYLES - Can be extended, not removed
+       ═══════════════════════════════════════════════════════════════════════════ */
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+    }
+    body {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      background: #0a0e1a;
+      font-family: 'Nunito Sans', system-ui, -apple-system, sans-serif;
+    }
+    #gameCanvas {
+      background: #0c1225;
+      border-radius: 8px;
+      display: block;
+    }
+  </style>
+</head>
+<body>
+  <!-- ═══════════════════════════════════════════════════════════════════════════
+       CANVAS - Sized dynamically to fill available space
+       ═══════════════════════════════════════════════════════════════════════════ -->
+  <canvas id="gameCanvas"></canvas>
+
+  <script>
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 1: QUESTION PLACEHOLDER - DO NOT MODIFY FORMAT                    ║
+  // ║  Platform replaces this at runtime. Use these exact 60-char answers.       ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  const QUESTION = {
+    type: "mcq",
+    prompt: "Sample question text",
+    choices: [
+      { text: "This is sample answer A which is long enough to test text overflow", is_correct: true, explanation: "Why A is correct" },
+      { text: "This is sample answer B which is long enough to test text overflow", is_correct: false, explanation: "Why B is wrong" },
+      { text: "This is sample answer C which is long enough to test text overflow", is_correct: false, explanation: "Why C is wrong" },
+      { text: "This is sample answer D which is long enough to test text overflow", is_correct: false, explanation: "Why D is wrong" }
+    ],
+    isLastQuestion: false
+  };
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 2: ENGINE CORE - DO NOT MODIFY                                    ║
+  // ║  Standard engine interface and end screen. This is sacred.                 ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  const canvas = document.getElementById('gameCanvas');
+  const ctx = canvas.getContext('2d');
+
+  // Logical dimensions (game code works in this coordinate space)
+  const W = 720, H = 540;
+
+  // Scaling state (computed on resize)
+  let scale = 1;
+  let dpr = 1;
+
+  let gameState = 'playing'; // 'playing' | 'ended'
+  let gameResult = null;     // true (correct) | false (wrong)
+  let gameExplanation = '';
+  let endScreenTime = 0;
+  let confettiParticles = [];
+
+  // End screen button bounds (logical coordinates)
+  const restartButton = { x: W / 2 - 170, y: H / 2 + 60, w: 150, h: 48 };
+  const nextButton = { x: W / 2 + 20, y: H / 2 + 60, w: 150, h: 48 };
+
+  /** Check if point is inside rectangle */
+  function pointInRect(px, py, rect) {
+    return px >= rect.x && px <= rect.x + rect.w &&
+           py >= rect.y && py <= rect.y + rect.h;
+  }
+
+  /** Draw a styled button */
+  function drawButton(rect, label, color, pulse) {
+    const p = pulse ? 1 + Math.sin(endScreenTime * 4) * 0.03 : 1;
+    ctx.save();
+    ctx.translate(rect.x + rect.w / 2, rect.y + rect.h / 2);
+    ctx.scale(p, p);
+    ctx.translate(-(rect.x + rect.w / 2), -(rect.y + rect.h / 2));
+
+    // Button background
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.roundRect(rect.x, rect.y, rect.w, rect.h, 12);
+    ctx.fill();
+
+    // Button text
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = 'bold 18px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, rect.x + rect.w / 2, rect.y + rect.h / 2);
+
+    ctx.restore();
+  }
+
+  /**
+   * Resize canvas to fill available space with proper DPR scaling.
+   * Maintains logical coordinate system (720×540).
+   */
+  function resizeCanvas() {
+    dpr = window.devicePixelRatio || 1;
+
+    // Get available space
+    const availW = window.innerWidth;
+    const availH = window.innerHeight;
+
+    // Calculate scale to fit logical space (720×540) in available space
+    const scaleX = availW / W;
+    const scaleY = availH / H;
+    scale = Math.min(scaleX, scaleY);
+
+    // Physical canvas buffer (DPR-scaled for crisp rendering)
+    canvas.width = W * scale * dpr;
+    canvas.height = H * scale * dpr;
+
+    // CSS display size
+    canvas.style.width = (W * scale) + 'px';
+    canvas.style.height = (H * scale) + 'px';
+  }
+
+  /**
+   * Convert screen coordinates to logical coordinates.
+   * Use this for mouse/click events to get positions in 720×540 space.
+   */
+  function screenToLogical(screenX, screenY) {
+    const rect = canvas.getBoundingClientRect();
+    return {
+      x: (screenX - rect.left) * (W / rect.width),
+      y: (screenY - rect.top) * (H / rect.height)
+    };
+  }
+
+  const engine = {
+    /** Call this to end the game. DO NOT draw your own end screen. */
+    end(isCorrect, explanation) {
+      if (gameState === 'ended') return;
+      gameState = 'ended';
+      gameResult = isCorrect;
+      gameExplanation = explanation || '';
+      endScreenTime = 0;
+
+      // Spawn confetti for correct answers
+      if (isCorrect) {
+        for (let i = 0; i < 50; i++) {
+          confettiParticles.push({
+            x: W / 2,
+            y: H / 2,
+            vx: (Math.random() - 0.5) * 600,
+            vy: -Math.random() * 400 - 100,
+            size: 4 + Math.random() * 6,
+            color: ['#FFD700', '#FF6B6B', '#4ECDC4', '#95E1D3', '#F38181'][Math.floor(Math.random() * 5)],
+            rotation: Math.random() * Math.PI * 2,
+            rotationSpeed: (Math.random() - 0.5) * 10
+          });
+        }
+      }
+
+      // Notify parent frame
+      if (window.parent && window.parent !== window) {
+        window.parent.postMessage({
+          type: 'quiz-end',
+          isCorrect: isCorrect,
+          explanation: explanation || ''
+        }, '*');
+      }
+    }
+  };
+
+  /** STANDARD END SCREEN - DO NOT MODIFY */
+  function drawEndScreen(dt) {
+    endScreenTime += dt;
+
+    // Update confetti
+    confettiParticles = confettiParticles.filter(p => {
+      p.vy += 800 * dt; // gravity
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.rotation += p.rotationSpeed * dt;
+      p.vx *= 0.99;
+      return p.y < H + 50;
+    });
+
+    // Dark overlay
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
+    ctx.fillRect(0, 0, W, H);
+
+    // Draw confetti
+    confettiParticles.forEach(p => {
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rotation);
+      ctx.fillStyle = p.color;
+      ctx.fillRect(-p.size / 2, -p.size / 4, p.size, p.size / 2);
+      ctx.restore();
+    });
+
+    // Result emoji
+    ctx.font = '72px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(gameResult ? '🎉' : '😢', W / 2, H / 2 - 50);
+
+    // Result text
+    ctx.fillStyle = gameResult ? '#4ADE80' : '#F87171';
+    ctx.font = 'bold 36px system-ui, sans-serif';
+    ctx.fillText(gameResult ? 'Correct!' : 'Wrong!', W / 2, H / 2 + 20);
+
+    // Buttons
+    if (gameResult) {
+      // Correct: show both Restart and Next/Finish
+      drawButton(restartButton, 'Restart', '#E87A3E', true);
+      const nextLabel = QUESTION.isLastQuestion ? 'Finish' : 'Next';
+      drawButton(nextButton, nextLabel, '#4ECDC4', true);
+    } else {
+      // Wrong: show only centered Restart button
+      const centeredRestart = { x: W / 2 - 75, y: H / 2 + 60, w: 150, h: 48 };
+      drawButton(centeredRestart, 'Restart', '#E87A3E', true);
+    }
+  }
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 3: YOUR GAME CODE - IMPLEMENT THESE FUNCTIONS                     ║
+  // ║  This is where your game logic goes. See requirements below.               ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+
+  // === COLORS ===
+  const COLORS = {
+    bgPrimary: '#0c1225',
+    orange: '#E87A3E',
+    amber: '#F5A742',
+    cyan: '#4ECDC4',
+    success: '#6BBF59',
+    error: '#E85D4A',
+    textPrimary: '#F5F5F0',
+    textSecondary: '#C2C2B8',
+    iceLight: '#b8e8f0',
+    iceMid: '#7bcfe0',
+    iceDark: '#4aa8c0',
+    auroraGreen: '#40e8a0',
+    auroraPurple: '#a060e8',
+    auroraBlue: '#50a0f0',
+    auroraPink: '#e060b0'
+  };
+
+  // === SOUND ===
+  const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+  function playSound(type) {
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    const now = audioCtx.currentTime;
+
+    if (type === 'slash') {
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(800, now);
+      osc.frequency.exponentialRampToValueAtTime(200, now + 0.15);
+      gain.gain.setValueAtTime(0.15, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.15);
+      osc.start(now);
+      osc.stop(now + 0.15);
+    } else if (type === 'correct') {
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(523, now);
+      osc.frequency.setValueAtTime(659, now + 0.1);
+      osc.frequency.setValueAtTime(784, now + 0.2);
+      gain.gain.setValueAtTime(0.2, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.4);
+      osc.start(now);
+      osc.stop(now + 0.4);
+    } else if (type === 'wrong') {
+      osc.type = 'square';
+      osc.frequency.setValueAtTime(200, now);
+      osc.frequency.exponentialRampToValueAtTime(80, now + 0.3);
+      gain.gain.setValueAtTime(0.12, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.3);
+      osc.start(now);
+      osc.stop(now + 0.3);
+    } else if (type === 'chip') {
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(1200, now);
+      osc.frequency.exponentialRampToValueAtTime(300, now + 0.08);
+      gain.gain.setValueAtTime(0.1, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.08);
+      osc.start(now);
+      osc.stop(now + 0.08);
+    }
+  }
+
+  // === GAME STATE ===
+  let knife = { x: 360, y: 270, targetX: 360, targetY: 270, trail: [] };
+  let iceCubes = [];
+  let snowflakes = [];
+  let auroraWaves = [];
+  let sparkParticles = [];
+  let iceShardParticles = [];
+  let slashAnim = { active: false, timer: 0, x: 0, y: 0, angle: 0 };
+  let gameTime = 0;
+  let keysDown = {};
+  let answered = false;
+  let entranceTimer = 0;
+  const KNIFE_SPEED = 350;
+  const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  function initGame() {
+    knife = { x: 360, y: 270, targetX: 360, targetY: 270, trail: [] };
+    iceCubes = [];
+    snowflakes = [];
+    auroraWaves = [];
+    sparkParticles = [];
+    iceShardParticles = [];
+    slashAnim = { active: false, timer: 0, x: 0, y: 0, angle: 0 };
+    gameTime = 0;
+    keysDown = {};
+    answered = false;
+    entranceTimer = 0;
+
+    // Create ice cubes for each answer choice
+    const startPositions = [
+      { x: 50, baseY: 120 },
+      { x: 230, baseY: 340 },
+      { x: 420, baseY: 140 },
+      { x: 600, baseY: 360 }
+    ];
+    QUESTION.choices.forEach((choice, i) => {
+      const pos = startPositions[i];
+      iceCubes.push({
+        choice: choice,
+        index: i,
+        x: pos.x,
+        y: pos.baseY,
+        baseY: pos.baseY,
+        vx: 40 + Math.random() * 15,
+        size: 110,
+        rotation: Math.random() * Math.PI * 2,
+        rotSpeed: 0.3 + Math.random() * 0.4,
+        bobPhase: Math.random() * Math.PI * 2,
+        alpha: 1,
+        scale: 0,
+        entranceDelay: i * 0.15,
+        slashed: false,
+        shakeX: 0,
+        shakeTimer: 0
+      });
+    });
+
+    // Snowflakes
+    for (let i = 0; i < 60; i++) {
+      snowflakes.push({
+        x: Math.random() * W,
+        y: Math.random() * H,
+        size: 1 + Math.random() * 3,
+        speed: 20 + Math.random() * 40,
+        drift: (Math.random() - 0.5) * 30,
+        alpha: 0.3 + Math.random() * 0.5
+      });
+    }
+
+    // Aurora waves
+    for (let i = 0; i < 5; i++) {
+      auroraWaves.push({
+        y: 30 + i * 30,
+        amplitude: 20 + Math.random() * 30,
+        frequency: 0.005 + Math.random() * 0.005,
+        phase: Math.random() * Math.PI * 2,
+        speed: 0.3 + Math.random() * 0.5,
+        color1: [COLORS.auroraGreen, COLORS.auroraPurple, COLORS.auroraBlue, COLORS.auroraPink][i % 4],
+        color2: [COLORS.auroraPurple, COLORS.auroraBlue, COLORS.auroraPink, COLORS.auroraGreen][i % 4],
+        alpha: 0.15 + Math.random() * 0.1
+      });
+    }
+  }
+
+  function wrapText(text, maxWidth, font) {
+    ctx.font = font;
+    const words = text.split(' ');
+    const lines = [];
+    let currentLine = '';
+    for (let w of words) {
+      const testLine = currentLine ? currentLine + ' ' + w : w;
+      if (ctx.measureText(testLine).width > maxWidth && currentLine) {
+        lines.push(currentLine);
+        currentLine = w;
+      } else {
+        currentLine = testLine;
+      }
+    }
+    if (currentLine) lines.push(currentLine);
+    return lines;
+  }
+
+  function updateGame(dt) {
+    if (gameState !== 'playing') return;
+
+    gameTime += dt;
+    entranceTimer += dt;
+
+    // Move knife toward target based on keys
+    let dx = 0, dy = 0;
+    if (keysDown['ArrowLeft'] || keysDown['KeyA']) dx -= 1;
+    if (keysDown['ArrowRight'] || keysDown['KeyD']) dx += 1;
+    if (keysDown['ArrowUp'] || keysDown['KeyW']) dy -= 1;
+    if (keysDown['ArrowDown'] || keysDown['KeyS']) dy += 1;
+    if (dx !== 0 || dy !== 0) {
+      const len = Math.sqrt(dx * dx + dy * dy);
+      knife.x += (dx / len) * KNIFE_SPEED * dt;
+      knife.y += (dy / len) * KNIFE_SPEED * dt;
+    }
+    knife.x = Math.max(20, Math.min(W - 20, knife.x));
+    knife.y = Math.max(20, Math.min(H - 20, knife.y));
+
+    // Update knife trail
+    if (!prefersReducedMotion) {
+      knife.trail.push({ x: knife.x, y: knife.y, alpha: 1 });
+      if (knife.trail.length > 12) knife.trail.shift();
+      knife.trail.forEach(t => t.alpha -= dt * 4);
+      knife.trail = knife.trail.filter(t => t.alpha > 0);
+    }
+
+    // Update ice cubes
+    iceCubes.forEach(cube => {
+      // Entrance animation
+      if (entranceTimer > cube.entranceDelay) {
+        const t = Math.min((entranceTimer - cube.entranceDelay) / 0.4, 1);
+        const spring = prefersReducedMotion ? 1 : 1 + Math.sin(t * Math.PI * 2) * 0.2 * (1 - t);
+        cube.scale = t * spring;
+      }
+
+      cube.x += cube.vx * dt;
+      cube.rotation += cube.rotSpeed * dt;
+      cube.y = cube.baseY + Math.sin(gameTime * 1.5 + cube.bobPhase) * 15;
+
+      // Wrap around screen
+      if (cube.x > W + 150) {
+        cube.x = -150;
+        // Keep alternating rows to avoid overlap
+        cube.baseY = cube.index % 2 === 0 ? 100 + Math.random() * 80 : 300 + Math.random() * 80;
+      }
+
+      // Shake animation
+      if (cube.shakeTimer > 0) {
+        cube.shakeTimer -= dt;
+        cube.shakeX = Math.sin(cube.shakeTimer * 40) * 6 * (cube.shakeTimer / 0.4);
+      } else {
+        cube.shakeX = 0;
+      }
+    });
+
+    // Update snowflakes
+    snowflakes.forEach(sf => {
+      sf.x += sf.drift * dt;
+      sf.y += sf.speed * dt;
+      if (sf.y > H + 10) { sf.y = -10; sf.x = Math.random() * W; }
+      if (sf.x < -10) sf.x = W + 10;
+      if (sf.x > W + 10) sf.x = -10;
+    });
+
+    // Update aurora
+    auroraWaves.forEach(wave => {
+      wave.phase += wave.speed * dt;
+    });
+
+    // Update spark particles
+    sparkParticles.forEach(p => {
+      p.vy += 300 * dt;
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.alpha -= dt * 2;
+      p.rotation += p.rotSpeed * dt;
+    });
+    sparkParticles = sparkParticles.filter(p => p.alpha > 0);
+
+    // Update ice shard particles
+    iceShardParticles.forEach(p => {
+      p.vy += 400 * dt;
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.alpha -= dt * 1.5;
+      p.rotation += p.rotSpeed * dt;
+    });
+    iceShardParticles = iceShardParticles.filter(p => p.alpha > 0);
+
+    // Update slash animation
+    if (slashAnim.active) {
+      slashAnim.timer -= dt;
+      if (slashAnim.timer <= 0) slashAnim.active = false;
+    }
+  }
+
+  function attemptSlash() {
+    if (answered || gameState !== 'playing') return;
+
+    slashAnim.active = true;
+    slashAnim.timer = 0.25;
+    slashAnim.x = knife.x;
+    slashAnim.y = knife.y;
+    slashAnim.angle = Math.random() * Math.PI * 0.5 - Math.PI * 0.25;
+    playSound('slash');
+
+    // Check collision with ice cubes
+    for (let cube of iceCubes) {
+      if (cube.slashed) continue;
+      const dist = Math.sqrt((knife.x - cube.x) ** 2 + (knife.y - cube.y) ** 2);
+      if (dist < cube.size * 0.7) {
+        cube.slashed = true;
+        answered = true;
+
+        if (cube.choice.is_correct) {
+          // Correct: ice shard explosion
+          playSound('correct');
+          for (let i = 0; i < 20; i++) {
+            iceShardParticles.push({
+              x: cube.x, y: cube.y,
+              vx: (Math.random() - 0.5) * 400,
+              vy: (Math.random() - 0.5) * 400 - 100,
+              size: 4 + Math.random() * 8,
+              alpha: 1,
+              rotation: Math.random() * Math.PI * 2,
+              rotSpeed: (Math.random() - 0.5) * 8,
+              color: COLORS.cyan
+            });
+          }
+          setTimeout(() => engine.end(true, cube.choice.explanation), 600);
+        } else {
+          // Wrong: grey sparks (blade chips)
+          playSound('wrong');
+          playSound('chip');
+          cube.shakeTimer = 0.4;
+          for (let i = 0; i < 15; i++) {
+            sparkParticles.push({
+              x: cube.x, y: cube.y,
+              vx: (Math.random() - 0.5) * 300,
+              vy: (Math.random() - 0.5) * 300 - 80,
+              size: 2 + Math.random() * 4,
+              alpha: 1,
+              rotation: Math.random() * Math.PI * 2,
+              rotSpeed: (Math.random() - 0.5) * 10,
+              color: '#888888'
+            });
+          }
+          setTimeout(() => engine.end(false, cube.choice.explanation), 600);
+        }
+        break;
+      }
+    }
+  }
+
+  function drawGame() {
+    // Dark arctic sky background
+    const skyGrad = ctx.createLinearGradient(0, 0, 0, H);
+    skyGrad.addColorStop(0, '#060a18');
+    skyGrad.addColorStop(0.4, '#0c1225');
+    skyGrad.addColorStop(1, '#101830');
+    ctx.fillStyle = skyGrad;
+    ctx.fillRect(0, 0, W, H);
+
+    // Aurora borealis
+    auroraWaves.forEach(wave => {
+      ctx.save();
+      ctx.globalAlpha = wave.alpha;
+      ctx.beginPath();
+      ctx.moveTo(0, wave.y);
+      for (let x = 0; x <= W; x += 4) {
+        const y = wave.y + Math.sin(x * wave.frequency + wave.phase) * wave.amplitude
+                  + Math.sin(x * wave.frequency * 0.5 + wave.phase * 1.3) * wave.amplitude * 0.5;
+        ctx.lineTo(x, y);
+      }
+      ctx.lineTo(W, wave.y + 60);
+      ctx.lineTo(0, wave.y + 60);
+      ctx.closePath();
+      const grad = ctx.createLinearGradient(0, wave.y - wave.amplitude, 0, wave.y + 60);
+      grad.addColorStop(0, wave.color1);
+      grad.addColorStop(1, wave.color2 + '00');
+      ctx.fillStyle = grad;
+      ctx.fill();
+      ctx.restore();
+    });
+
+    // Snowflakes (behind cubes)
+    snowflakes.forEach(sf => {
+      ctx.globalAlpha = sf.alpha;
+      ctx.fillStyle = '#e0f0ff';
+      ctx.beginPath();
+      ctx.arc(sf.x, sf.y, sf.size, 0, Math.PI * 2);
+      ctx.fill();
+    });
+    ctx.globalAlpha = 1;
+
+    // Draw ice cubes
+    iceCubes.forEach(cube => {
+      if (cube.scale <= 0) return;
+      ctx.save();
+      ctx.translate(cube.x + cube.shakeX, cube.y);
+      ctx.scale(cube.scale, cube.scale);
+      ctx.rotate(cube.rotation);
+
+      const s = cube.size * 0.5;
+
+      // Outer ice cube (translucent)
+      ctx.globalAlpha = 0.35;
+      ctx.fillStyle = COLORS.iceLight;
+      ctx.beginPath();
+      ctx.roundRect(-s, -s, s * 2, s * 2, 8);
+      ctx.fill();
+
+      // Ice cube border glow
+      ctx.globalAlpha = 0.6;
+      ctx.strokeStyle = COLORS.iceMid;
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      ctx.roundRect(-s, -s, s * 2, s * 2, 8);
+      ctx.stroke();
+
+      // Inner highlight
+      ctx.globalAlpha = 0.15;
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath();
+      ctx.roundRect(-s + 6, -s + 6, s * 0.8, s * 0.6, 4);
+      ctx.fill();
+
+      // Diagonal ice cracks
+      ctx.globalAlpha = 0.2;
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(-s + 10, -s + 10);
+      ctx.lineTo(-s + 35, -s + 40);
+      ctx.moveTo(s - 15, -s + 5);
+      ctx.lineTo(s - 5, -s + 25);
+      ctx.stroke();
+
+      ctx.globalAlpha = 1;
+      ctx.restore();
+
+      // Draw answer text (not rotated, always readable)
+      if (cube.scale > 0.5) {
+        ctx.save();
+        ctx.translate(cube.x + cube.shakeX, cube.y);
+
+        const textFont = "500 14px 'Nunito', sans-serif";
+        const maxTextWidth = cube.size * 1.6;
+        const lines = wrapText(cube.choice.text, maxTextWidth, textFont);
+        const lineHeight = 17;
+        const totalTextH = lines.length * lineHeight;
+
+        // Text background for readability
+        const bgPad = 6;
+        const bgW = maxTextWidth + bgPad * 2;
+        const bgH = totalTextH + bgPad * 2;
+        ctx.globalAlpha = 0.75;
+        ctx.fillStyle = '#0a1020';
+        ctx.beginPath();
+        ctx.roundRect(-bgW / 2, -totalTextH / 2 - bgPad, bgW, bgH, 6);
+        ctx.fill();
+        ctx.globalAlpha = 1;
+
+        ctx.font = textFont;
+        ctx.fillStyle = COLORS.textPrimary;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        lines.forEach((line, li) => {
+          const ly = -totalTextH / 2 + li * lineHeight + lineHeight / 2;
+          ctx.fillText(line, 0, ly);
+        });
+
+        // Choice label (A, B, C, D)
+        const labels = ['A', 'B', 'C', 'D'];
+        ctx.font = "700 16px 'Nunito Sans', sans-serif";
+        ctx.fillStyle = COLORS.cyan;
+        ctx.fillText(labels[cube.index], 0, -totalTextH / 2 - 18);
+
+        ctx.restore();
+      }
+    });
+
+    // Ice shard particles
+    iceShardParticles.forEach(p => {
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rotation);
+      ctx.globalAlpha = p.alpha;
+      ctx.fillStyle = p.color;
+      // Irregular shard shape
+      ctx.beginPath();
+      ctx.moveTo(0, -p.size);
+      ctx.lineTo(p.size * 0.5, 0);
+      ctx.lineTo(0, p.size * 0.7);
+      ctx.lineTo(-p.size * 0.4, 0);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+    });
+
+    // Grey spark particles (wrong answer)
+    sparkParticles.forEach(p => {
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rotation);
+      ctx.globalAlpha = p.alpha;
+      ctx.fillStyle = p.color;
+      ctx.fillRect(-p.size / 2, -p.size / 2, p.size, p.size);
+      ctx.restore();
+    });
+
+    // Slash animation
+    if (slashAnim.active) {
+      const t = 1 - slashAnim.timer / 0.25;
+      ctx.save();
+      ctx.translate(slashAnim.x, slashAnim.y);
+      ctx.rotate(slashAnim.angle);
+      ctx.globalAlpha = (1 - t) * 0.9;
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(-40 * t, -20);
+      ctx.lineTo(40 * t, 20);
+      ctx.stroke();
+      ctx.strokeStyle = COLORS.cyan;
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(-35 * t, -18);
+      ctx.lineTo(35 * t, 18);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    // Draw knife cursor
+    ctx.save();
+    ctx.translate(knife.x, knife.y);
+
+    // Knife trail
+    if (!prefersReducedMotion) {
+      knife.trail.forEach(t => {
+        ctx.globalAlpha = t.alpha * 0.3;
+        ctx.fillStyle = COLORS.cyan;
+        ctx.beginPath();
+        ctx.arc(t.x - knife.x, t.y - knife.y, 3, 0, Math.PI * 2);
+        ctx.fill();
+      });
+    }
+    ctx.globalAlpha = 1;
+
+    // Knife blade
+    const knifeAngle = -Math.PI / 4;
+    ctx.rotate(knifeAngle);
+
+    // Blade
+    ctx.fillStyle = '#d8e8f0';
+    ctx.beginPath();
+    ctx.moveTo(0, -22);
+    ctx.lineTo(5, 0);
+    ctx.lineTo(3, 10);
+    ctx.lineTo(-3, 10);
+    ctx.lineTo(-5, 0);
+    ctx.closePath();
+    ctx.fill();
+
+    // Blade edge highlight
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(0, -22);
+    ctx.lineTo(4, -2);
+    ctx.stroke();
+
+    // Handle
+    ctx.fillStyle = COLORS.orange;
+    ctx.beginPath();
+    ctx.roundRect(-4, 10, 8, 16, 2);
+    ctx.fill();
+
+    // Handle detail
+    ctx.fillStyle = COLORS.amber;
+    ctx.fillRect(-3, 13, 6, 2);
+    ctx.fillRect(-3, 18, 6, 2);
+
+    ctx.restore();
+
+    // Frosty vignette
+    ctx.save();
+    const vigGrad = ctx.createRadialGradient(W / 2, H / 2, H * 0.3, W / 2, H / 2, W * 0.7);
+    vigGrad.addColorStop(0, 'rgba(12, 18, 37, 0)');
+    vigGrad.addColorStop(1, 'rgba(6, 10, 24, 0.5)');
+    ctx.fillStyle = vigGrad;
+    ctx.fillRect(0, 0, W, H);
+    ctx.restore();
+  }
+
+  function handleInput(e) {
+    if (gameState !== 'playing') return;
+
+    if (e.type === 'keydown') {
+      keysDown[e.code] = true;
+      if (e.code === 'Space' || e.code === 'Enter') {
+        e.preventDefault();
+        attemptSlash();
+      }
+    }
+  }
+
+  // Track keyup separately
+  document.addEventListener('keyup', (e) => {
+    keysDown[e.code] = false;
+  });
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 4: GAME LOOP - DO NOT MODIFY                                      ║
+  // ║  Standard loop with responsive scaling and DPR support.                    ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  let lastTime = performance.now();
+
+  function gameLoop(now) {
+    const dt = Math.min((now - lastTime) / 1000, 0.05); // Cap at 50ms
+    lastTime = now;
+
+    // Apply transform for logical coordinate system
+    ctx.setTransform(scale * dpr, 0, 0, scale * dpr, 0, 0);
+
+    if (gameState === 'playing') {
+      updateGame(dt);
+      drawGame();
+    } else {
+      drawGame(); // Draw game state behind overlay
+      drawEndScreen(dt);
+    }
+
+    // Reset transform for next frame
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+    requestAnimationFrame(gameLoop);
+  }
+
+  // Input handlers
+  document.addEventListener('keydown', (e) => {
+    if (gameState === 'ended' && (e.code === 'KeyR')) {
+      // Restart game
+      gameState = 'playing';
+      gameResult = null;
+      gameExplanation = '';
+      confettiParticles = [];
+      initGame();
+      return;
+    }
+    handleInput(e);
+  });
+
+  document.addEventListener('keyup', (e) => {
+    // Optional: handle key release in your handleInput
+  });
+
+  // Canvas click handler for end screen buttons
+  canvas.addEventListener('click', (e) => {
+    if (gameState !== 'ended') return;
+
+    const { x, y } = screenToLogical(e.clientX, e.clientY);
+
+    if (gameResult) {
+      // Correct answer: check both buttons
+      if (pointInRect(x, y, restartButton)) {
+        gameState = 'playing';
+        gameResult = null;
+        gameExplanation = '';
+        confettiParticles = [];
+        initGame();
+        return;
+      }
+      if (pointInRect(x, y, nextButton)) {
+        // Notify parent to go to next question
+        if (window.parent && window.parent !== window) {
+          window.parent.postMessage({ type: 'quiz-next' }, '*');
+        }
+        return;
+      }
+    } else {
+      // Wrong answer: check centered restart button
+      const centeredRestart = { x: W / 2 - 75, y: H / 2 + 60, w: 150, h: 48 };
+      if (pointInRect(x, y, centeredRestart)) {
+        gameState = 'playing';
+        gameResult = null;
+        gameExplanation = '';
+        confettiParticles = [];
+        initGame();
+        return;
+      }
+    }
+  });
+
+  // Handle resize
+  window.addEventListener('resize', resizeCanvas);
+
+  // Initialize
+  resizeCanvas();
+  initGame();
+  requestAnimationFrame(gameLoop);
+  </script>
+</body>
+</html>

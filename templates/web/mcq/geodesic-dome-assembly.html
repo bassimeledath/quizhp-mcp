@@ -1,0 +1,965 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Geodesic Dome Assembly</title>
+  <link href="https://fonts.googleapis.com/css2?family=Belanosima:wght@400;600;700&family=Nunito+Sans:wght@400;500;600;700&family=Nunito:wght@400;500;600&display=swap" rel="stylesheet">
+  <!--
+  ╔══════════════════════════════════════════════════════════════════════════════╗
+  ║  GAME FACTORY TEMPLATE                                                        ║
+  ║  This template enforces critical invariants. Follow the section markers.      ║
+  ╚══════════════════════════════════════════════════════════════════════════════╝
+  -->
+  <style>
+    /* ═══════════════════════════════════════════════════════════════════════════
+       BASE STYLES - Can be extended, not removed
+       ═══════════════════════════════════════════════════════════════════════════ */
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+    }
+    body {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      background: #1a1a2e;
+      font-family: 'Nunito Sans', system-ui, -apple-system, sans-serif;
+    }
+    #gameCanvas {
+      background: #16213e;
+      border-radius: 8px;
+      display: block;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+  <!-- ═══════════════════════════════════════════════════════════════════════════
+       CANVAS - Sized dynamically to fill available space
+       ═══════════════════════════════════════════════════════════════════════════ -->
+  <canvas id="gameCanvas"></canvas>
+
+  <script>
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 1: QUESTION PLACEHOLDER - DO NOT MODIFY FORMAT                    ║
+  // ║  Platform replaces this at runtime. Use these exact 60-char answers.       ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  const QUESTION = {
+    type: "mcq",
+    prompt: "Sample question text",
+    choices: [
+      { text: "This is sample answer A which is long enough to test text overflow", is_correct: true, explanation: "Why A is correct" },
+      { text: "This is sample answer B which is long enough to test text overflow", is_correct: false, explanation: "Why B is wrong" },
+      { text: "This is sample answer C which is long enough to test text overflow", is_correct: false, explanation: "Why C is wrong" },
+      { text: "This is sample answer D which is long enough to test text overflow", is_correct: false, explanation: "Why D is wrong" }
+    ],
+    isLastQuestion: false
+  };
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 2: ENGINE CORE - DO NOT MODIFY                                    ║
+  // ║  Standard engine interface and end screen. This is sacred.                 ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  const canvas = document.getElementById('gameCanvas');
+  const ctx = canvas.getContext('2d');
+
+  // Logical dimensions (game code works in this coordinate space)
+  const W = 720, H = 540;
+
+  // Scaling state (computed on resize)
+  let scale = 1;
+  let dpr = 1;
+
+  let gameState = 'playing'; // 'playing' | 'ended'
+  let gameResult = null;     // true (correct) | false (wrong)
+  let gameExplanation = '';
+  let endScreenTime = 0;
+  let confettiParticles = [];
+
+  // End screen button bounds (logical coordinates)
+  const restartButton = { x: W / 2 - 170, y: H / 2 + 60, w: 150, h: 48 };
+  const nextButton = { x: W / 2 + 20, y: H / 2 + 60, w: 150, h: 48 };
+
+  /** Check if point is inside rectangle */
+  function pointInRect(px, py, rect) {
+    return px >= rect.x && px <= rect.x + rect.w &&
+           py >= rect.y && py <= rect.y + rect.h;
+  }
+
+  /** Draw a styled button */
+  function drawButton(rect, label, color, pulse) {
+    const p = pulse ? 1 + Math.sin(endScreenTime * 4) * 0.03 : 1;
+    ctx.save();
+    ctx.translate(rect.x + rect.w / 2, rect.y + rect.h / 2);
+    ctx.scale(p, p);
+    ctx.translate(-(rect.x + rect.w / 2), -(rect.y + rect.h / 2));
+
+    // Button background
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.roundRect(rect.x, rect.y, rect.w, rect.h, 12);
+    ctx.fill();
+
+    // Button text
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = 'bold 18px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, rect.x + rect.w / 2, rect.y + rect.h / 2);
+
+    ctx.restore();
+  }
+
+  /**
+   * Resize canvas to fill available space with proper DPR scaling.
+   * Maintains logical coordinate system (720×540).
+   */
+  function resizeCanvas() {
+    dpr = window.devicePixelRatio || 1;
+
+    // Get available space
+    const availW = window.innerWidth;
+    const availH = window.innerHeight;
+
+    // Calculate scale to fit logical space (720×540) in available space
+    const scaleX = availW / W;
+    const scaleY = availH / H;
+    scale = Math.min(scaleX, scaleY);
+
+    // Physical canvas buffer (DPR-scaled for crisp rendering)
+    canvas.width = W * scale * dpr;
+    canvas.height = H * scale * dpr;
+
+    // CSS display size
+    canvas.style.width = (W * scale) + 'px';
+    canvas.style.height = (H * scale) + 'px';
+  }
+
+  /**
+   * Convert screen coordinates to logical coordinates.
+   * Use this for mouse/click events to get positions in 720×540 space.
+   */
+  function screenToLogical(screenX, screenY) {
+    const rect = canvas.getBoundingClientRect();
+    return {
+      x: (screenX - rect.left) * (W / rect.width),
+      y: (screenY - rect.top) * (H / rect.height)
+    };
+  }
+
+  const engine = {
+    /** Call this to end the game. DO NOT draw your own end screen. */
+    end(isCorrect, explanation) {
+      if (gameState === 'ended') return;
+      gameState = 'ended';
+      gameResult = isCorrect;
+      gameExplanation = explanation || '';
+      endScreenTime = 0;
+
+      // Spawn confetti for correct answers
+      if (isCorrect) {
+        for (let i = 0; i < 50; i++) {
+          confettiParticles.push({
+            x: W / 2,
+            y: H / 2,
+            vx: (Math.random() - 0.5) * 600,
+            vy: -Math.random() * 400 - 100,
+            size: 4 + Math.random() * 6,
+            color: ['#FFD700', '#FF6B6B', '#4ECDC4', '#95E1D3', '#F38181'][Math.floor(Math.random() * 5)],
+            rotation: Math.random() * Math.PI * 2,
+            rotationSpeed: (Math.random() - 0.5) * 10
+          });
+        }
+      }
+
+      // Notify parent frame
+      if (window.parent && window.parent !== window) {
+        window.parent.postMessage({
+          type: 'quiz-end',
+          isCorrect: isCorrect,
+          explanation: explanation || ''
+        }, '*');
+      }
+    }
+  };
+
+  /** STANDARD END SCREEN - DO NOT MODIFY */
+  function drawEndScreen(dt) {
+    endScreenTime += dt;
+
+    // Update confetti
+    confettiParticles = confettiParticles.filter(p => {
+      p.vy += 800 * dt; // gravity
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.rotation += p.rotationSpeed * dt;
+      p.vx *= 0.99;
+      return p.y < H + 50;
+    });
+
+    // Dark overlay
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
+    ctx.fillRect(0, 0, W, H);
+
+    // Draw confetti
+    confettiParticles.forEach(p => {
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rotation);
+      ctx.fillStyle = p.color;
+      ctx.fillRect(-p.size / 2, -p.size / 4, p.size, p.size / 2);
+      ctx.restore();
+    });
+
+    // Result emoji
+    ctx.font = '72px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(gameResult ? '🎉' : '😢', W / 2, H / 2 - 50);
+
+    // Result text
+    ctx.fillStyle = gameResult ? '#4ADE80' : '#F87171';
+    ctx.font = 'bold 36px system-ui, sans-serif';
+    ctx.fillText(gameResult ? 'Correct!' : 'Wrong!', W / 2, H / 2 + 20);
+
+    // Buttons
+    if (gameResult) {
+      // Correct: show both Restart and Next/Finish
+      drawButton(restartButton, 'Restart', '#E87A3E', true);
+      const nextLabel = QUESTION.isLastQuestion ? 'Finish' : 'Next';
+      drawButton(nextButton, nextLabel, '#4ECDC4', true);
+    } else {
+      // Wrong: show only centered Restart button
+      const centeredRestart = { x: W / 2 - 75, y: H / 2 + 60, w: 150, h: 48 };
+      drawButton(centeredRestart, 'Restart', '#E87A3E', true);
+    }
+  }
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 3: YOUR GAME CODE - IMPLEMENT THESE FUNCTIONS                     ║
+  // ║  This is where your game logic goes. See requirements below.               ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+
+  // === COLORS ===
+  const COLORS = {
+    bgPrimary: '#FAFAF7',
+    bgSurface: '#FFFFFF',
+    bgSecondary: '#F5F5F0',
+    textPrimary: '#2B2B28',
+    textSecondary: '#5A5A54',
+    orange: '#E87A3E',
+    orangeHover: '#D66B31',
+    amber: '#F5A742',
+    cyan: '#4ECDC4',
+    cyanHover: '#45B8B0',
+    success: '#6BBF59',
+    error: '#E85D4A',
+    borderSubtle: '#E6E6E0',
+    borderStrong: '#D4D4CC',
+    blueprintBg: '#1B2A4A',
+    blueprintGrid: 'rgba(78, 205, 196, 0.12)',
+    blueprintLine: 'rgba(78, 205, 196, 0.5)',
+    blueprintLineBright: 'rgba(78, 205, 196, 0.8)',
+    blueprintDim: 'rgba(78, 205, 196, 0.25)',
+    blueprintGlow: 'rgba(78, 205, 196, 0.15)',
+    missingPiece: 'rgba(232, 122, 62, 0.4)',
+    missingPieceBorder: 'rgba(232, 122, 62, 0.8)'
+  };
+
+  // === SOUND ENGINE ===
+  const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+  function playSound(type) {
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    const now = audioCtx.currentTime;
+
+    if (type === 'click') {
+      osc.frequency.setValueAtTime(600, now);
+      osc.frequency.exponentialRampToValueAtTime(800, now + 0.05);
+      gain.gain.setValueAtTime(0.12, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.1);
+      osc.start(now);
+      osc.stop(now + 0.1);
+    } else if (type === 'correct') {
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(523, now);
+      osc.frequency.setValueAtTime(659, now + 0.1);
+      osc.frequency.setValueAtTime(784, now + 0.2);
+      gain.gain.setValueAtTime(0.15, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.4);
+      osc.start(now);
+      osc.stop(now + 0.4);
+    } else if (type === 'wrong') {
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(200, now);
+      osc.frequency.exponentialRampToValueAtTime(100, now + 0.3);
+      gain.gain.setValueAtTime(0.1, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.3);
+      osc.start(now);
+      osc.stop(now + 0.3);
+    } else if (type === 'snap') {
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(400, now);
+      osc.frequency.exponentialRampToValueAtTime(1200, now + 0.08);
+      gain.gain.setValueAtTime(0.15, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.15);
+      osc.start(now);
+      osc.stop(now + 0.15);
+    }
+  }
+
+  // === GAME STATE ===
+  const DOME_CENTER_X = W / 2;
+  const DOME_CENTER_Y = 200;
+  const DOME_RADIUS = 150;
+
+  // Section layout: 4 quadrants of the dome
+  // Each section is a pie-wedge of the dome
+  let sections = [];
+  let hoveredSection = -1;
+  let selectedSection = -1;
+  let animTime = 0;
+  let entranceProgress = 0;
+  let snapAnimation = { active: false, progress: 0, sectionIdx: -1 };
+  let gameParticles = [];
+  let shakeOffset = { x: 0, y: 0 };
+  let shakeTime = 0;
+
+  // Text panel positions (below dome)
+  const PANEL_Y_START = 360;
+  const PANEL_HEIGHT = 40;
+  const PANEL_GAP = 5;
+  const PANEL_WIDTH = 500;
+  const PANEL_X = (W - PANEL_WIDTH) / 2;
+
+  // Word-wrap helper for answer text
+  function wrapText(text, maxWidth, font) {
+    ctx.font = font;
+    const words = text.split(' ');
+    const lines = [];
+    let currentLine = '';
+    for (const word of words) {
+      const testLine = currentLine ? currentLine + ' ' + word : word;
+      if (ctx.measureText(testLine).width > maxWidth && currentLine) {
+        lines.push(currentLine);
+        currentLine = word;
+      } else {
+        currentLine = testLine;
+      }
+    }
+    if (currentLine) lines.push(currentLine);
+    return lines;
+  }
+
+  // Draw triangular geodesic struts within a region
+  function drawGeodesicStruts(cx, cy, radius, startAngle, endAngle, alpha) {
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.strokeStyle = COLORS.blueprintLine;
+    ctx.lineWidth = 1.5;
+
+    // Draw triangular mesh within the wedge
+    const midAngle = (startAngle + endAngle) / 2;
+    const divisions = 4;
+
+    for (let r = 1; r <= divisions; r++) {
+      const rr = (r / divisions) * radius;
+      ctx.beginPath();
+      ctx.arc(cx, cy, rr, startAngle, endAngle);
+      ctx.stroke();
+    }
+
+    // Radial lines
+    const angleSteps = 5;
+    const angleStep = (endAngle - startAngle) / angleSteps;
+    for (let a = 0; a <= angleSteps; a++) {
+      const angle = startAngle + a * angleStep;
+      ctx.beginPath();
+      ctx.moveTo(cx, cy);
+      ctx.lineTo(cx + Math.cos(angle) * radius, cy + Math.sin(angle) * radius);
+      ctx.stroke();
+    }
+
+    // Diagonal struts for triangle pattern
+    for (let r = 1; r < divisions; r++) {
+      const rr1 = (r / divisions) * radius;
+      const rr2 = ((r + 1) / divisions) * radius;
+      for (let a = 0; a < angleSteps; a++) {
+        const a1 = startAngle + a * angleStep;
+        const a2 = startAngle + (a + 1) * angleStep;
+        ctx.beginPath();
+        ctx.moveTo(cx + Math.cos(a1) * rr1, cy + Math.sin(a1) * rr1);
+        ctx.lineTo(cx + Math.cos(a2) * rr2, cy + Math.sin(a2) * rr2);
+        ctx.stroke();
+      }
+    }
+
+    ctx.restore();
+  }
+
+  // Draw a glowing "missing piece" indicator
+  function drawMissingPiece(cx, cy, radius, startAngle, endAngle, pulse) {
+    ctx.save();
+    const glow = 0.3 + Math.sin(pulse) * 0.15;
+
+    // Dashed outline
+    ctx.strokeStyle = COLORS.missingPieceBorder;
+    ctx.lineWidth = 2;
+    ctx.setLineDash([6, 4]);
+    ctx.globalAlpha = 0.6 + Math.sin(pulse) * 0.2;
+
+    // Draw arc wedge outline
+    const innerR = radius * 0.6;
+    ctx.beginPath();
+    ctx.arc(cx, cy, radius, startAngle, endAngle);
+    ctx.arc(cx, cy, innerR, endAngle, startAngle, true);
+    ctx.closePath();
+    ctx.stroke();
+
+    // Fill with pulsing glow
+    ctx.globalAlpha = glow * 0.3;
+    ctx.fillStyle = COLORS.missingPiece;
+    ctx.fill();
+
+    ctx.setLineDash([]);
+    ctx.restore();
+  }
+
+  function initGame() {
+    hoveredSection = -1;
+    selectedSection = -1;
+    animTime = 0;
+    entranceProgress = 0;
+    snapAnimation = { active: false, progress: 0, sectionIdx: -1 };
+    gameParticles = [];
+    shakeOffset = { x: 0, y: 0 };
+    shakeTime = 0;
+
+    // Define 4 dome sections as wedges of the semicircle
+    const sectionDefs = [
+      { startAngle: -Math.PI, endAngle: -Math.PI * 0.75, label: 'A' },
+      { startAngle: -Math.PI * 0.75, endAngle: -Math.PI * 0.5, label: 'B' },
+      { startAngle: -Math.PI * 0.5, endAngle: -Math.PI * 0.25, label: 'C' },
+      { startAngle: -Math.PI * 0.25, endAngle: 0, label: 'D' }
+    ];
+
+    sections = QUESTION.choices.map((choice, i) => ({
+      choice: choice,
+      startAngle: sectionDefs[i].startAngle,
+      endAngle: sectionDefs[i].endAngle,
+      label: sectionDefs[i].label,
+      completed: false,
+      scale: 0,
+      alpha: 0,
+      panelY: PANEL_Y_START + i * (PANEL_HEIGHT + PANEL_GAP),
+      hoverAnim: 0,
+      // Entrance stagger
+      entranceDelay: i * 0.1
+    }));
+  }
+
+  function updateGame(dt) {
+    if (gameState !== 'playing') return;
+
+    animTime += dt;
+
+    // Entrance animation
+    if (entranceProgress < 1.5) {
+      entranceProgress += dt;
+    }
+
+    // Update section entrance animations
+    sections.forEach((s, i) => {
+      const t = Math.max(0, Math.min(1, (entranceProgress - s.entranceDelay) / 0.35));
+      // Spring easing
+      const spring = t < 1 ? t * (1 + Math.sin(t * Math.PI * 2) * 0.2 * (1 - t)) : 1;
+      s.scale = spring;
+      s.alpha = Math.min(1, t * 1.5);
+    });
+
+    // Update hover animations
+    sections.forEach((s, i) => {
+      const target = (i === hoveredSection) ? 1 : 0;
+      s.hoverAnim += (target - s.hoverAnim) * dt * 8;
+    });
+
+    // Snap animation
+    if (snapAnimation.active) {
+      snapAnimation.progress += dt * 3;
+      if (snapAnimation.progress >= 1) {
+        snapAnimation.active = false;
+        const section = sections[snapAnimation.sectionIdx];
+        section.completed = true;
+
+        const choice = section.choice;
+        if (choice.is_correct) {
+          playSound('correct');
+          // Spawn celebration particles
+          const midAngle = (section.startAngle + section.endAngle) / 2;
+          const px = DOME_CENTER_X + Math.cos(midAngle) * DOME_RADIUS * 0.7;
+          const py = DOME_CENTER_Y + Math.sin(midAngle) * DOME_RADIUS * 0.7;
+          const particleColors = [COLORS.orange, COLORS.amber, COLORS.cyan, COLORS.success];
+          for (let j = 0; j < 25; j++) {
+            gameParticles.push({
+              x: px, y: py,
+              vx: (Math.random() - 0.5) * 300,
+              vy: (Math.random() - 0.5) * 300 - 100,
+              size: 3 + Math.random() * 5,
+              color: particleColors[Math.floor(Math.random() * particleColors.length)],
+              rotation: Math.random() * Math.PI * 2,
+              rotationSpeed: (Math.random() - 0.5) * 8,
+              alpha: 1,
+              gravity: 400
+            });
+          }
+        } else {
+          playSound('wrong');
+          shakeTime = 0.4;
+        }
+
+        // Delay engine.end to let the visual settle
+        setTimeout(() => {
+          engine.end(choice.is_correct, choice.explanation);
+        }, choice.is_correct ? 500 : 400);
+      }
+    }
+
+    // Update shake
+    if (shakeTime > 0) {
+      shakeTime -= dt;
+      const decay = shakeTime / 0.4;
+      shakeOffset.x = Math.sin(shakeTime * 40) * 6 * decay;
+      shakeOffset.y = Math.cos(shakeTime * 30) * 3 * decay;
+    } else {
+      shakeOffset.x = 0;
+      shakeOffset.y = 0;
+    }
+
+    // Update particles
+    gameParticles.forEach(p => {
+      p.vy += p.gravity * dt;
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.rotation += p.rotationSpeed * dt;
+      p.alpha -= dt * 1.2;
+    });
+    gameParticles = gameParticles.filter(p => p.alpha > 0);
+  }
+
+  function drawGame() {
+    // Blueprint background
+    ctx.fillStyle = COLORS.blueprintBg;
+    ctx.fillRect(0, 0, W, H);
+
+    // Blueprint grid
+    ctx.strokeStyle = COLORS.blueprintGrid;
+    ctx.lineWidth = 0.5;
+    const gridSize = 30;
+    for (let x = 0; x < W; x += gridSize) {
+      ctx.beginPath();
+      ctx.moveTo(x, 0);
+      ctx.lineTo(x, H);
+      ctx.stroke();
+    }
+    for (let y = 0; y < H; y += gridSize) {
+      ctx.beginPath();
+      ctx.moveTo(0, y);
+      ctx.lineTo(W, y);
+      ctx.stroke();
+    }
+
+    ctx.save();
+    ctx.translate(shakeOffset.x, shakeOffset.y);
+
+    // Draw dome base line
+    ctx.strokeStyle = COLORS.blueprintLineBright;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(DOME_CENTER_X - DOME_RADIUS - 30, DOME_CENTER_Y);
+    ctx.lineTo(DOME_CENTER_X + DOME_RADIUS + 30, DOME_CENTER_Y);
+    ctx.stroke();
+
+    // Draw dome outline (semicircle)
+    ctx.strokeStyle = COLORS.blueprintLineBright;
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    ctx.arc(DOME_CENTER_X, DOME_CENTER_Y, DOME_RADIUS, -Math.PI, 0);
+    ctx.stroke();
+
+    // Draw each section
+    sections.forEach((section, i) => {
+      const isHovered = i === hoveredSection && !snapAnimation.active;
+      const isSnapping = snapAnimation.active && snapAnimation.sectionIdx === i;
+
+      ctx.save();
+
+      // Section entrance animation
+      const midAngle = (section.startAngle + section.endAngle) / 2;
+      const sectionCX = DOME_CENTER_X + Math.cos(midAngle) * DOME_RADIUS * 0.5;
+      const sectionCY = DOME_CENTER_Y + Math.sin(midAngle) * DOME_RADIUS * 0.5;
+
+      ctx.globalAlpha = section.alpha;
+
+      if (section.completed) {
+        // Draw completed section - solid struts
+        drawGeodesicStruts(DOME_CENTER_X, DOME_CENTER_Y, DOME_RADIUS,
+          section.startAngle, section.endAngle, 1);
+
+        // Fill with success/error color
+        ctx.beginPath();
+        ctx.moveTo(DOME_CENTER_X, DOME_CENTER_Y);
+        ctx.arc(DOME_CENTER_X, DOME_CENTER_Y, DOME_RADIUS, section.startAngle, section.endAngle);
+        ctx.closePath();
+        ctx.fillStyle = section.choice.is_correct ? 'rgba(107, 191, 89, 0.3)' : 'rgba(232, 93, 74, 0.3)';
+        ctx.fill();
+      } else if (isSnapping) {
+        // Draw snap-in animation
+        const progress = snapAnimation.progress;
+        const snapScale = 0.5 + progress * 0.5;
+        const snapAlpha = 0.3 + progress * 0.7;
+
+        ctx.save();
+        ctx.translate(sectionCX, sectionCY);
+        ctx.scale(snapScale, snapScale);
+        ctx.translate(-sectionCX, -sectionCY);
+
+        drawGeodesicStruts(DOME_CENTER_X, DOME_CENTER_Y, DOME_RADIUS,
+          section.startAngle, section.endAngle, snapAlpha);
+
+        // Bright fill during snap
+        ctx.beginPath();
+        ctx.moveTo(DOME_CENTER_X, DOME_CENTER_Y);
+        ctx.arc(DOME_CENTER_X, DOME_CENTER_Y, DOME_RADIUS, section.startAngle, section.endAngle);
+        ctx.closePath();
+        ctx.fillStyle = `rgba(78, 205, 196, ${0.2 * progress})`;
+        ctx.fill();
+
+        ctx.restore();
+      } else {
+        // Draw incomplete section with dim struts (60% built)
+        drawGeodesicStruts(DOME_CENTER_X, DOME_CENTER_Y, DOME_RADIUS * 0.6,
+          section.startAngle, section.endAngle, 0.4);
+
+        // Draw missing piece indicator (outer ring)
+        const hoverPulse = animTime * 3 + i;
+        const hoverGlow = isHovered ? 0.5 : 0;
+        drawMissingPiece(DOME_CENTER_X, DOME_CENTER_Y, DOME_RADIUS,
+          section.startAngle, section.endAngle, hoverPulse);
+
+        // Extra hover glow
+        if (isHovered) {
+          ctx.beginPath();
+          ctx.moveTo(DOME_CENTER_X, DOME_CENTER_Y);
+          ctx.arc(DOME_CENTER_X, DOME_CENTER_Y, DOME_RADIUS, section.startAngle, section.endAngle);
+          ctx.closePath();
+          ctx.fillStyle = `rgba(232, 122, 62, ${0.12 + Math.sin(animTime * 4) * 0.05})`;
+          ctx.fill();
+        }
+      }
+
+      // Draw section label (letter A-D) at section center
+      const labelAngle = (section.startAngle + section.endAngle) / 2;
+      const labelR = DOME_RADIUS * 0.75;
+      const lx = DOME_CENTER_X + Math.cos(labelAngle) * labelR;
+      const ly = DOME_CENTER_Y + Math.sin(labelAngle) * labelR;
+
+      ctx.font = "600 20px 'Nunito Sans', sans-serif";
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = isHovered ? COLORS.orange : COLORS.blueprintLineBright;
+      ctx.globalAlpha = section.alpha;
+      ctx.fillText(section.label, lx, ly);
+
+      ctx.restore();
+    });
+
+    // Draw section divider lines inside dome
+    ctx.strokeStyle = COLORS.blueprintLineBright;
+    ctx.lineWidth = 1.5;
+    for (let i = 0; i < 4; i++) {
+      const angle = -Math.PI + i * (Math.PI / 4);
+      ctx.beginPath();
+      ctx.moveTo(DOME_CENTER_X, DOME_CENTER_Y);
+      ctx.lineTo(DOME_CENTER_X + Math.cos(angle) * DOME_RADIUS, DOME_CENTER_Y + Math.sin(angle) * DOME_RADIUS);
+      ctx.stroke();
+    }
+    // Closing line at angle 0
+    ctx.beginPath();
+    ctx.moveTo(DOME_CENTER_X, DOME_CENTER_Y);
+    ctx.lineTo(DOME_CENTER_X + DOME_RADIUS, DOME_CENTER_Y);
+    ctx.stroke();
+
+    ctx.restore(); // End shake offset
+
+    // Draw answer panels below the dome
+    const answerFont = "400 16px 'Nunito', sans-serif";
+    sections.forEach((section, i) => {
+      const panelX = PANEL_X;
+      const panelY = section.panelY;
+      const isHovered = i === hoveredSection && !snapAnimation.active;
+      const hoverOffset = section.hoverAnim * 2;
+
+      ctx.save();
+      ctx.globalAlpha = section.alpha;
+
+      // Panel background
+      ctx.beginPath();
+      ctx.roundRect(panelX - hoverOffset, panelY, PANEL_WIDTH + hoverOffset * 2, PANEL_HEIGHT, 8);
+
+      if (section.completed) {
+        ctx.fillStyle = section.choice.is_correct ? 'rgba(107, 191, 89, 0.15)' : 'rgba(232, 93, 74, 0.15)';
+        ctx.strokeStyle = section.choice.is_correct ? COLORS.success : COLORS.error;
+      } else if (isHovered) {
+        ctx.fillStyle = 'rgba(78, 205, 196, 0.12)';
+        ctx.strokeStyle = COLORS.cyan;
+      } else {
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.06)';
+        ctx.strokeStyle = COLORS.blueprintDim;
+      }
+
+      ctx.fill();
+      ctx.lineWidth = isHovered ? 2 : 1;
+      ctx.stroke();
+
+      // Section label badge
+      const badgeSize = 24;
+      const badgeX = panelX + 12;
+      const badgeY = panelY + (PANEL_HEIGHT - badgeSize) / 2;
+
+      ctx.beginPath();
+      ctx.roundRect(badgeX, badgeY, badgeSize, badgeSize, 4);
+      ctx.fillStyle = isHovered ? COLORS.orange : COLORS.blueprintLine;
+      ctx.fill();
+
+      ctx.font = "600 14px 'Nunito Sans', sans-serif";
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = '#FFFFFF';
+      ctx.fillText(section.label, badgeX + badgeSize / 2, badgeY + badgeSize / 2);
+
+      // Answer text
+      ctx.font = answerFont;
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = isHovered ? '#FFFFFF' : 'rgba(255, 255, 255, 0.8)';
+
+      const textX = badgeX + badgeSize + 12;
+      const maxTextW = PANEL_WIDTH - badgeSize - 36;
+      const lines = wrapText(section.choice.text, maxTextW, answerFont);
+
+      if (lines.length === 1) {
+        ctx.fillText(lines[0], textX, panelY + PANEL_HEIGHT / 2);
+      } else {
+        const lineHeight = 17;
+        const startTextY = panelY + PANEL_HEIGHT / 2 - ((lines.length - 1) * lineHeight) / 2;
+        lines.forEach((line, li) => {
+          ctx.fillText(line, textX, startTextY + li * lineHeight);
+        });
+      }
+
+      ctx.restore();
+    });
+
+    // Draw particles
+    gameParticles.forEach(p => {
+      ctx.save();
+      ctx.globalAlpha = p.alpha;
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rotation);
+      ctx.fillStyle = p.color;
+      ctx.fillRect(-p.size / 2, -p.size / 3, p.size, p.size * 0.66);
+      ctx.restore();
+    });
+  }
+
+  function handleInput(e) {
+    if (gameState !== 'playing') return;
+
+    // We handle click events on canvas below
+  }
+
+  // Mouse move handler for hover detection
+  canvas.addEventListener('mousemove', (e) => {
+    if (gameState !== 'playing' || snapAnimation.active) {
+      canvas.style.cursor = 'default';
+      return;
+    }
+
+    const { x, y } = screenToLogical(e.clientX, e.clientY);
+    let found = -1;
+
+    // Check dome sections (wedge hit test)
+    const dx = x - DOME_CENTER_X;
+    const dy = y - DOME_CENTER_Y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    const angle = Math.atan2(dy, dx);
+
+    if (dist <= DOME_RADIUS && dy <= 0) {
+      // Inside dome semicircle
+      for (let i = 0; i < sections.length; i++) {
+        const s = sections[i];
+        if (!s.completed && angle >= s.startAngle && angle <= s.endAngle) {
+          found = i;
+          break;
+        }
+      }
+    }
+
+    // Also check text panels
+    if (found === -1) {
+      for (let i = 0; i < sections.length; i++) {
+        const s = sections[i];
+        if (!s.completed &&
+            x >= PANEL_X && x <= PANEL_X + PANEL_WIDTH &&
+            y >= s.panelY && y <= s.panelY + PANEL_HEIGHT) {
+          found = i;
+          break;
+        }
+      }
+    }
+
+    hoveredSection = found;
+    canvas.style.cursor = found >= 0 ? 'pointer' : 'default';
+  });
+
+  // Click handler for answer selection
+  canvas.addEventListener('click', (e) => {
+    if (gameState !== 'playing' || snapAnimation.active) return;
+
+    const { x, y } = screenToLogical(e.clientX, e.clientY);
+    let clickedSection = -1;
+
+    // Check dome sections
+    const dx = x - DOME_CENTER_X;
+    const dy = y - DOME_CENTER_Y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    const angle = Math.atan2(dy, dx);
+
+    if (dist <= DOME_RADIUS && dy <= 0) {
+      for (let i = 0; i < sections.length; i++) {
+        const s = sections[i];
+        if (!s.completed && angle >= s.startAngle && angle <= s.endAngle) {
+          clickedSection = i;
+          break;
+        }
+      }
+    }
+
+    // Also check text panels
+    if (clickedSection === -1) {
+      for (let i = 0; i < sections.length; i++) {
+        const s = sections[i];
+        if (!s.completed &&
+            x >= PANEL_X && x <= PANEL_X + PANEL_WIDTH &&
+            y >= s.panelY && y <= s.panelY + PANEL_HEIGHT) {
+          clickedSection = i;
+          break;
+        }
+      }
+    }
+
+    if (clickedSection >= 0) {
+      playSound('snap');
+      selectedSection = clickedSection;
+      snapAnimation = { active: true, progress: 0, sectionIdx: clickedSection };
+    }
+  });
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 4: GAME LOOP - DO NOT MODIFY                                      ║
+  // ║  Standard loop with responsive scaling and DPR support.                    ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  let lastTime = performance.now();
+
+  function gameLoop(now) {
+    const dt = Math.min((now - lastTime) / 1000, 0.05); // Cap at 50ms
+    lastTime = now;
+
+    // Apply transform for logical coordinate system
+    ctx.setTransform(scale * dpr, 0, 0, scale * dpr, 0, 0);
+
+    if (gameState === 'playing') {
+      updateGame(dt);
+      drawGame();
+    } else {
+      drawGame(); // Draw game state behind overlay
+      drawEndScreen(dt);
+    }
+
+    // Reset transform for next frame
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+    requestAnimationFrame(gameLoop);
+  }
+
+  // Input handlers
+  document.addEventListener('keydown', (e) => {
+    if (gameState === 'ended' && (e.code === 'KeyR')) {
+      // Restart game
+      gameState = 'playing';
+      gameResult = null;
+      gameExplanation = '';
+      confettiParticles = [];
+      initGame();
+      return;
+    }
+    handleInput(e);
+  });
+
+  document.addEventListener('keyup', (e) => {
+    // Optional: handle key release in your handleInput
+  });
+
+  // Canvas click handler for end screen buttons
+  canvas.addEventListener('click', (e) => {
+    if (gameState !== 'ended') return;
+
+    const { x, y } = screenToLogical(e.clientX, e.clientY);
+
+    if (gameResult) {
+      // Correct answer: check both buttons
+      if (pointInRect(x, y, restartButton)) {
+        gameState = 'playing';
+        gameResult = null;
+        gameExplanation = '';
+        confettiParticles = [];
+        initGame();
+        return;
+      }
+      if (pointInRect(x, y, nextButton)) {
+        // Notify parent to go to next question
+        if (window.parent && window.parent !== window) {
+          window.parent.postMessage({ type: 'quiz-next' }, '*');
+        }
+        return;
+      }
+    } else {
+      // Wrong answer: check centered restart button
+      const centeredRestart = { x: W / 2 - 75, y: H / 2 + 60, w: 150, h: 48 };
+      if (pointInRect(x, y, centeredRestart)) {
+        gameState = 'playing';
+        gameResult = null;
+        gameExplanation = '';
+        confettiParticles = [];
+        initGame();
+        return;
+      }
+    }
+  });
+
+  // Handle resize
+  window.addEventListener('resize', resizeCanvas);
+
+  // Initialize
+  resizeCanvas();
+  initGame();
+  requestAnimationFrame(gameLoop);
+  </script>
+</body>
+</html>

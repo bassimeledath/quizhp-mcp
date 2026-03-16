@@ -1,0 +1,2018 @@
+{
+  "version": 1,
+  "templates": [
+    {
+      "name": "piano-keys",
+      "path": "web/mcq/piano-keys.html",
+      "platform": "web",
+      "questionType": "mcq",
+      "instructions": "Click a piano key or press the corresponding letter key (A, B, C, D) to select your answer. Each key plays its musical note when pressed.",
+      "controls": [
+        {
+          "type": "mouse",
+          "description": "Click piano key to select answer"
+        },
+        {
+          "keys": [
+            "R"
+          ],
+          "type": "keyboard",
+          "description": "Restart game"
+        }
+      ]
+    },
+    {
+      "name": "treasure-chest-key",
+      "path": "web/mcq/treasure-chest-key.html",
+      "platform": "web",
+      "questionType": "mcq",
+      "instructions": "Click on the treasure chest that contains the correct answer. Your golden key will fly toward the chest and attempt to unlock it. Choose wisely - the correct chest will open to reveal treasure, while the wrong one will shake and stay locked!",
+      "controls": [
+        {
+          "type": "mouse",
+          "description": "Click on a treasure chest to unlock it"
+        },
+        {
+          "keys": [
+            "R"
+          ],
+          "type": "keyboard",
+          "description": "Restart game"
+        }
+      ]
+    },
+    {
+      "name": "millionaire-final-question",
+      "path": "web/mcq/millionaire-final-question.html",
+      "platform": "web",
+      "questionType": "mcq",
+      "instructions": "Select the correct answer to win one million dollars.",
+      "controls": [
+        {
+          "keys": [
+            "1",
+            "2",
+            "3",
+            "4"
+          ],
+          "type": "keyboard",
+          "description": "Select answer A, B, C, or D"
+        },
+        {
+          "type": "mouse",
+          "description": "Click answer button to select"
+        },
+        {
+          "keys": [
+            "R"
+          ],
+          "type": "keyboard",
+          "description": "Restart game"
+        }
+      ]
+    },
+    {
+      "name": "wind-chime-melody",
+      "path": "web/mcq/wind-chime-melody.html",
+      "platform": "web",
+      "questionType": "mcq",
+      "instructions": "Hold mouse to blow wind, release to chime your answer.",
+      "controls": [
+        {
+          "key": "click",
+          "action": "Select answer label or hold to create breeze"
+        }
+      ]
+    },
+    {
+      "name": "vampire-striker",
+      "path": "web/mcq/vampire-striker.html",
+      "platform": "web",
+      "questionType": "mcq",
+      "instructions": "Time your strike to pierce the correct answer as it scrolls below the vampire.",
+      "controls": [
+        {
+          "type": "mouse",
+          "description": "Click STRIKE button to thrust pitchfork"
+        },
+        {
+          "keys": [
+            "Space",
+            "Enter"
+          ],
+          "type": "keyboard",
+          "description": "Strike pitchfork down"
+        },
+        {
+          "keys": [
+            "R"
+          ],
+          "type": "keyboard",
+          "description": "Restart game"
+        }
+      ]
+    },
+    {
+      "name": "frame-fixer",
+      "path": "web/mcq/frame-fixer.html",
+      "platform": "web",
+      "questionType": "mcq",
+      "instructions": "Click on the tilted painting with the correct answer to straighten it",
+      "controls": [
+        {
+          "type": "mouse",
+          "description": "Click tilted painting to straighten it"
+        },
+        {
+          "keys": [
+            "R"
+          ],
+          "type": "keyboard",
+          "description": "Restart game"
+        }
+      ]
+    },
+    {
+      "name": "win95-file-drop",
+      "path": "web/mcq/win95-file-drop.html",
+      "platform": "web",
+      "questionType": "mcq",
+      "instructions": "Drag the correct file into the folder to answer.",
+      "controls": [
+        {
+          "type": "mouse",
+          "description": "Click and drag file to drop zone"
+        },
+        {
+          "keys": [
+            "R"
+          ],
+          "type": "keyboard",
+          "description": "Restart game"
+        }
+      ]
+    },
+    {
+      "name": "ocean-answer-fisher",
+      "path": "web/mcq/ocean-answer-fisher.html",
+      "platform": "web",
+      "questionType": "mcq",
+      "instructions": "Lower your hook to catch the correct answer!",
+      "controls": [
+        {
+          "type": "mouse",
+          "description": "Move horizontally to position fishing hook"
+        },
+        {
+          "type": "mouse",
+          "description": "Click and hold to lower hook into water"
+        },
+        {
+          "keys": [
+            "R"
+          ],
+          "type": "keyboard",
+          "description": "Restart game"
+        }
+      ]
+    },
+    {
+      "name": "vintage-radio-frequency-tune",
+      "path": "web/mcq/vintage-radio-frequency-tune.html",
+      "platform": "web",
+      "questionType": "mcq",
+      "instructions": "Click a glowing radio dial to tune into your answer.",
+      "controls": [
+        {
+          "key": "click",
+          "action": "Select answer dial"
+        }
+      ]
+    },
+    {
+      "name": "rocket-launch-commander",
+      "path": "web/true-false/rocket-launch-commander.html",
+      "platform": "web",
+      "questionType": "true_false",
+      "instructions": "Click the correct button to launch the rocket successfully.",
+      "controls": [
+        {
+          "type": "mouse",
+          "description": "Click TRUE or FALSE button"
+        },
+        {
+          "keys": [
+            "R"
+          ],
+          "type": "keyboard",
+          "description": "Restart game"
+        }
+      ]
+    },
+    {
+      "name": "water-pipe-flow",
+      "path": "web/mcq/water-pipe-flow.html",
+      "platform": "web",
+      "questionType": "mcq",
+      "instructions": "Click the valve to flow water to the correct answer.",
+      "controls": [
+        {
+          "type": "mouse",
+          "description": "Click on valve to open pipe and start water flow"
+        },
+        {
+          "keys": [
+            "R"
+          ],
+          "type": "keyboard",
+          "description": "Restart game"
+        }
+      ]
+    },
+    {
+      "name": "slingshot",
+      "path": "web/true-false/slingshot.html",
+      "platform": "web",
+      "questionType": "true_false",
+      "instructions": "Hit the right answer!",
+      "controls": [
+        {
+          "type": "mouse",
+          "description": "Click and drag ball to aim slingshot"
+        },
+        {
+          "type": "mouse",
+          "description": "Release to launch ball"
+        },
+        {
+          "keys": [
+            "R"
+          ],
+          "type": "keyboard",
+          "description": "Restart game"
+        }
+      ]
+    },
+    {
+      "name": "arrow-ufo-hunter",
+      "path": "web/true-false/arrow-ufo-hunter.html",
+      "platform": "web",
+      "questionType": "true_false",
+      "instructions": "Shoot the UFO with the correct answer! Click and drag away from the bow to aim and build power, then release to fire your arrow.",
+      "controls": [
+        {
+          "type": "click-drag",
+          "description": "Click and drag to aim and power your shot, release to fire"
+        }
+      ]
+    },
+    {
+      "name": "balance-beam",
+      "path": "web/true-false/balance-beam.html",
+      "platform": "web",
+      "questionType": "true_false",
+      "instructions": "Tip the scale to the right answer",
+      "controls": [
+        {
+          "type": "mouse",
+          "description": "Click and hold the right/left half of the canvas to tilt the beam toward the right bucket"
+        }
+      ]
+    },
+    {
+      "name": "pizza-builder",
+      "path": "web/mcq/pizza-builder.html",
+      "platform": "web",
+      "questionType": "mcq",
+      "instructions": "Click on the pizza slice with the correct answer topping.",
+      "controls": [
+        {
+          "type": "mouse",
+          "description": "Hover over pizza slices to preview"
+        },
+        {
+          "type": "mouse",
+          "description": "Click on slice to select answer"
+        },
+        {
+          "keys": [
+            "R"
+          ],
+          "type": "keyboard",
+          "description": "Restart game"
+        }
+      ]
+    },
+    {
+      "name": "snake-answer-eater",
+      "path": "web/mcq/snake-answer-eater.html",
+      "platform": "web",
+      "questionType": "mcq",
+      "instructions": "Use arrow keys to control the snake's direction. Press any arrow key to start moving. Navigate to the correct answer while avoiding walls and your own body.",
+      "controls": [
+        {
+          "keys": [
+            "↑",
+            "↓",
+            "←",
+            "→"
+          ],
+          "type": "keyboard",
+          "description": "Control snake direction"
+        },
+        {
+          "keys": [
+            "R"
+          ],
+          "type": "keyboard",
+          "description": "Restart game"
+        }
+      ]
+    },
+    {
+      "name": "mcq-whackamole",
+      "path": "web/mcq/mcq-whackamole.html",
+      "platform": "web",
+      "questionType": "mcq",
+      "instructions": "Whack the mole matching your answer!",
+      "controls": [
+        {
+          "type": "mouse",
+          "description": "Click moles to whack them"
+        },
+        {
+          "keys": [
+            "R"
+          ],
+          "type": "keyboard",
+          "description": "Restart game"
+        }
+      ]
+    },
+    {
+      "name": "rose-ceremony-quiz",
+      "path": "web/mcq/rose-ceremony-quiz.html",
+      "platform": "web",
+      "questionType": "mcq",
+      "instructions": "Click a contestant to give them the rose and reveal if they have the correct answer.",
+      "controls": {
+        "select": "Click on contestant",
+        "preview": "Hover over contestant to highlight"
+      }
+    },
+    {
+      "name": "bomb-defusal",
+      "path": "web/true-false/bomb-defusal.html",
+      "platform": "web",
+      "questionType": "true_false",
+      "instructions": "Position the scissors over the correct wire and click to cut it.",
+      "controls": [
+        {
+          "type": "mouse",
+          "description": "Move scissors and click to cut wire"
+        },
+        {
+          "keys": [
+            "R"
+          ],
+          "type": "keyboard",
+          "description": "Restart game"
+        }
+      ]
+    },
+    {
+      "name": "temple-idol-swap",
+      "path": "mobile/mcq/temple-idol-swap.html",
+      "platform": "mobile",
+      "questionType": "mcq",
+      "instructions": "Tap a sandbag to swap it with the golden idol!",
+      "controls": [
+        {
+          "type": "tap",
+          "description": "Tap a sandbag to select your answer"
+        }
+      ]
+    },
+    {
+      "name": "gazillionaire",
+      "path": "mobile/mcq/gazillionaire.html",
+      "platform": "mobile",
+      "questionType": "mcq",
+      "instructions": "Tap your final answer for the Gazillion dollar prize!",
+      "controls": [
+        {
+          "type": "tap",
+          "action": "Select answer"
+        }
+      ]
+    },
+    {
+      "name": "golf-striker",
+      "path": "web/mcq/golf-striker.html",
+      "platform": "web",
+      "questionType": "mcq",
+      "instructions": "Aim with mouse, hold to charge, release to putt!",
+      "controls": [
+        {
+          "key": "Mouse",
+          "action": "Aim toward cursor"
+        },
+        {
+          "key": "Click + Hold",
+          "action": "Charge power"
+        },
+        {
+          "key": "Release",
+          "action": "Hit the ball"
+        }
+      ]
+    },
+    {
+      "name": "hungry-monster-feeder",
+      "path": "mobile/mcq/hungry-monster-feeder.html",
+      "platform": "mobile",
+      "questionType": "mcq",
+      "instructions": "Feed the hungry monster the correct answer!",
+      "controls": [
+        {
+          "action": "tap",
+          "description": "Tap a food to feed the monster"
+        }
+      ]
+    },
+    {
+      "name": "word-search-true-false",
+      "path": "web/true-false/word-search-true-false.html",
+      "platform": "web",
+      "questionType": "true_false",
+      "instructions": "Find and select TRUE or FALSE hidden in the letter grid by dragging across the letters.",
+      "controls": [
+        {
+          "action": "drag",
+          "description": "Drag across letters to select them"
+        }
+      ]
+    },
+    {
+      "name": "pokemon-battle-arena",
+      "path": "web/mcq/pokemon-battle-arena.html",
+      "platform": "web",
+      "questionType": "mcq",
+      "instructions": "Click the correct answer button to defeat your opponent in battle.",
+      "controls": [
+        {
+          "type": "mouse",
+          "description": "Click answer button to attack"
+        },
+        {
+          "keys": [
+            "R"
+          ],
+          "type": "keyboard",
+          "description": "Restart game"
+        }
+      ]
+    },
+    {
+      "name": "jetpack-quiz",
+      "path": "mobile/mcq/jetpack-quiz.html",
+      "platform": "mobile",
+      "questionType": "mcq",
+      "instructions": "Fly through an exit to select your answer!",
+      "controls": [
+        {
+          "input": "Hold 🚀 button",
+          "action": "Fly upward with jetpack"
+        },
+        {
+          "input": "◀ / ▶ buttons",
+          "action": "Move left or right"
+        },
+        {
+          "input": "Fly through exit",
+          "action": "Select that answer"
+        }
+      ]
+    },
+    {
+      "name": "alchemists-potion-bottles",
+      "path": "web/mcq/alchemists-potion-bottles.html",
+      "platform": "web",
+      "questionType": "mcq",
+      "instructions": "Press 1-4 to grab a glowing potion bottle",
+      "controls": [
+        {
+          "key": "1-4",
+          "action": "Select potion bottle"
+        },
+        {
+          "key": "click",
+          "action": "Select potion bottle"
+        }
+      ]
+    },
+    {
+      "name": "tos-agreement",
+      "path": "mobile/true-false/tos-agreement.html",
+      "platform": "mobile",
+      "questionType": "true_false",
+      "instructions": "Read the Terms of Service carefully (or don't), then tap True or False to indicate whether you agree with the statement.",
+      "controls": [
+        {
+          "type": "drag",
+          "description": "Scroll through the Terms of Service"
+        },
+        {
+          "type": "tap",
+          "description": "Tap True or False to answer"
+        }
+      ]
+    },
+    {
+      "name": "cup-shuffle",
+      "path": "mobile/mcq/cup-shuffle.html",
+      "platform": "mobile",
+      "questionType": "mcq",
+      "instructions": "Watch the ball, then guess which cup hides it!",
+      "controls": [
+        {
+          "type": "tap",
+          "action": "Select answer"
+        }
+      ]
+    },
+    {
+      "name": "flower-waterer",
+      "path": "web/mcq/flower-waterer.html",
+      "platform": "web",
+      "questionType": "mcq",
+      "instructions": "Water a flower to full bloom to select your answer.",
+      "controls": [
+        {
+          "key": "Mouse click/hold",
+          "action": "Water flower under cursor"
+        },
+        {
+          "key": "1-4",
+          "action": "Water flower by number"
+        }
+      ]
+    },
+    {
+      "name": "maze-escape",
+      "path": "mobile/mcq/maze-escape.html",
+      "platform": "mobile",
+      "questionType": "mcq",
+      "instructions": "Tilt your phone to roll the ball to your answer!",
+      "controls": [
+        {
+          "type": "tilt",
+          "description": "Tilt phone to roll ball"
+        }
+      ]
+    },
+    {
+      "name": "shape-block-drop",
+      "path": "mobile/mcq/shape-block-drop.html",
+      "platform": "mobile",
+      "questionType": "mcq",
+      "instructions": "Drag the correct answer's shape into its matching hole",
+      "controls": [
+        {
+          "type": "drag",
+          "description": "Drag shape to matching hole"
+        }
+      ]
+    },
+    {
+      "name": "wire-match",
+      "path": "mobile/mcq/wire-match.html",
+      "platform": "mobile",
+      "questionType": "mcq",
+      "instructions": "Drag the wire from the correct answer to the matching colored hole",
+      "controls": [
+        {
+          "action": "Drag wire",
+          "description": "Connect to matching color hole"
+        }
+      ]
+    },
+    {
+      "name": "word-find-true-false",
+      "path": "mobile/true-false/word-find-true-false.html",
+      "platform": "mobile",
+      "questionType": "true_false",
+      "instructions": "Find the word TRUE or FALSE hidden in the letter grid to answer the question.",
+      "controls": [
+        "Drag across letters in the grid to select them",
+        "Select letters in a straight line (horizontal, vertical, or diagonal)",
+        "Find and select TRUE or FALSE to submit your answer"
+      ]
+    },
+    {
+      "name": "Slingshot True/False",
+      "path": "web/true-false/slingshot-true-false.html",
+      "platform": "web",
+      "questionType": "true_false",
+      "instructions": "Drag the ball from the slingshot and release to launch toward the True or False target",
+      "controls": {}
+    },
+    {
+      "name": "ipod-quiz",
+      "path": "mobile/mcq/ipod-quiz.html",
+      "platform": "mobile",
+      "questionType": "mcq",
+      "instructions": "Swipe the clickwheel to navigate, tap center to select your answer.",
+      "controls": [
+        {
+          "action": "Swipe wheel",
+          "description": "Navigate between answers"
+        },
+        {
+          "action": "Tap center",
+          "description": "Select answer"
+        }
+      ]
+    },
+    {
+      "name": "sword-fight-tf",
+      "path": "mobile/true-false/sword-fight-tf.html",
+      "platform": "mobile",
+      "questionType": "true_false",
+      "instructions": "Duel your opponent by answering correctly!",
+      "controls": [
+        {
+          "type": "tap",
+          "description": "Tap TRUE or FALSE to answer"
+        }
+      ]
+    },
+    {
+      "name": "answer-pump",
+      "path": "web/true-false/answer-pump.html",
+      "platform": "web",
+      "questionType": "true_false",
+      "instructions": "Click the triangular button below your chosen answer repeatedly to inflate its pressure meter. Each pump requires about 6 clicks to reach 100%. When fully pumped, your answer is submitted with an explosion effect.",
+      "controls": [
+        {
+          "type": "mouse",
+          "description": "Click the triangular button below your answer choice to pump it"
+        },
+        {
+          "keys": [
+            "T"
+          ],
+          "type": "keyboard",
+          "description": "Pump the first answer"
+        },
+        {
+          "keys": [
+            "F"
+          ],
+          "type": "keyboard",
+          "description": "Pump the second answer"
+        },
+        {
+          "keys": [
+            "R"
+          ],
+          "type": "keyboard",
+          "description": "Restart game"
+        }
+      ]
+    },
+    {
+      "name": "basketball-true-false",
+      "path": "mobile/true-false/basketball-true-false.html",
+      "platform": "mobile",
+      "questionType": "true_false",
+      "instructions": "Swipe toward the correct hoop to score!",
+      "controls": [
+        {
+          "action": "Swipe up-left",
+          "description": "Shoot toward TRUE hoop"
+        },
+        {
+          "action": "Swipe up-right",
+          "description": "Shoot toward FALSE hoop"
+        }
+      ]
+    },
+    {
+      "name": "boulder-blaster",
+      "path": "mobile/mcq/boulder-blaster.html",
+      "platform": "mobile",
+      "questionType": "mcq",
+      "instructions": "Drive the tank and shoot the boulder containing the correct answer. Each boulder takes 3 hits to destroy.",
+      "controls": [
+        {
+          "type": "button",
+          "label": "Backward",
+          "description": "Move tank backward"
+        },
+        {
+          "type": "steering",
+          "label": "Steering Wheel",
+          "description": "Tilt phone or drag to steer"
+        },
+        {
+          "type": "button",
+          "label": "Shoot",
+          "description": "Fire at boulders"
+        },
+        {
+          "type": "button",
+          "label": "Forward",
+          "description": "Move tank forward"
+        }
+      ]
+    },
+    {
+      "name": "Pokemon Battle Arena",
+      "path": "web/mcq/pokemon-battle-arena.html",
+      "platform": "web",
+      "questionType": "mcq",
+      "instructions": "Click answer buttons to attack! Choose the correct answer to defeat your opponent.",
+      "controls": {}
+    },
+    {
+      "name": "soccer-kicker",
+      "path": "web/mcq/soccer-kicker.html",
+      "platform": "web",
+      "questionType": "mcq",
+      "instructions": "Click on the goal that represents your answer choice. The soccer ball will fly toward it!",
+      "controls": [
+        {
+          "type": "mouse",
+          "action": "click",
+          "description": "Click on a goal to kick the ball"
+        }
+      ]
+    },
+    {
+      "name": "ancient-temple-runes",
+      "path": "web/mcq/ancient-temple-runes.html",
+      "platform": "web",
+      "questionType": "mcq",
+      "instructions": "Click a glowing rune to absorb its power and answer.",
+      "controls": [
+        {
+          "key": "click",
+          "action": "Select answer"
+        }
+      ]
+    },
+    {
+      "name": "arcane-library-scrolls",
+      "path": "web/mcq/arcane-library-scrolls.html",
+      "platform": "web",
+      "questionType": "mcq",
+      "instructions": "Click an ancient scroll to reveal your answer.",
+      "controls": [
+        {
+          "key": "click",
+          "action": "Select answer scroll"
+        }
+      ]
+    },
+    {
+      "name": "archery-range-balloons",
+      "path": "web/mcq/archery-range-balloons.html",
+      "platform": "web",
+      "questionType": "mcq",
+      "instructions": "Draw the bow and fire arrows at balloons to answer!",
+      "controls": [
+        {
+          "key": "click+drag",
+          "action": "Draw bow and aim"
+        },
+        {
+          "key": "release",
+          "action": "Fire arrow at balloon"
+        }
+      ]
+    },
+    {
+      "name": "bank-vault-dial-crack",
+      "path": "web/true-false/bank-vault-dial-crack.html",
+      "platform": "web",
+      "questionType": "true_false",
+      "instructions": "Spin the vault dial to True or False, then crack it open!",
+      "controls": [
+        {
+          "key": "left/right arrows",
+          "action": "Rotate dial"
+        },
+        {
+          "key": "spacebar",
+          "action": "Crack the vault"
+        }
+      ]
+    },
+    {
+      "name": "brutalist-concrete-slabs",
+      "path": "web/mcq/brutalist-concrete-slabs.html",
+      "platform": "web",
+      "questionType": "mcq",
+      "instructions": "Click a concrete slab to choose your answer.",
+      "controls": [
+        {
+          "key": "click",
+          "action": "Select answer"
+        }
+      ]
+    },
+    {
+      "name": "catapult-target-launch",
+      "path": "web/true-false/catapult-target-launch.html",
+      "platform": "web",
+      "questionType": "true_false",
+      "instructions": "Aim the catapult and launch a rock at the correct banner!",
+      "controls": [
+        {
+          "key": "←/→",
+          "action": "Adjust catapult angle"
+        },
+        {
+          "key": "Space",
+          "action": "Launch rock"
+        }
+      ]
+    },
+    {
+      "name": "coffee-bean-sacks",
+      "path": "web/mcq/coffee-bean-sacks.html",
+      "platform": "web",
+      "questionType": "mcq",
+      "instructions": "Cycle through coffee sacks with arrows, spacebar to pick.",
+      "controls": [
+        {
+          "key": "ArrowLeft / ArrowRight",
+          "action": "Cycle through sacks"
+        },
+        {
+          "key": "Space",
+          "action": "Select highlighted sack"
+        }
+      ]
+    },
+    {
+      "name": "comet-capture-net",
+      "path": "web/mcq/comet-capture-net.html",
+      "platform": "web",
+      "questionType": "mcq",
+      "instructions": "Steer your spacecraft into a comet to select an answer.",
+      "controls": [
+        {
+          "key": "arrow keys",
+          "action": "Steer spacecraft"
+        },
+        {
+          "key": "WASD",
+          "action": "Steer spacecraft (alternate)"
+        }
+      ]
+    },
+    {
+      "name": "constellation-telescope-view",
+      "path": "web/mcq/constellation-telescope-view.html",
+      "platform": "web",
+      "questionType": "mcq",
+      "instructions": "Hover over a constellation and click to select your answer.",
+      "controls": [
+        {
+          "key": "mouse",
+          "action": "Hover to highlight constellation"
+        },
+        {
+          "key": "click",
+          "action": "Select answer"
+        }
+      ]
+    },
+    {
+      "name": "drone-delivery-beacon",
+      "path": "web/mcq/drone-delivery-beacon.html",
+      "platform": "web",
+      "questionType": "mcq",
+      "instructions": "Fly the drone over a pad and drop your cargo",
+      "controls": [
+        {
+          "key": "arrows",
+          "action": "Move drone"
+        },
+        {
+          "key": "space",
+          "action": "Drop cargo"
+        }
+      ]
+    },
+    {
+      "name": "dungeon-gate-levers",
+      "path": "web/true-false/dungeon-gate-levers.html",
+      "platform": "web",
+      "questionType": "true_false",
+      "instructions": "Pull a lever to open its gate and choose your path",
+      "controls": [
+        {
+          "key": "click",
+          "action": "Pull a lever to select answer"
+        }
+      ]
+    },
+    {
+      "name": "factory-robot-diverter",
+      "path": "web/true-false/factory-robot-diverter.html",
+      "platform": "web",
+      "questionType": "true_false",
+      "instructions": "Use arrow keys to divert the robot onto your chosen path",
+      "controls": [
+        {
+          "key": "ArrowLeft",
+          "action": "Divert robot left"
+        },
+        {
+          "key": "ArrowRight",
+          "action": "Divert robot right"
+        }
+      ]
+    },
+    {
+      "name": "geodesic-dome-assembly",
+      "path": "web/mcq/geodesic-dome-assembly.html",
+      "platform": "web",
+      "questionType": "mcq",
+      "instructions": "Click a dome section to snap its final piece and select your answer.",
+      "controls": [
+        {
+          "key": "click",
+          "action": "Select answer"
+        }
+      ]
+    },
+    {
+      "name": "glowing-crystal-shard-selection",
+      "path": "web/mcq/glowing-crystal-shard-selection.html",
+      "platform": "web",
+      "questionType": "mcq",
+      "instructions": "Press 1-4 to select a glowing crystal shard",
+      "controls": [
+        {
+          "key": "1-4",
+          "action": "Select crystal shard"
+        },
+        {
+          "key": "click",
+          "action": "Select crystal shard"
+        }
+      ]
+    },
+    {
+      "name": "laboratory-toggle-switch",
+      "path": "web/true-false/laboratory-toggle-switch.html",
+      "platform": "web",
+      "questionType": "true_false",
+      "instructions": "Flip a toggle switch to choose True or False.",
+      "controls": [
+        {
+          "key": "click",
+          "action": "Flip a toggle switch"
+        }
+      ]
+    },
+    {
+      "name": "lightning-strike-targets",
+      "path": "web/mcq/lightning-strike-targets.html",
+      "platform": "web",
+      "questionType": "mcq",
+      "instructions": "Click a glowing target to strike it with lightning.",
+      "controls": [
+        {
+          "key": "click",
+          "action": "Strike target with lightning"
+        }
+      ]
+    },
+    {
+      "name": "molten-wax-seal-press",
+      "path": "web/mcq/molten-wax-seal-press.html",
+      "platform": "web",
+      "questionType": "mcq",
+      "instructions": "Click a glowing wax seal to press your answer.",
+      "controls": [
+        {
+          "key": "click",
+          "action": "Select answer"
+        }
+      ]
+    },
+    {
+      "name": "radiant-energy-nodes",
+      "path": "web/mcq/radiant-energy-nodes.html",
+      "platform": "web",
+      "questionType": "mcq",
+      "instructions": "Press 1-4 to solidify your answer node selection.",
+      "controls": [
+        {
+          "key": "1-4",
+          "action": "Select answer node"
+        },
+        {
+          "key": "click",
+          "action": "Select answer node"
+        }
+      ]
+    },
+    {
+      "name": "retro-mainframe-data-entry",
+      "path": "web/mcq/retro-mainframe-data-entry.html",
+      "platform": "web",
+      "questionType": "mcq",
+      "instructions": "Press 1-4 to activate a vacuum tube and answer.",
+      "controls": [
+        {
+          "key": "1-4",
+          "action": "Select answer"
+        },
+        {
+          "key": "click",
+          "action": "Select answer"
+        }
+      ]
+    },
+    {
+      "name": "retro-tv-channels",
+      "path": "web/mcq/retro-tv-channels.html",
+      "platform": "web",
+      "questionType": "mcq",
+      "instructions": "Switch channels with arrow keys, press Enter to lock in your answer.",
+      "controls": [
+        {
+          "key": "Arrow Keys",
+          "action": "Switch channels"
+        },
+        {
+          "key": "Enter/Space",
+          "action": "Select answer"
+        }
+      ]
+    },
+    {
+      "name": "sacred-totem-symbols",
+      "path": "web/mcq/sacred-totem-symbols.html",
+      "platform": "web",
+      "questionType": "mcq",
+      "instructions": "Click a glowing totem to select your answer.",
+      "controls": [
+        {
+          "key": "click",
+          "action": "Select a totem"
+        },
+        {
+          "key": "1-4",
+          "action": "Select totem by number"
+        }
+      ]
+    },
+    {
+      "name": "saloon-wanted-posters",
+      "path": "web/mcq/saloon-wanted-posters.html",
+      "platform": "web",
+      "questionType": "mcq",
+      "instructions": "Click a wanted poster to choose your answer",
+      "controls": [
+        {
+          "key": "click",
+          "action": "Select a wanted poster"
+        }
+      ]
+    },
+    {
+      "name": "shimmering-crystal-fragments",
+      "path": "web/mcq/shimmering-crystal-fragments.html",
+      "platform": "web",
+      "questionType": "mcq",
+      "instructions": "Hover over a crystal to amplify its glow, then click to select",
+      "controls": [
+        {
+          "key": "click",
+          "action": "Select crystal answer"
+        },
+        {
+          "key": "1-4",
+          "action": "Select crystal by number"
+        }
+      ]
+    },
+    {
+      "name": "snake-apple-eat",
+      "path": "web/mcq/snake-apple-eat.html",
+      "platform": "web",
+      "questionType": "mcq",
+      "instructions": "Steer the snake with arrow keys to eat the apple with your answer.",
+      "controls": [
+        {
+          "key": "Arrow Keys / WASD",
+          "action": "Steer the snake"
+        }
+      ]
+    },
+    {
+      "name": "space-asteroid-shooter",
+      "path": "web/mcq/space-asteroid-shooter.html",
+      "platform": "web",
+      "questionType": "mcq",
+      "instructions": "Aim your ship and blast the asteroid with your answer!",
+      "controls": [
+        {
+          "key": "ArrowLeft / ArrowRight",
+          "action": "Rotate ship"
+        },
+        {
+          "key": "Space",
+          "action": "Fire bullet"
+        }
+      ]
+    },
+    {
+      "name": "space-defense-laser-blast",
+      "path": "web/mcq/space-defense-laser-blast.html",
+      "platform": "web",
+      "questionType": "mcq",
+      "instructions": "Aim your laser cannon at an alien craft and fire to select your answer.",
+      "controls": [
+        {
+          "key": "mouse",
+          "action": "Aim laser cannon"
+        },
+        {
+          "key": "click",
+          "action": "Fire laser at target"
+        }
+      ]
+    },
+    {
+      "name": "space-station-hatchways",
+      "path": "web/mcq/space-station-hatchways.html",
+      "platform": "web",
+      "questionType": "mcq",
+      "instructions": "Click a numbered hatchway to open it and select your answer.",
+      "controls": [
+        {
+          "key": "click",
+          "action": "Select answer"
+        }
+      ]
+    },
+    {
+      "name": "steam-engine-gauge",
+      "path": "web/mcq/steam-engine-gauge.html",
+      "platform": "web",
+      "questionType": "mcq",
+      "instructions": "Press 1-4 to release steam and lock in your answer.",
+      "controls": [
+        {
+          "key": "1-4",
+          "action": "Select answer gauge"
+        }
+      ]
+    },
+    {
+      "name": "switchboard-lever-pull",
+      "path": "web/true-false/switchboard-lever-pull.html",
+      "platform": "web",
+      "questionType": "true_false",
+      "instructions": "Click a lever to pull it and lock in your answer.",
+      "controls": [
+        {
+          "key": "click",
+          "action": "Select lever"
+        }
+      ]
+    },
+    {
+      "name": "train-track-junction-switch",
+      "path": "web/mcq/train-track-junction-switch.html",
+      "platform": "web",
+      "questionType": "mcq",
+      "instructions": "Steer the train onto a branch to choose your answer.",
+      "controls": [
+        {
+          "key": "Up/Down Arrow",
+          "action": "Switch between tracks"
+        },
+        {
+          "key": "Enter/Right Arrow",
+          "action": "Send train down selected track"
+        }
+      ]
+    },
+    {
+      "name": "Alchemist Vials Shatter",
+      "path": "mobile/mcq/alchemist-vials-shatter.html",
+      "platform": "mobile",
+      "questionType": "mcq",
+      "instructions": "Tap a potion vial to shatter it and select your answer.",
+      "controls": [
+        {
+          "key": "tap",
+          "action": "Select answer by shattering vial"
+        }
+      ]
+    },
+    {
+      "name": "Alien Seed Pod Burst",
+      "path": "mobile/mcq/alien-seed-pod-burst.html",
+      "platform": "mobile",
+      "questionType": "mcq",
+      "instructions": "Tap a glowing seed pod to burst it open",
+      "controls": [
+        {
+          "key": "tap",
+          "action": "Select answer"
+        }
+      ]
+    },
+    {
+      "name": "Ancient Tablet Crumble",
+      "path": "mobile/mcq/ancient-tablet-crumble.html",
+      "platform": "mobile",
+      "questionType": "mcq",
+      "instructions": "Tap a stone tablet to crumble it and reveal your answer.",
+      "controls": [
+        {
+          "key": "tap",
+          "action": "Select answer tablet"
+        }
+      ]
+    },
+    {
+      "name": "Bubble Tea Pearl Pop",
+      "path": "mobile/mcq/bubble-tea-pearl-pop.html",
+      "platform": "mobile",
+      "questionType": "mcq",
+      "instructions": "Tap a bubble tea cup to pop its pearls and select your answer",
+      "controls": [
+        {
+          "key": "tap",
+          "action": "Select answer"
+        }
+      ]
+    },
+    {
+      "name": "Celestial Gate Alignment",
+      "path": "mobile/true-false/celestial-gate-alignment.html",
+      "platform": "mobile",
+      "questionType": "true_false",
+      "instructions": "Drag the star into your chosen celestial gate to answer.",
+      "controls": [
+        {
+          "key": "drag",
+          "action": "Move guiding star"
+        },
+        {
+          "key": "release",
+          "action": "Select gate answer"
+        }
+      ]
+    },
+    {
+      "name": "City Rooftop Hot Air Balloons",
+      "path": "mobile/mcq/city-rooftop-hot-air-balloons.html",
+      "platform": "mobile",
+      "questionType": "mcq",
+      "instructions": "Tap the balloon carrying your answer choice",
+      "controls": [
+        {
+          "key": "tap",
+          "action": "Select answer"
+        }
+      ]
+    },
+    {
+      "name": "Clay Tablet Stamp",
+      "path": "mobile/mcq/clay-tablet-stamp.html",
+      "platform": "mobile",
+      "questionType": "mcq",
+      "instructions": "Tap a clay tablet to stamp your answer into it",
+      "controls": [
+        {
+          "key": "tap",
+          "action": "Stamp answer into clay tablet"
+        }
+      ]
+    },
+    {
+      "name": "Cliff Rock Climbing Grab",
+      "path": "mobile/true-false/cliff-rock-climbing-grab.html",
+      "platform": "mobile",
+      "questionType": "true_false",
+      "instructions": "Swipe up toward a True or False rock hold to climb and grab your answer.",
+      "controls": [
+        {
+          "key": "swipe",
+          "action": "Swipe up-left or up-right toward a rock hold to grab it"
+        },
+        {
+          "key": "tap",
+          "action": "Tap directly on a rock hold to select it"
+        }
+      ]
+    },
+    {
+      "name": "Colorful Paint Splatter",
+      "path": "mobile/mcq/colorful-paint-splatter.html",
+      "platform": "mobile",
+      "questionType": "mcq",
+      "instructions": "Tap a paint blob to splash your answer",
+      "controls": [
+        {
+          "key": "tap",
+          "action": "Select answer"
+        }
+      ]
+    },
+    {
+      "name": "Cosmic Slot Machine",
+      "path": "mobile/mcq/cosmic-slot-machine.html",
+      "platform": "mobile",
+      "questionType": "mcq",
+      "instructions": "Stop the spinning reels then pick your answer!",
+      "controls": [
+        {
+          "key": "tap",
+          "action": "Stop reels / Select answer"
+        }
+      ]
+    },
+    {
+      "name": "Crystal Cluster Shimmer",
+      "path": "mobile/mcq/crystal-cluster-shimmer.html",
+      "platform": "mobile",
+      "questionType": "mcq",
+      "instructions": "Tap a glowing crystal to select your answer",
+      "controls": [
+        {
+          "key": "tap",
+          "action": "Select answer"
+        }
+      ]
+    },
+    {
+      "name": "Deep Sea Diver Helmets",
+      "path": "mobile/mcq/deep-sea-diver-helmets.html",
+      "platform": "mobile",
+      "questionType": "mcq",
+      "instructions": "Tap a diver helmet to lock in your answer.",
+      "controls": [
+        {
+          "key": "tap",
+          "action": "Select answer"
+        }
+      ]
+    },
+    {
+      "name": "Desert Cactus Blooms",
+      "path": "mobile/mcq/desert-cactus-blooms.html",
+      "platform": "mobile",
+      "questionType": "mcq",
+      "instructions": "Tap a blooming cactus to select your answer.",
+      "controls": [
+        {
+          "key": "tap",
+          "action": "Select answer"
+        }
+      ]
+    },
+    {
+      "name": "Desert Oasis Wells",
+      "path": "mobile/mcq/desert-oasis-wells.html",
+      "platform": "mobile",
+      "questionType": "mcq",
+      "instructions": "Tap a desert well to draw your answer",
+      "controls": [
+        {
+          "key": "tap",
+          "action": "Select a well"
+        }
+      ]
+    },
+    {
+      "name": "Dragon Hoard Gemstones",
+      "path": "mobile/mcq/dragon-hoard-gemstones.html",
+      "platform": "mobile",
+      "questionType": "mcq",
+      "instructions": "Tap a glimmering gemstone to claim your answer.",
+      "controls": [
+        {
+          "key": "tap",
+          "action": "Select gemstone answer"
+        }
+      ]
+    },
+    {
+      "name": "Factory Conveyor Grab",
+      "path": "mobile/mcq/factory-conveyor-grab.html",
+      "platform": "mobile",
+      "questionType": "mcq",
+      "instructions": "Tap a moving package on the conveyor belt to grab it.",
+      "controls": [
+        {
+          "key": "tap",
+          "action": "Select answer package"
+        }
+      ]
+    },
+    {
+      "name": "Molten Glass Drip Form",
+      "path": "mobile/mcq/molten-glass-drip-form.html",
+      "platform": "mobile",
+      "questionType": "mcq",
+      "instructions": "Tap a molten glass form to solidify your answer",
+      "controls": [
+        {
+          "key": "tap",
+          "action": "Select and solidify a glass form"
+        }
+      ]
+    },
+    {
+      "name": "Old Film Strip Develop",
+      "path": "mobile/mcq/old-film-strip-develop.html",
+      "platform": "mobile",
+      "questionType": "mcq",
+      "instructions": "Swipe the film strip and tap a frame to develop your answer",
+      "controls": [
+        {
+          "key": "swipe",
+          "action": "Scroll film strip"
+        },
+        {
+          "key": "tap",
+          "action": "Develop frame to reveal answer"
+        }
+      ]
+    },
+    {
+      "name": "Pendulum Clock Swing",
+      "path": "mobile/true-false/pendulum-clock-swing.html",
+      "platform": "mobile",
+      "questionType": "true_false",
+      "instructions": "Tap when the pendulum swings to your answer",
+      "controls": [
+        {
+          "key": "tap",
+          "action": "Lock in answer based on pendulum position"
+        }
+      ]
+    },
+    {
+      "name": "Pirate Cannon Shoot",
+      "path": "mobile/true-false/pirate-cannon-shoot.html",
+      "platform": "mobile",
+      "questionType": "true_false",
+      "instructions": "Aim the cannon and fire at your answer!",
+      "controls": [
+        {
+          "key": "drag",
+          "action": "Aim cannon left or right"
+        },
+        {
+          "key": "tap",
+          "action": "Fire cannonball at target"
+        }
+      ]
+    },
+    {
+      "name": "Pirate Crate Smash",
+      "path": "mobile/mcq/pirate-crate-smash.html",
+      "platform": "mobile",
+      "questionType": "mcq",
+      "instructions": "Tap a crate to smash it open and reveal your answer!",
+      "controls": [
+        {
+          "key": "tap",
+          "action": "Smash a crate to select answer"
+        }
+      ]
+    },
+    {
+      "name": "Retro Radio Dials",
+      "path": "mobile/mcq/retro-radio-dials.html",
+      "platform": "mobile",
+      "questionType": "mcq",
+      "instructions": "Tap a radio dial to tune into your answer",
+      "controls": [
+        {
+          "key": "tap",
+          "action": "Select answer"
+        }
+      ]
+    },
+    {
+      "name": "Sand Mandala Petals",
+      "path": "mobile/mcq/sand-mandala-petals.html",
+      "platform": "mobile",
+      "questionType": "mcq",
+      "instructions": "Tap a petal to select your answer",
+      "controls": [
+        {
+          "key": "tap",
+          "action": "Select answer petal"
+        }
+      ]
+    },
+    {
+      "name": "Steam Pipe Valve Turn",
+      "path": "mobile/true-false/steam-pipe-valve-turn.html",
+      "platform": "mobile",
+      "questionType": "true_false",
+      "instructions": "Swipe a valve left or right to open it and answer",
+      "controls": [
+        {
+          "key": "swipe",
+          "action": "Turn valve to select answer"
+        }
+      ]
+    },
+    {
+      "name": "Steampunk Gear Turn",
+      "path": "mobile/mcq/steampunk-gear-turn.html",
+      "platform": "mobile",
+      "questionType": "mcq",
+      "instructions": "Tap a rotating gear to lock in your answer",
+      "controls": [
+        {
+          "key": "tap",
+          "action": "Select answer gear"
+        }
+      ]
+    },
+    {
+      "name": "Ticking Clockwork Gears",
+      "path": "mobile/mcq/ticking-clockwork-gears.html",
+      "platform": "mobile",
+      "questionType": "mcq",
+      "instructions": "Tap a clockwork gear to select your answer",
+      "controls": [
+        {
+          "key": "tap",
+          "action": "Select answer gear"
+        }
+      ]
+    },
+    {
+      "name": "Vintage Typewriter Keys",
+      "path": "mobile/mcq/vintage-typewriter-keys.html",
+      "platform": "mobile",
+      "questionType": "mcq",
+      "instructions": "Tap a typewriter key to type your answer",
+      "controls": [
+        {
+          "key": "tap",
+          "action": "Select answer"
+        }
+      ]
+    },
+    {
+      "name": "bicycle-sprocket-cog-catch",
+      "path": "mobile/mcq/bicycle-sprocket-cog-catch.html",
+      "platform": "mobile",
+      "questionType": "mcq",
+      "instructions": "Drag the sieve to catch falling tokens or tap an answer",
+      "controls": [
+        {
+          "key": "drag",
+          "action": "Move sieve to catch tokens"
+        },
+        {
+          "key": "tap",
+          "action": "Select answer"
+        }
+      ]
+    },
+    {
+      "name": "cathode-tube-plasma-burst",
+      "path": "mobile/mcq/cathode-tube-plasma-burst.html",
+      "platform": "mobile",
+      "questionType": "mcq",
+      "instructions": "Tap the glowing vacuum tube with the correct answer",
+      "controls": [
+        {
+          "key": "tap",
+          "action": "Select answer tube"
+        }
+      ]
+    },
+    {
+      "name": "obsidian-ice-floe-tilt",
+      "path": "mobile/mcq/obsidian-ice-floe-tilt.html",
+      "platform": "mobile",
+      "questionType": "mcq",
+      "instructions": "Drag to tilt the ice and guide the brass bead into a hole",
+      "controls": [
+        {
+          "key": "drag",
+          "action": "Tilt the ice surface to slide the bead"
+        }
+      ]
+    },
+    {
+      "name": "octopus-ink-tentacle-flip",
+      "path": "mobile/mcq/octopus-ink-tentacle-flip.html",
+      "platform": "mobile",
+      "questionType": "mcq",
+      "instructions": "Tap octopuses to reveal answers, tap again to select your choice",
+      "controls": [
+        {
+          "key": "tap",
+          "action": "Reveal octopus or select answer"
+        }
+      ]
+    },
+    {
+      "name": "reed-weaving-tension-pendulum",
+      "path": "mobile/mcq/reed-weaving-tension-pendulum.html",
+      "platform": "mobile",
+      "questionType": "mcq",
+      "instructions": "Tap to drop the stone onto the correct reed bundle",
+      "controls": [
+        {
+          "key": "tap",
+          "action": "Release stone weight"
+        }
+      ]
+    },
+    {
+      "name": "alchemist-vial-rotary-stop",
+      "path": "web/mcq/alchemist-vial-rotary-stop.html",
+      "platform": "web",
+      "questionType": "mcq",
+      "instructions": "Stop the spinning brass dial to select a potion vial.",
+      "controls": [
+        {
+          "key": "space/enter",
+          "action": "Stop the rotating dial"
+        }
+      ]
+    },
+    {
+      "name": "arctic-glacier-shiver-slash",
+      "path": "web/mcq/arctic-glacier-shiver-slash.html",
+      "platform": "web",
+      "questionType": "mcq",
+      "instructions": "Move your knife to ice cubes and slash to answer",
+      "controls": [
+        {
+          "key": "Arrow Keys / WASD",
+          "action": "Move knife"
+        },
+        {
+          "key": "Space / Enter",
+          "action": "Slash ice cube"
+        }
+      ]
+    },
+    {
+      "name": "barometric-mercury-glass-shatter",
+      "path": "web/mcq/barometric-mercury-glass-shatter.html",
+      "platform": "web",
+      "questionType": "mcq",
+      "instructions": "Slide the brass scale and launch the weight to shatter a glass bulb.",
+      "controls": [
+        {
+          "key": "arrow_keys/wasd",
+          "action": "Slide brass scale left/right"
+        },
+        {
+          "key": "space/enter",
+          "action": "Launch lead weight"
+        }
+      ]
+    },
+    {
+      "name": "bioluminescent-cavern-fungi-slash",
+      "path": "web/mcq/bioluminescent-cavern-fungi-slash.html",
+      "platform": "web",
+      "questionType": "mcq",
+      "instructions": "Move blade with arrows and slash glowing fungi with spacebar",
+      "controls": [
+        {
+          "key": "Arrow Keys / WASD",
+          "action": "Move blade"
+        },
+        {
+          "key": "Space / Enter",
+          "action": "Slash mushroom"
+        }
+      ]
+    },
+    {
+      "name": "blacksmith-guild-thermal-laser",
+      "path": "web/mcq/blacksmith-guild-thermal-laser.html",
+      "platform": "web",
+      "questionType": "mcq",
+      "instructions": "Aim your heat beam at a shield and fire to answer.",
+      "controls": [
+        {
+          "key": "up/down or W/S",
+          "action": "Aim beam at shield"
+        },
+        {
+          "key": "space/enter",
+          "action": "Fire beam"
+        }
+      ]
+    },
+    {
+      "name": "catapult-trajectory-ice-shatter",
+      "path": "web/mcq/catapult-trajectory-ice-shatter.html",
+      "platform": "web",
+      "questionType": "mcq",
+      "instructions": "Aim the catapult and launch the stone to shatter an ice block",
+      "controls": [
+        {
+          "key": "Arrow Keys / WASD",
+          "action": "Move catapult left and right"
+        },
+        {
+          "key": "Space / Enter",
+          "action": "Launch stone"
+        }
+      ]
+    },
+    {
+      "name": "constellation-wax-telescope-pan",
+      "path": "web/mcq/constellation-wax-telescope-pan.html",
+      "platform": "web",
+      "questionType": "mcq",
+      "instructions": "Aim telescope at a zodiac sculpture and lock on",
+      "controls": [
+        {
+          "key": "WASD / Arrow Keys",
+          "action": "Move telescope"
+        },
+        {
+          "key": "Enter / Space",
+          "action": "Lock onto sculpture"
+        }
+      ]
+    },
+    {
+      "name": "coral-reef-structure-build",
+      "path": "web/mcq/coral-reef-structure-build.html",
+      "platform": "web",
+      "questionType": "mcq",
+      "instructions": "Select the correct polyp to restore the coral reef",
+      "controls": [
+        {
+          "key": "↑/↓ or W/S",
+          "action": "Navigate polyp choices"
+        },
+        {
+          "key": "Space/Enter",
+          "action": "Lock in selected polyp"
+        }
+      ]
+    },
+    {
+      "name": "dew-point-satellite-steer",
+      "path": "web/mcq/dew-point-satellite-steer.html",
+      "platform": "web",
+      "questionType": "mcq",
+      "instructions": "Fly drone to a balloon and hold SPACE to dock with your answer.",
+      "controls": [
+        {
+          "key": "Arrow Keys / WASD",
+          "action": "Move drone"
+        },
+        {
+          "key": "Space / Enter",
+          "action": "Dock with balloon"
+        }
+      ]
+    },
+    {
+      "name": "industrial-press-roller-grab",
+      "path": "web/mcq/industrial-press-roller-grab.html",
+      "platform": "web",
+      "questionType": "mcq",
+      "instructions": "Press spacebar to grab the correct metal plate as it passes by.",
+      "controls": [
+        {
+          "key": "Space/Enter",
+          "action": "Activate grabber"
+        }
+      ]
+    },
+    {
+      "name": "javelin-disc-plain-launch",
+      "path": "web/mcq/javelin-disc-plain-launch.html",
+      "platform": "web",
+      "questionType": "mcq",
+      "instructions": "Aim at a basket and launch your disc!",
+      "controls": [
+        {
+          "key": "Arrow Keys / WASD",
+          "action": "Select target basket"
+        },
+        {
+          "key": "Space / Enter",
+          "action": "Launch disc"
+        },
+        {
+          "key": "click",
+          "action": "Click basket or answer to launch"
+        }
+      ]
+    },
+    {
+      "name": "locksmith-tumbler-pin-toss",
+      "path": "web/mcq/locksmith-tumbler-pin-toss.html",
+      "platform": "web",
+      "questionType": "mcq",
+      "instructions": "Aim your key-pick and launch the ball into the correct tumbler",
+      "controls": [
+        {
+          "key": "left/right arrows",
+          "action": "Move key-pick"
+        },
+        {
+          "key": "up arrow / spacebar",
+          "action": "Launch ball"
+        }
+      ]
+    },
+    {
+      "name": "lookout-tower-signal-laser",
+      "path": "web/mcq/lookout-tower-signal-laser.html",
+      "platform": "web",
+      "questionType": "mcq",
+      "instructions": "Aim the signal mirror and flash light at the correct tower",
+      "controls": [
+        {
+          "key": "Arrow Keys / WASD",
+          "action": "Aim mirror"
+        },
+        {
+          "key": "Space / Enter",
+          "action": "Flash beam"
+        }
+      ]
+    },
+    {
+      "name": "minaret-spiral-arrow-shot",
+      "path": "web/mcq/minaret-spiral-arrow-shot.html",
+      "platform": "web",
+      "questionType": "mcq",
+      "instructions": "Aim your glowing arrow at silk banners and shoot to answer",
+      "controls": [
+        {
+          "key": "Arrow Keys / WASD",
+          "action": "Aim arrow trajectory"
+        },
+        {
+          "key": "Space / Enter",
+          "action": "Shoot arrow"
+        }
+      ]
+    },
+    {
+      "name": "movable-type-lead-slingshot",
+      "path": "web/mcq/movable-type-lead-slingshot.html",
+      "platform": "web",
+      "questionType": "mcq",
+      "instructions": "Aim the slingshot and launch the lead block at an answer box",
+      "controls": [
+        {
+          "key": "Arrow Keys / WASD",
+          "action": "Aim slingshot and adjust power"
+        },
+        {
+          "key": "Space / Enter",
+          "action": "Launch lead block"
+        }
+      ]
+    },
+    {
+      "name": "nebula-navigator-pressure-sensor",
+      "path": "web/mcq/nebula-navigator-pressure-sensor.html",
+      "platform": "web",
+      "questionType": "mcq",
+      "instructions": "Steer probe to the correct portal and engage thrusters",
+      "controls": [
+        {
+          "key": "Arrow Keys / WASD",
+          "action": "Steer probe"
+        },
+        {
+          "key": "Space / Enter",
+          "action": "Enter portal"
+        }
+      ]
+    },
+    {
+      "name": "polished-pneumatic-capsule-slingshot",
+      "path": "web/mcq/polished-pneumatic-capsule-slingshot.html",
+      "platform": "web",
+      "questionType": "mcq",
+      "instructions": "Aim the pneumatic launcher and fire capsules into pipe valves.",
+      "controls": [
+        {
+          "key": "←/→ or A/D",
+          "action": "Aim launcher"
+        },
+        {
+          "key": "Space/Enter",
+          "action": "Fire capsule"
+        }
+      ]
+    },
+    {
+      "name": "pulsar-beacon-frequency-maze",
+      "path": "web/mcq/pulsar-beacon-frequency-maze.html",
+      "platform": "web",
+      "questionType": "mcq",
+      "instructions": "Navigate your ship through neon paths to the correct answer zone.",
+      "controls": [
+        {
+          "key": "Arrow Keys / WASD",
+          "action": "Move ship through maze"
+        }
+      ]
+    },
+    {
+      "name": "selkie-seal-moonlight-sweep",
+      "path": "web/mcq/selkie-seal-moonlight-sweep.html",
+      "platform": "web",
+      "questionType": "mcq",
+      "instructions": "Stop the moonlight beam on the correct pearl outcrop.",
+      "controls": [
+        {
+          "key": "space/enter",
+          "action": "Stop moonlight beam"
+        },
+        {
+          "key": "click",
+          "action": "Select answer directly"
+        }
+      ]
+    },
+    {
+      "name": "shadow-candle-flashlight-search",
+      "path": "web/mcq/shadow-candle-flashlight-search.html",
+      "platform": "web",
+      "questionType": "mcq",
+      "instructions": "Move lamp to candles and confirm your choice",
+      "controls": [
+        {
+          "key": "Arrow Keys / WASD",
+          "action": "Move lamp beam"
+        },
+        {
+          "key": "Space / Enter",
+          "action": "Confirm selection"
+        }
+      ]
+    },
+    {
+      "name": "steam-gauge-switch-punch",
+      "path": "mobile/mcq/steam-gauge-switch-punch.html",
+      "platform": "mobile",
+      "questionType": "mcq",
+      "instructions": "Tap the correct railway switch lever to punch it upright",
+      "controls": [
+        {
+          "key": "tap",
+          "action": "Strike a switch lever"
+        }
+      ]
+    },
+    {
+      "name": "two-buttons-meme",
+      "path": "mobile/true-false/two-buttons-meme.html",
+      "platform": "mobile",
+      "questionType": "true_false",
+      "instructions": "Tap your answer - TRUE or FALSE!",
+      "controls": [
+        {
+          "type": "tap",
+          "description": "Tap TRUE or FALSE button"
+        }
+      ]
+    },
+    {
+      "name": "matrix-pill-quiz",
+      "path": "mobile/true-false/matrix-pill-quiz.html",
+      "platform": "mobile",
+      "questionType": "true_false",
+      "instructions": "Choose your truth: red pill for TRUE, blue pill for FALSE",
+      "controls": [
+        {
+          "type": "tap",
+          "description": "Tap red pill for TRUE, blue pill for FALSE"
+        }
+      ]
+    }
+  ]
+}

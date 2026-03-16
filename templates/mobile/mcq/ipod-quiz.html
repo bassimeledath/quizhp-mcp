@@ -1,0 +1,1241 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <title>iPod Quiz</title>
+  <link href="https://fonts.googleapis.com/css2?family=Belanosima:wght@400;600;700&family=Nunito+Sans:wght@400;500;600;700&family=Nunito:wght@400;500;600&display=swap" rel="stylesheet">
+  <!--
+  ╔══════════════════════════════════════════════════════════════════════════════╗
+  ║  iPod Quiz - Classic iPod-style MCQ game                                     ║
+  ║  Navigate with clickwheel, submit with center button                         ║
+  ╚══════════════════════════════════════════════════════════════════════════════╝
+  -->
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      touch-action: none;
+      -webkit-touch-callout: none;
+      -webkit-user-select: none;
+      user-select: none;
+    }
+    body {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      background: #1C1C1A;
+      font-family: 'Nunito Sans', system-ui, -apple-system, sans-serif;
+    }
+    #gameCanvas {
+      background: #16213e;
+      width: 100vw;
+      height: 100vh;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="gameCanvas"></canvas>
+
+  <script>
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 1: QUESTION PLACEHOLDER - DO NOT MODIFY FORMAT                    ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  const QUESTION = {
+    type: "mcq",
+    prompt: "Sample question text",
+    choices: [
+      { text: "This is sample answer A which is long enough to test text overflow", is_correct: true, explanation: "Why A is correct" },
+      { text: "This is sample answer B which is long enough to test text overflow", is_correct: false, explanation: "Why B is wrong" },
+      { text: "This is sample answer C which is long enough to test text overflow", is_correct: false, explanation: "Why C is wrong" },
+      { text: "This is sample answer D which is long enough to test text overflow", is_correct: false, explanation: "Why D is wrong" }
+    ],
+    isLastQuestion: false
+  };
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 2: ENGINE CORE (MOBILE) - DO NOT MODIFY                           ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  const canvas = document.getElementById('gameCanvas');
+  const ctx = canvas.getContext('2d');
+
+  const W = 360, H = 640;
+
+  let scaleX = 1;
+  let scaleY = 1;
+  let aspectRatio = 1;
+
+  let gameState = 'playing';
+  let gameResult = null;
+  let gameExplanation = '';
+  let endScreenTime = 0;
+  let confettiParticles = [];
+
+  // End screen buttons (dual button pattern)
+  const restartButton = { x: 20, y: H / 2 + 50, w: 155, h: 56 };
+  const nextButton = { x: 185, y: H / 2 + 50, w: 155, h: 56 };
+  const centeredRestartButton = { x: W / 2 - 100, y: H / 2 + 50, w: 200, h: 56 };
+
+  function resizeCanvas() {
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = window.innerWidth * dpr;
+    canvas.height = window.innerHeight * dpr;
+    canvas.style.width = window.innerWidth + 'px';
+    canvas.style.height = window.innerHeight + 'px';
+    scaleX = canvas.width / W;
+    scaleY = canvas.height / H;
+    aspectRatio = scaleX / scaleY;
+  }
+
+  const TEXT_SCALE_MIN = 0.75;
+  const TEXT_SCALE_MAX = 1.4;
+
+  function getTextScaleAdjustment() {
+    const baseScale = window.innerHeight / H;
+    const clampedScale = Math.min(TEXT_SCALE_MAX, Math.max(TEXT_SCALE_MIN, baseScale));
+    return clampedScale / baseScale;
+  }
+
+  function drawText(text, x, y, options = {}) {
+    const { font = "500 16px system-ui, sans-serif", color = '#F5F5F0', align = 'center', baseline = 'middle' } = options;
+    ctx.save();
+    ctx.translate(x, y);
+    const adj = getTextScaleAdjustment();
+    ctx.scale(adj / aspectRatio, adj);
+    ctx.font = font;
+    ctx.fillStyle = color;
+    ctx.textAlign = align;
+    ctx.textBaseline = baseline;
+    ctx.fillText(text, 0, 0);
+    ctx.restore();
+  }
+
+  function screenToLogical(screenX, screenY) {
+    const dpr = window.devicePixelRatio || 1;
+    const rect = canvas.getBoundingClientRect();
+    const canvasX = (screenX - rect.left) * dpr;
+    const canvasY = (screenY - rect.top) * dpr;
+    return {
+      x: canvasX / scaleX,
+      y: canvasY / scaleY
+    };
+  }
+
+  function pointInRect(px, py, rect) {
+    return px >= rect.x && px <= rect.x + rect.w &&
+           py >= rect.y && py <= rect.y + rect.h;
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // TEXT UTILITIES - From template-mobile.html
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  function wrapText(text, maxWidth, font, maxLines = 3) {
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.font = font;
+    const adj = getTextScaleAdjustment();
+    const maxRawWidth = maxWidth * aspectRatio / adj;
+    const words = text.split(' ');
+    const lines = [];
+    let currentLine = '';
+    words.forEach(word => {
+      const testLine = currentLine ? currentLine + ' ' + word : word;
+      if (ctx.measureText(testLine).width > maxRawWidth && currentLine) {
+        lines.push(currentLine);
+        currentLine = word;
+      } else {
+        currentLine = testLine;
+      }
+    });
+    if (currentLine) lines.push(currentLine);
+    ctx.restore();
+    return lines.slice(0, maxLines);
+  }
+
+  function findOptimalFontSize(options) {
+    const { texts, maxWidth, availableHeight, minFont = 10, maxFont = 20, itemPadding = 8, fontFamily = "'Nunito', sans-serif" } = options;
+    let bestFontSize = minFont;
+    let bestWrappedTexts = [];
+    for (let fontSize = maxFont; fontSize >= minFont; fontSize -= 0.5) {
+      const font = `${fontSize}px ${fontFamily}`;
+      const lineHeight = fontSize + 1;
+      let totalHeight = 0;
+      const wrappedTexts = [];
+      for (const text of texts) {
+        const lines = wrapText(text, maxWidth, font);
+        wrappedTexts.push(lines);
+        totalHeight += itemPadding + lines.length * lineHeight;
+      }
+      if (totalHeight <= availableHeight) {
+        bestFontSize = fontSize;
+        bestWrappedTexts = wrappedTexts;
+        break;
+      }
+      bestWrappedTexts = wrappedTexts;
+    }
+    return { fontSize: bestFontSize, wrappedTexts: bestWrappedTexts };
+  }
+
+  function createScaledUI(baseDimensions) {
+    const base = baseDimensions;
+    let scale = 1;
+    let dimensions = JSON.parse(JSON.stringify(base));
+    let offsetX = 0, offsetY = 0;
+    let effectiveHeight = base.height;
+
+    function scaleObject(baseObj) {
+      const scaled = {};
+      for (const key in baseObj) {
+        if (typeof baseObj[key] === 'object' && baseObj[key] !== null) {
+          scaled[key] = scaleObject(baseObj[key]);
+        } else if (typeof baseObj[key] === 'number') {
+          scaled[key] = baseObj[key] * scale;
+        } else {
+          scaled[key] = baseObj[key];
+        }
+      }
+      return scaled;
+    }
+
+    function update() {
+      const marginX = 20, marginY = 20;
+      const availableW = W - marginX * 2;
+      const availableH = H - marginY * 2;
+
+      // At wide aspect ratios (aspectRatio > 1), the wheel extends further down
+      // due to ellipse height compensation. Account for this in effective height.
+      const wheelRadius = base.wheel?.radius || 65;
+      const extraHeightNeeded = wheelRadius * 2 * Math.max(0, aspectRatio - 1);
+      effectiveHeight = base.height + extraHeightNeeded;
+
+      const scaleByWidth = availableW / base.width;
+      const scaleByHeight = availableH / effectiveHeight;
+      scale = Math.min(scaleByWidth, scaleByHeight, 1.5);
+      const scaledW = base.width * scale;
+      const scaledH = effectiveHeight * scale;
+      offsetX = (W - scaledW) / 2;
+      offsetY = (H - scaledH) / 2;
+      dimensions = scaleObject(base);
+      dimensions.offsetX = offsetX;
+      dimensions.offsetY = offsetY;
+    }
+
+    return {
+      get scale() { return scale; },
+      get dimensions() { return dimensions; },
+      get offsetX() { return offsetX; },
+      get offsetY() { return offsetY; },
+      get effectiveHeight() { return effectiveHeight; },
+      update,
+      s: (value) => value * scale,
+      x: (value) => offsetX + value * scale,
+      y: (value) => offsetY + value * scale
+    };
+  }
+
+  const engine = {
+    end(isCorrect, explanation) {
+      if (gameState === 'ended') return;
+      gameState = 'ended';
+      gameResult = isCorrect;
+      gameExplanation = explanation || '';
+      endScreenTime = 0;
+
+      if (isCorrect) {
+        for (let i = 0; i < 50; i++) {
+          confettiParticles.push({
+            x: W / 2,
+            y: H / 2,
+            vx: (Math.random() - 0.5) * 400,
+            vy: -Math.random() * 300 - 80,
+            size: 4 + Math.random() * 6,
+            color: ['#FFD700', '#FF6B6B', '#4ECDC4', '#95E1D3', '#F38181'][Math.floor(Math.random() * 5)],
+            rotation: Math.random() * Math.PI * 2,
+            rotationSpeed: (Math.random() - 0.5) * 10
+          });
+        }
+      }
+
+      if (window.parent && window.parent !== window) {
+        window.parent.postMessage({
+          type: 'quiz-end',
+          isCorrect: isCorrect,
+          explanation: explanation || ''
+        }, '*');
+      }
+    }
+  };
+
+  /** Draw a styled mobile button with pulse effect */
+  function drawMobileButton(rect, label, color, pulse) {
+    const textAdj = getTextScaleAdjustment();
+    const scale = pulse ? 1 + Math.sin(endScreenTime * 4) * 0.03 : 1;
+
+    ctx.save();
+    ctx.translate(rect.x + rect.w / 2, rect.y + rect.h / 2);
+    ctx.scale(scale, scale);
+    ctx.translate(-(rect.x + rect.w / 2), -(rect.y + rect.h / 2));
+
+    // Button shadow
+    ctx.shadowColor = `${color}66`;
+    ctx.shadowBlur = 12;
+    ctx.shadowOffsetY = 4;
+
+    // Button background
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.roundRect(rect.x, rect.y, rect.w, rect.h, 12);
+    ctx.fill();
+
+    ctx.shadowColor = 'transparent';
+
+    // Button text
+    ctx.save();
+    ctx.translate(rect.x + rect.w / 2, rect.y + rect.h / 2);
+    ctx.scale(textAdj / aspectRatio, textAdj);
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = 'bold 18px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, 0, 0);
+    ctx.restore();
+
+    ctx.restore();
+  }
+
+  /** STANDARD END SCREEN (MOBILE) - Dual button pattern */
+  function drawEndScreen(dt) {
+    endScreenTime += dt;
+
+    confettiParticles = confettiParticles.filter(p => {
+      p.vy += 600 * dt;
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.rotation += p.rotationSpeed * dt;
+      p.vx *= 0.99;
+      return p.y < H + 50;
+    });
+
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
+    ctx.fillRect(0, 0, W, H);
+
+    confettiParticles.forEach(p => {
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rotation);
+      ctx.fillStyle = p.color;
+      ctx.fillRect(-p.size / 2, -p.size / 4, p.size, p.size / 2);
+      ctx.restore();
+    });
+
+    const textAdj = getTextScaleAdjustment();
+    ctx.save();
+    ctx.translate(W / 2, H / 2 - 80);
+    ctx.scale(textAdj / aspectRatio, textAdj);
+    ctx.font = '64px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(gameResult ? '🎉' : '😢', 0, 0);
+    ctx.restore();
+
+    ctx.save();
+    ctx.translate(W / 2, H / 2 - 10);
+    ctx.scale(textAdj / aspectRatio, textAdj);
+    ctx.fillStyle = gameResult ? '#4ADE80' : '#F87171';
+    ctx.font = 'bold 32px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(gameResult ? 'Correct!' : 'Wrong!', 0, 0);
+    ctx.restore();
+
+    // Draw buttons based on result
+    if (gameResult) {
+      // Correct: show Restart + Next/Finish
+      drawMobileButton(restartButton, 'Restart', '#E87A3E', true);
+      const nextLabel = QUESTION.isLastQuestion ? 'Finish' : 'Next';
+      drawMobileButton(nextButton, nextLabel, '#4ECDC4', true);
+    } else {
+      // Wrong: show centered Restart only
+      drawMobileButton(centeredRestartButton, 'Restart', '#E87A3E', true);
+    }
+  }
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  POLISH: QuizHP Colors, Sounds & Animations                                ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+
+  // QuizHP Color Palette
+  const COLORS = {
+    bgPrimary: '#FAFAF7',
+    bgSurface: '#FFFFFF',
+    bgDark: '#1C1C1A',
+    textPrimary: '#2B2B28',
+    textSecondary: '#5A5A54',
+    textLight: '#F5F5F0',
+    orange: '#E87A3E',
+    orangeHover: '#D66B31',
+    amber: '#F5A742',
+    cyan: '#4ECDC4',
+    cyanHover: '#45B8B0',
+    success: '#6BBF59',
+    error: '#E85D4A',
+    borderSubtle: '#E6E6E0',
+    borderStrong: '#D4D4CC'
+  };
+
+  // Reduced motion preference
+  const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  // Web Audio API for sounds
+  let audioCtx = null;
+
+  function initAudio() {
+    if (!audioCtx) {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    if (audioCtx.state === 'suspended') {
+      audioCtx.resume();
+    }
+  }
+
+  function playSound(type) {
+    if (!audioCtx) return;
+    try {
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+
+      const now = audioCtx.currentTime;
+
+      if (type === 'click') {
+        // Click for wheel navigation
+        osc.frequency.setValueAtTime(600, now);
+        osc.frequency.exponentialRampToValueAtTime(400, now + 0.2);
+        gain.gain.setValueAtTime(0.18, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.2);
+        osc.start(now);
+        osc.stop(now + 0.2);
+      } else if (type === 'select') {
+        // Satisfying select sound for center button
+        osc.frequency.setValueAtTime(523, now);
+        osc.frequency.setValueAtTime(659, now + 0.08);
+        gain.gain.setValueAtTime(0.15, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.2);
+        osc.start(now);
+        osc.stop(now + 0.2);
+      } else if (type === 'correct') {
+        // Ascending cheerful ding
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(523, now);
+        osc.frequency.setValueAtTime(659, now + 0.1);
+        osc.frequency.setValueAtTime(784, now + 0.2);
+        gain.gain.setValueAtTime(0.25, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.4);
+        osc.start(now);
+        osc.stop(now + 0.4);
+      } else if (type === 'wrong') {
+        // Sympathetic buzz (not harsh)
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(200, now);
+        osc.frequency.exponentialRampToValueAtTime(150, now + 0.2);
+        gain.gain.setValueAtTime(0.15, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.25);
+        osc.start(now);
+        osc.stop(now + 0.25);
+      }
+    } catch (e) {
+      // Silently fail if audio doesn't work
+    }
+  }
+
+  // Feedback particles for correct/wrong answers
+  let feedbackParticles = [];
+
+  function spawnFeedbackParticles(x, y, isCorrect) {
+    if (prefersReducedMotion) return;
+    const colors = isCorrect
+      ? [COLORS.success, COLORS.cyan, COLORS.amber, COLORS.orange]
+      : [COLORS.error, '#D04A3A', '#B83A2A'];
+    const count = isCorrect ? 25 : 12;
+
+    for (let i = 0; i < count; i++) {
+      feedbackParticles.push({
+        x, y,
+        vx: (Math.random() - 0.5) * (isCorrect ? 350 : 200),
+        vy: isCorrect ? -Math.random() * 250 - 80 : (Math.random() - 0.5) * 150,
+        color: colors[Math.floor(Math.random() * colors.length)],
+        size: Math.random() * 6 + 3,
+        rotation: Math.random() * Math.PI * 2,
+        rotationSpeed: (Math.random() - 0.5) * 8,
+        gravity: isCorrect ? 500 : 300,
+        alpha: 1,
+        life: 1
+      });
+    }
+  }
+
+  function updateFeedbackParticles(dt) {
+    feedbackParticles = feedbackParticles.filter(p => {
+      p.vy += p.gravity * dt;
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.rotation += p.rotationSpeed * dt;
+      p.life -= dt * 1.2;
+      p.alpha = Math.max(0, p.life);
+      return p.life > 0 && p.y < H + 50;
+    });
+  }
+
+  function drawFeedbackParticles() {
+    feedbackParticles.forEach(p => {
+      ctx.save();
+      ctx.globalAlpha = p.alpha;
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rotation);
+      ctx.fillStyle = p.color;
+      ctx.fillRect(-p.size / 2, -p.size / 4, p.size, p.size / 2);
+      ctx.restore();
+    });
+  }
+
+  // Entrance animation state
+  let entranceProgress = 0;
+  let menuEntranceProgress = [];
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 3: iPod Quiz GAME CODE                                            ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+
+  // === iPod UI using createScaledUI ===
+  // Define base dimensions once, scaling handled automatically
+  // Screen height increased to fit 4 answers at 16px minimum font
+  const ui = createScaledUI({
+    width: 220,
+    height: 390,
+    cornerRadius: 20,
+    screen: { x: 15, y: 18, w: 190, h: 175 },
+    wheel: { y: 180, radius: 65, innerRadius: 24 }  // y is offset from screen bottom
+  });
+
+  // Cached geometry (updated on resize only)
+  let cachedIPOD = null;
+  let cachedSCREEN = null;
+  let cachedWHEEL = null;
+
+  // Cached gradients (updated on resize only)
+  let cachedBgGrad = null;
+  let cachedBodyGrad = null;
+  let cachedScreenGrad = null;
+  let cachedHeaderGrad = null;
+  let cachedWheelGrad = null;
+  let cachedCenterGrad = null;
+
+  function getIPOD() { return cachedIPOD; }
+  function getSCREEN() { return cachedSCREEN; }
+  function getWHEEL() { return cachedWHEEL; }
+
+  function updateResponsiveDimensions() {
+    ui.update();
+
+    // Cache iPod dimensions
+    cachedIPOD = {
+      x: ui.offsetX,
+      y: ui.offsetY,
+      w: ui.s(220),
+      h: ui.s(ui.effectiveHeight),
+      cornerRadius: ui.s(20)
+    };
+
+    // Cache screen dimensions
+    cachedSCREEN = {
+      x: ui.x(15),
+      y: ui.y(18),
+      w: ui.s(190),
+      h: ui.s(175)
+    };
+
+    // Cache wheel dimensions
+    const outerRadius = ui.s(65);
+    const baseGap = ui.s(15);
+    const extraGap = outerRadius * Math.max(0, aspectRatio - 1);
+    cachedWHEEL = {
+      cx: ui.x(110),
+      cy: cachedSCREEN.y + cachedSCREEN.h + baseGap + extraGap + outerRadius,
+      outerRadius: outerRadius,
+      innerRadius: ui.s(24)
+    };
+
+    // Cache gradients
+    cachedBgGrad = ctx.createLinearGradient(0, 0, 0, H);
+    cachedBgGrad.addColorStop(0, '#2A2A27');
+    cachedBgGrad.addColorStop(1, COLORS.bgDark);
+
+    cachedBodyGrad = ctx.createLinearGradient(cachedIPOD.x, cachedIPOD.y, cachedIPOD.x + cachedIPOD.w, cachedIPOD.y + cachedIPOD.h);
+    cachedBodyGrad.addColorStop(0, '#FFFFFF');
+    cachedBodyGrad.addColorStop(0.3, '#F8F8F8');
+    cachedBodyGrad.addColorStop(0.7, '#ECECEC');
+    cachedBodyGrad.addColorStop(1, '#E0E0E0');
+
+    cachedScreenGrad = ctx.createLinearGradient(cachedSCREEN.x, cachedSCREEN.y, cachedSCREEN.x, cachedSCREEN.y + cachedSCREEN.h);
+    cachedScreenGrad.addColorStop(0, '#B8C6D1');
+    cachedScreenGrad.addColorStop(1, '#9EAAB5');
+
+    const headerHeight = ui.s(20);
+    cachedHeaderGrad = ctx.createLinearGradient(cachedSCREEN.x, cachedSCREEN.y, cachedSCREEN.x, cachedSCREEN.y + headerHeight);
+    cachedHeaderGrad.addColorStop(0, COLORS.orange);
+    cachedHeaderGrad.addColorStop(1, COLORS.orangeHover);
+
+    cachedWheelGrad = ctx.createRadialGradient(
+      cachedWHEEL.cx, cachedWHEEL.cy - ui.s(20), 0,
+      cachedWHEEL.cx, cachedWHEEL.cy, cachedWHEEL.outerRadius
+    );
+    cachedWheelGrad.addColorStop(0, '#F5F5F5');
+    cachedWheelGrad.addColorStop(0.5, '#E8E8E8');
+    cachedWheelGrad.addColorStop(1, '#D8D8D8');
+
+    cachedCenterGrad = ctx.createRadialGradient(
+      cachedWHEEL.cx, cachedWHEEL.cy - ui.s(10), 0,
+      cachedWHEEL.cx, cachedWHEEL.cy, cachedWHEEL.innerRadius
+    );
+    cachedCenterGrad.addColorStop(0, '#FFFFFF');
+    cachedCenterGrad.addColorStop(0.6, '#F0F0F0');
+    cachedCenterGrad.addColorStop(1, '#E0E0E0');
+  }
+
+  // === Game state ===
+  let selectedIndex = 0;
+  let menuItems = [];
+  let touchStartAngle = null;
+  let lastAngle = null;
+  let accumulatedRotation = 0;
+  let wheelHighlight = null; // 'up', 'down', 'center', or null
+  let selectPulse = 0;
+  let wheelTouchActive = false; // Track if wheel is being touched
+  let wheelGlowIntensity = 0; // For wheel touch feedback glow
+  let selectionPulseTime = 0; // For selected item pulse animation
+  let lastSelectedIndex = -1; // Track selection changes for sound
+  let feedbackState = null; // 'correct', 'wrong', or null
+  let feedbackTimer = 0;
+
+  function initGame() {
+    selectedIndex = 0;
+    accumulatedRotation = 0;
+    touchStartAngle = null;
+    lastAngle = null;
+    wheelHighlight = null;
+    selectPulse = 0;
+    wheelTouchActive = false;
+    wheelGlowIntensity = 0;
+    selectionPulseTime = 0;
+    lastSelectedIndex = -1;
+    feedbackState = null;
+    feedbackTimer = 0;
+    feedbackParticles = [];
+
+    // Reset entrance animation
+    entranceProgress = prefersReducedMotion ? 1 : 0;
+    menuEntranceProgress = QUESTION.choices.map(() => prefersReducedMotion ? 1 : 0);
+
+    // Create menu items from choices
+    menuItems = QUESTION.choices.map((choice, i) => ({
+      index: i,
+      choice: choice,
+      lines: []
+    }));
+
+    // Calculate initial text wrapping
+    recalculateTextWrap();
+  }
+
+  // Current menu font size (updated by recalculateTextWrap)
+  let currentMenuFontSize = 16;
+
+  // Recalculate text wrapping using findOptimalFontSize utility
+  function recalculateTextWrap() {
+    if (!menuItems.length) return;
+
+    const screen = getSCREEN();
+    const headerHeight = ui.s(20);
+    const textMaxWidth = screen.w - ui.s(40); // letter prefix + arrow margin
+    const availableHeight = screen.h - headerHeight;
+
+    // Use template utility to find optimal font size
+    const { fontSize, wrappedTexts } = findOptimalFontSize({
+      texts: QUESTION.choices.map(c => c.text),
+      maxWidth: textMaxWidth,
+      availableHeight: availableHeight,
+      minFont: 14,
+      maxFont: Math.min(20, 16 * ui.scale),
+      itemPadding: 6
+    });
+
+    currentMenuFontSize = fontSize;
+
+    // Apply wrapped texts to menu items
+    menuItems.forEach((item, i) => {
+      item.lines = wrappedTexts[i];
+    });
+  }
+
+  function updateGame(dt) {
+    if (gameState !== 'playing') return;
+
+    // Update select pulse animation
+    selectPulse += dt * 4;
+
+    // Update entrance animation for iPod
+    if (entranceProgress < 1) {
+      entranceProgress = Math.min(1, entranceProgress + dt * 2.5);
+    }
+
+    // Update staggered entrance for menu items
+    menuEntranceProgress = menuEntranceProgress.map((progress, i) => {
+      const delay = 0.15 + i * 0.08; // Stagger delay
+      if (entranceProgress > delay && progress < 1) {
+        return Math.min(1, progress + dt * 4);
+      }
+      return progress;
+    });
+
+    // Update wheel glow intensity
+    if (wheelTouchActive) {
+      wheelGlowIntensity = Math.min(1, wheelGlowIntensity + dt * 8);
+    } else {
+      wheelGlowIntensity = Math.max(0, wheelGlowIntensity - dt * 4);
+    }
+
+    // Update selection pulse time
+    selectionPulseTime += dt * 3;
+
+    // Play click sound when selection changes
+    if (selectedIndex !== lastSelectedIndex && lastSelectedIndex !== -1) {
+      playSound('click');
+    }
+    lastSelectedIndex = selectedIndex;
+
+    // Update feedback timer and particles
+    if (feedbackState) {
+      feedbackTimer += dt;
+    }
+    updateFeedbackParticles(dt);
+  }
+
+  function drawGame() {
+    // Background gradient - using cached gradient
+    ctx.fillStyle = cachedBgGrad;
+    ctx.fillRect(0, 0, W, H);
+
+    // Apply entrance animation transform
+    ctx.save();
+    if (entranceProgress < 1) {
+      // Spring easing for bounce effect
+      const t = entranceProgress;
+      const spring = 1 + Math.sin(t * Math.PI * 1.5) * 0.15 * (1 - t);
+      const scale = t * spring;
+      const alpha = t;
+
+      ctx.globalAlpha = alpha;
+      ctx.translate(W / 2, H / 2);
+      ctx.scale(scale, scale);
+      ctx.translate(-W / 2, -H / 2);
+    }
+
+    // Draw iPod body
+    drawIPodBody();
+
+    // Draw screen with menu
+    drawScreen();
+
+    // Draw clickwheel
+    drawClickwheel();
+
+    ctx.restore();
+
+    // Draw feedback particles on top
+    drawFeedbackParticles();
+  }
+
+  function drawIPodBody() {
+    const IPOD = getIPOD();
+
+    // Main body - using cached gradient (shadow removed for performance)
+    ctx.fillStyle = cachedBodyGrad;
+    ctx.beginPath();
+    ctx.roundRect(IPOD.x, IPOD.y, IPOD.w, IPOD.h, IPOD.cornerRadius);
+    ctx.fill();
+
+    // Subtle border
+    ctx.strokeStyle = '#CCCCCC';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+  }
+
+  function drawScreen() {
+    const SCREEN = getSCREEN();
+    const bezelWidth = ui.s(3);
+    const headerHeight = ui.s(20);
+
+    // Screen bezel
+    ctx.fillStyle = COLORS.bgDark;
+    ctx.beginPath();
+    ctx.roundRect(SCREEN.x - bezelWidth, SCREEN.y - bezelWidth, SCREEN.w + bezelWidth * 2, SCREEN.h + bezelWidth * 2, ui.s(4));
+    ctx.fill();
+
+    // Screen background - using cached gradient
+    ctx.fillStyle = cachedScreenGrad;
+    ctx.beginPath();
+    ctx.roundRect(SCREEN.x, SCREEN.y, SCREEN.w, SCREEN.h, ui.s(2));
+    ctx.fill();
+
+    // Header bar - using cached gradient
+    ctx.fillStyle = cachedHeaderGrad;
+    ctx.fillRect(SCREEN.x, SCREEN.y, SCREEN.w, headerHeight);
+
+    // Header text - "Quiz"
+    const headerFontSize = Math.max(10, ui.s(12));
+    drawText('Quiz', SCREEN.x + SCREEN.w / 2, SCREEN.y + headerHeight / 2, {
+      font: `bold ${headerFontSize}px 'Nunito Sans', sans-serif`,
+      color: '#FFFFFF',
+      align: 'center',
+      baseline: 'middle'
+    });
+
+    // Draw menu items with wrapped text
+    const ITEM_PADDING = 8;
+    const dynamicLineHeight = currentMenuFontSize + 1;
+    const startY = SCREEN.y + headerHeight + ui.s(2);
+
+    // Pre-calculate item heights and Y positions
+    const itemHeights = menuItems.map(item => ITEM_PADDING + item.lines.length * dynamicLineHeight);
+    const itemYPositions = [];
+    let currentY = startY;
+    for (let i = 0; i < menuItems.length; i++) {
+      itemYPositions.push(currentY);
+      currentY += itemHeights[i];
+    }
+
+    // Clip menu items to screen area (below header)
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(SCREEN.x, SCREEN.y + headerHeight, SCREEN.w, SCREEN.h - headerHeight);
+    ctx.clip();
+
+    menuItems.forEach((item, i) => {
+      const itemY = itemYPositions[i];
+      const itemHeight = itemHeights[i];
+
+      // Get menu entrance progress
+      const menuProgress = menuEntranceProgress[i] || 0;
+      if (menuProgress <= 0) return;
+
+      ctx.save();
+
+      // Apply entrance animation
+      if (menuProgress < 1) {
+        const t = menuProgress;
+        const spring = 1 + Math.sin(t * Math.PI * 2) * 0.1 * (1 - t);
+        const scale = t * spring;
+        ctx.globalAlpha = t;
+        ctx.translate(SCREEN.x + SCREEN.w / 2, itemY + itemHeight / 2);
+        ctx.scale(scale, scale);
+        ctx.translate(-(SCREEN.x + SCREEN.w / 2), -(itemY + itemHeight / 2));
+      }
+
+      // Selected item highlight with pulse animation
+      if (i === selectedIndex) {
+        const pulseIntensity = 0.08 + Math.sin(selectionPulseTime) * 0.04;
+
+        let highlightColor1, highlightColor2;
+        if (feedbackState === 'correct') {
+          highlightColor1 = COLORS.success;
+          highlightColor2 = '#5AAF4A';
+        } else if (feedbackState === 'wrong') {
+          highlightColor1 = COLORS.error;
+          highlightColor2 = '#D04A3A';
+        } else {
+          highlightColor1 = COLORS.cyan;
+          highlightColor2 = COLORS.cyanHover;
+        }
+
+        const highlightGrad = ctx.createLinearGradient(SCREEN.x, itemY, SCREEN.x, itemY + itemHeight - 2);
+        highlightGrad.addColorStop(0, highlightColor1);
+        highlightGrad.addColorStop(1, highlightColor2);
+        ctx.fillStyle = highlightGrad;
+
+        const pulseScale = 1 + pulseIntensity * (feedbackState ? 0.5 : 1);
+        ctx.save();
+        ctx.translate(SCREEN.x + SCREEN.w / 2, itemY + itemHeight / 2 - 1);
+        ctx.scale(pulseScale, pulseScale);
+        ctx.translate(-(SCREEN.x + SCREEN.w / 2), -(itemY + itemHeight / 2 - 1));
+        ctx.fillRect(SCREEN.x + 2, itemY, SCREEN.w - 4, itemHeight - 2);
+        ctx.restore();
+      }
+
+      // Item letter (A, B, C, D)
+      const letter = String.fromCharCode(65 + i);
+      const letterX = SCREEN.x + ui.s(8);
+      const textX = SCREEN.x + ui.s(24);
+      const textTopPadding = 4;
+
+      drawText(letter + '.', letterX, itemY + textTopPadding, {
+        font: `bold ${currentMenuFontSize}px 'Nunito Sans', sans-serif`,
+        color: i === selectedIndex ? '#FFFFFF' : COLORS.textPrimary,
+        align: 'left',
+        baseline: 'top'
+      });
+
+      // Draw wrapped text lines
+      item.lines.forEach((line, lineIdx) => {
+        drawText(line, textX, itemY + textTopPadding + lineIdx * dynamicLineHeight, {
+          font: `${currentMenuFontSize}px 'Nunito', sans-serif`,
+          color: i === selectedIndex ? '#FFFFFF' : COLORS.textPrimary,
+          align: 'left',
+          baseline: 'top'
+        });
+      });
+
+      // Right arrow for selected item
+      if (i === selectedIndex) {
+        const arrowFontSize = Math.max(12, ui.s(14));
+        drawText('>', SCREEN.x + SCREEN.w - ui.s(8), itemY + itemHeight / 2, {
+          font: `bold ${arrowFontSize}px 'Nunito Sans', sans-serif`,
+          color: '#FFFFFF',
+          align: 'center',
+          baseline: 'middle'
+        });
+      }
+
+      ctx.restore();
+    });
+
+    // Restore from screen clipping
+    ctx.restore();
+  }
+
+  function drawClickwheel() {
+    const WHEEL = getWHEEL();
+
+    // Outer wheel - using cached gradient (shadows/glow removed for performance)
+    ctx.fillStyle = cachedWheelGrad;
+    ctx.beginPath();
+    ctx.ellipse(WHEEL.cx, WHEEL.cy, WHEEL.outerRadius, WHEEL.outerRadius * aspectRatio, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Wheel border
+    ctx.strokeStyle = COLORS.borderSubtle;
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    // Draw touch zones (subtle labels)
+    const labelColor = '#666666';
+    const wheelLabelSize = Math.max(9, ui.s(11));
+
+    // MENU at top
+    drawText('MENU', WHEEL.cx, WHEEL.cy - WHEEL.outerRadius * aspectRatio * 0.65, {
+      font: `bold ${wheelLabelSize}px 'Nunito Sans', sans-serif`,
+      color: labelColor,
+      align: 'center',
+      baseline: 'middle'
+    });
+
+    // Forward/back symbols on sides
+    drawText('<<', WHEEL.cx - WHEEL.outerRadius * 0.65, WHEEL.cy, {
+      font: `bold ${wheelLabelSize}px 'Nunito Sans', sans-serif`,
+      color: labelColor,
+      align: 'center',
+      baseline: 'middle'
+    });
+
+    drawText('>>', WHEEL.cx + WHEEL.outerRadius * 0.65, WHEEL.cy, {
+      font: `bold ${wheelLabelSize}px 'Nunito Sans', sans-serif`,
+      color: labelColor,
+      align: 'center',
+      baseline: 'middle'
+    });
+
+    // Play/Pause at bottom
+    drawText('PLAY', WHEEL.cx, WHEEL.cy + WHEEL.outerRadius * aspectRatio * 0.65, {
+      font: `bold ${wheelLabelSize}px 'Nunito Sans', sans-serif`,
+      color: labelColor,
+      align: 'center',
+      baseline: 'middle'
+    });
+
+    // Center button - using cached gradient (pulse effect removed for performance)
+    ctx.fillStyle = wheelHighlight === 'center' ? COLORS.orange : cachedCenterGrad;
+    ctx.beginPath();
+    ctx.ellipse(WHEEL.cx, WHEEL.cy, WHEEL.innerRadius, WHEEL.innerRadius * aspectRatio, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.strokeStyle = wheelHighlight === 'center' ? COLORS.orange : COLORS.borderSubtle;
+    ctx.lineWidth = wheelHighlight === 'center' ? 2 : 1;
+    ctx.stroke();
+  }
+
+  function getAngleFromCenter(x, y) {
+    const WHEEL = getWHEEL();
+    const dx = x - WHEEL.cx;
+    const dy = (y - WHEEL.cy) / aspectRatio; // Compensate for aspect ratio
+    return Math.atan2(dy, dx);
+  }
+
+  function getDistanceFromWheelCenter(x, y) {
+    const WHEEL = getWHEEL();
+    const dx = x - WHEEL.cx;
+    const dy = (y - WHEEL.cy) / aspectRatio;
+    return Math.sqrt(dx * dx + dy * dy);
+  }
+
+  function normalizeAngle(angle) {
+    while (angle > Math.PI) angle -= Math.PI * 2;
+    while (angle < -Math.PI) angle += Math.PI * 2;
+    return angle;
+  }
+
+  function handleTouch(e, type) {
+    if (gameState !== 'playing') return;
+
+    const touch = e.touches[0] || e.changedTouches[0];
+    if (!touch) return;
+
+    const { x, y } = screenToLogical(touch.clientX, touch.clientY);
+    const WHEEL = getWHEEL();
+    const dist = getDistanceFromWheelCenter(x, y);
+
+    if (type === 'start') {
+      // Check if touch is on the wheel
+      if (dist <= WHEEL.outerRadius) {
+        wheelTouchActive = true;
+
+        if (dist <= WHEEL.innerRadius) {
+          // Center button pressed
+          wheelHighlight = 'center';
+          playSound('select');
+        } else {
+          // On the wheel ring - start tracking rotation
+          touchStartAngle = getAngleFromCenter(x, y);
+          lastAngle = touchStartAngle;
+          accumulatedRotation = 0;
+        }
+      }
+    } else if (type === 'move') {
+      if (touchStartAngle !== null) {
+        const currentAngle = getAngleFromCenter(x, y);
+        let deltaAngle = normalizeAngle(currentAngle - lastAngle);
+
+        accumulatedRotation += deltaAngle;
+        lastAngle = currentAngle;
+
+        // Threshold for changing selection (about 45 degrees)
+        const threshold = Math.PI / 4;
+
+        if (accumulatedRotation > threshold) {
+          // Clockwise - move down (wrap to top)
+          selectedIndex = (selectedIndex + 1) % menuItems.length;
+          accumulatedRotation = 0;
+        } else if (accumulatedRotation < -threshold) {
+          // Counter-clockwise - move up (wrap to bottom)
+          selectedIndex = (selectedIndex - 1 + menuItems.length) % menuItems.length;
+          accumulatedRotation = 0;
+        }
+      }
+    } else if (type === 'end') {
+      wheelTouchActive = false;
+
+      if (wheelHighlight === 'center') {
+        // Submit answer with visual feedback
+        const selectedChoice = menuItems[selectedIndex].choice;
+        const isCorrect = selectedChoice.is_correct;
+
+        // Set feedback state for visual display
+        feedbackState = isCorrect ? 'correct' : 'wrong';
+        feedbackTimer = 0;
+
+        // Play sound
+        playSound(isCorrect ? 'correct' : 'wrong');
+
+        // Spawn particles at screen center
+        const SCREEN = getSCREEN();
+        const itemHeight = ui.s(50);
+        const startY = SCREEN.y + ui.s(28);
+        const itemY = startY + selectedIndex * itemHeight;
+        spawnFeedbackParticles(SCREEN.x + SCREEN.w / 2, itemY + itemHeight / 2, isCorrect);
+
+        // Delay engine.end slightly to show feedback
+        setTimeout(() => {
+          engine.end(isCorrect, selectedChoice.explanation);
+        }, 350);
+      }
+
+      // Also check for tap on wheel quadrants (up/down navigation)
+      if (touchStartAngle !== null && Math.abs(accumulatedRotation) < 0.1) {
+        // This was a tap, not a swipe
+        const angle = getAngleFromCenter(x, y);
+
+        // Top quadrant (-3pi/4 to -pi/4) = up (wrap to bottom)
+        if (angle > -Math.PI * 0.75 && angle < -Math.PI * 0.25) {
+          selectedIndex = (selectedIndex - 1 + menuItems.length) % menuItems.length;
+        }
+        // Bottom quadrant (pi/4 to 3pi/4) = down (wrap to top)
+        else if (angle > Math.PI * 0.25 && angle < Math.PI * 0.75) {
+          selectedIndex = (selectedIndex + 1) % menuItems.length;
+        }
+      }
+
+      // Reset tracking
+      touchStartAngle = null;
+      lastAngle = null;
+      wheelHighlight = null;
+      accumulatedRotation = 0;
+    }
+  }
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 4: GAME LOOP - DO NOT MODIFY                                      ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  let lastTime = performance.now();
+
+  function gameLoop(now) {
+    const dt = Math.min((now - lastTime) / 1000, 0.05);
+    lastTime = now;
+
+    ctx.setTransform(scaleX, 0, 0, scaleY, 0, 0);
+
+    if (gameState === 'playing') {
+      updateGame(dt);
+      drawGame();
+    } else {
+      drawGame();
+      drawEndScreen(dt);
+    }
+
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+    requestAnimationFrame(gameLoop);
+  }
+
+  function onTouchStart(e) {
+    e.preventDefault();
+    initAudio(); // Initialize audio on first touch
+    if (gameState === 'ended') {
+      const touch = e.touches[0];
+      const { x, y } = screenToLogical(touch.clientX, touch.clientY);
+
+      if (gameResult) {
+        // Correct answer: check both buttons
+        if (pointInRect(x, y, restartButton)) {
+          gameState = 'playing';
+          gameResult = null;
+          gameExplanation = '';
+          confettiParticles = [];
+          initGame();
+          return;
+        }
+        if (pointInRect(x, y, nextButton)) {
+          // Notify parent to go to next question
+          if (window.parent && window.parent !== window) {
+            window.parent.postMessage({ type: 'quiz-next' }, '*');
+          }
+          return;
+        }
+      } else {
+        // Wrong answer: check centered restart button
+        if (pointInRect(x, y, centeredRestartButton)) {
+          gameState = 'playing';
+          gameResult = null;
+          gameExplanation = '';
+          confettiParticles = [];
+          initGame();
+          return;
+        }
+      }
+    }
+    handleTouch(e, 'start');
+  }
+
+  function onTouchMove(e) {
+    e.preventDefault();
+    handleTouch(e, 'move');
+  }
+
+  function onTouchEnd(e) {
+    e.preventDefault();
+    handleTouch(e, 'end');
+  }
+
+  canvas.addEventListener('touchstart', onTouchStart, { passive: false });
+  canvas.addEventListener('touchmove', onTouchMove, { passive: false });
+  canvas.addEventListener('touchend', onTouchEnd, { passive: false });
+
+  // Mouse support for testing
+  let mouseDown = false;
+  canvas.addEventListener('mousedown', (e) => {
+    mouseDown = true;
+    initAudio(); // Initialize audio on mouse interaction too
+    const fakeTouch = { touches: [{ clientX: e.clientX, clientY: e.clientY }], changedTouches: [{ clientX: e.clientX, clientY: e.clientY }] };
+    onTouchStart(fakeTouch);
+  });
+
+  canvas.addEventListener('mousemove', (e) => {
+    if (mouseDown) {
+      const fakeTouch = { touches: [{ clientX: e.clientX, clientY: e.clientY }], changedTouches: [{ clientX: e.clientX, clientY: e.clientY }] };
+      handleTouch(fakeTouch, 'move');
+    }
+  });
+
+  canvas.addEventListener('mouseup', (e) => {
+    mouseDown = false;
+    wheelTouchActive = false; // Reset touch state for glow animation
+    const fakeTouch = { touches: [], changedTouches: [{ clientX: e.clientX, clientY: e.clientY }] };
+    onTouchEnd(fakeTouch);
+  });
+
+  // Cursor change handler for end screen buttons
+  canvas.addEventListener('mousemove', (e) => {
+    if (gameState !== 'ended') {
+      canvas.style.cursor = 'default';
+      return;
+    }
+    const { x, y } = screenToLogical(e.clientX, e.clientY);
+    if (gameResult) {
+      if (pointInRect(x, y, restartButton) || pointInRect(x, y, nextButton)) {
+        canvas.style.cursor = 'pointer';
+        return;
+      }
+    } else {
+      if (pointInRect(x, y, centeredRestartButton)) {
+        canvas.style.cursor = 'pointer';
+        return;
+      }
+    }
+    canvas.style.cursor = 'default';
+  });
+
+  window.addEventListener('resize', () => {
+    resizeCanvas();
+    updateResponsiveDimensions();
+    recalculateTextWrap();
+  });
+  window.addEventListener('orientationchange', () => {
+    setTimeout(() => {
+      resizeCanvas();
+      updateResponsiveDimensions();
+      recalculateTextWrap();
+    }, 100);
+  });
+
+  document.body.addEventListener('touchmove', (e) => e.preventDefault(), { passive: false });
+
+  resizeCanvas();
+  updateResponsiveDimensions();
+  initGame();
+  requestAnimationFrame(gameLoop);
+  </script>
+</body>
+</html>

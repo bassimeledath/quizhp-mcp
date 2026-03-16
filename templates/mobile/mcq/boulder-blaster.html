@@ -1,0 +1,1446 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <title>Boulder Blaster</title>
+  <link href="https://fonts.googleapis.com/css2?family=Belanosima:wght@400;600;700&family=Nunito+Sans:wght@400;500;600;700&family=Nunito:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      touch-action: none;
+      -webkit-touch-callout: none;
+      -webkit-user-select: none;
+      user-select: none;
+    }
+    body {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      background: #1a1a2e;
+      font-family: system-ui, -apple-system, sans-serif;
+    }
+    #gameCanvas {
+      background: #16213e;
+      width: 100vw;
+      height: 100vh;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="gameCanvas"></canvas>
+
+  <script>
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 1: QUESTION PLACEHOLDER - DO NOT MODIFY FORMAT                    ║
+  // ║  Platform replaces this at runtime. Use these exact 60-char answers.       ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  const QUESTION = {
+    type: "mcq",
+    prompt: "Sample question text",
+    choices: [
+      { text: "This is sample answer A which is long enough to test text overflow", is_correct: true, explanation: "Why A is correct" },
+      { text: "This is sample answer B which is long enough to test text overflow", is_correct: false, explanation: "Why B is wrong" },
+      { text: "This is sample answer C which is long enough to test text overflow", is_correct: false, explanation: "Why C is wrong" },
+      { text: "This is sample answer D which is long enough to test text overflow", is_correct: false, explanation: "Why D is wrong" }
+    ],
+    isLastQuestion: false
+  };
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 2: ENGINE CORE (MOBILE) - DO NOT MODIFY                           ║
+  // ║  Non-uniform scaling (fills container), touch input, tap-to-restart.       ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  const canvas = document.getElementById('gameCanvas');
+  const ctx = canvas.getContext('2d');
+
+  // Logical dimensions (game code works in this coordinate space)
+  const W = 360, H = 640;
+
+  // Scaling state (computed on resize)
+  let scaleX = 1;
+  let scaleY = 1;
+  let aspectRatio = 1;  // scaleX/scaleY - use for proportional shapes
+
+  // Game state
+  let gameState = 'playing'; // 'playing' | 'ended'
+  let gameResult = null;     // true (correct) | false (wrong)
+  let gameExplanation = '';
+  let endScreenTime = 0;
+  let confettiParticles = [];
+
+  // End screen button bounds (logical coordinates)
+  const restartButton = { x: 20, y: H / 2 + 50, w: 155, h: 56 };
+  const nextButton = { x: 185, y: H / 2 + 50, w: 155, h: 56 };
+  // Centered restart button for wrong answers
+  const centeredRestartButton = { x: W / 2 - 100, y: H / 2 + 50, w: 200, h: 56 };
+
+  /** Draw a styled button with aspect-ratio aware text */
+  function drawMobileButton(rect, label, color, pulse) {
+    const textAdj = getTextScaleAdjustment();
+    const p = pulse ? 1 + Math.sin(endScreenTime * 4) * 0.03 : 1;
+
+    ctx.save();
+    ctx.translate(rect.x + rect.w / 2, rect.y + rect.h / 2);
+    ctx.scale(p, p);
+    ctx.translate(-(rect.x + rect.w / 2), -(rect.y + rect.h / 2));
+
+    // Button background
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.roundRect(rect.x, rect.y, rect.w, rect.h, 12);
+    ctx.fill();
+
+    // Button text (aspect-ratio aware)
+    ctx.save();
+    ctx.translate(rect.x + rect.w / 2, rect.y + rect.h / 2);
+    ctx.scale(textAdj / aspectRatio, textAdj);
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = 'bold 18px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, 0, 0);
+    ctx.restore();
+
+    ctx.restore();
+  }
+
+  /**
+   * Resize canvas to fill viewport completely (no letterboxing).
+   * Uses non-uniform scaling - game code works in 360×640 logical space.
+   * Use aspectRatio to draw proportionally correct shapes.
+   */
+  function resizeCanvas() {
+    const dpr = window.devicePixelRatio || 1;
+
+    // Physical canvas size (actual pixels)
+    canvas.width = window.innerWidth * dpr;
+    canvas.height = window.innerHeight * dpr;
+
+    // CSS size (fills viewport)
+    canvas.style.width = window.innerWidth + 'px';
+    canvas.style.height = window.innerHeight + 'px';
+
+    // Non-uniform scaling to fill entire canvas
+    scaleX = canvas.width / W;
+    scaleY = canvas.height / H;
+
+    // Aspect ratio for proportional shape drawing
+    // >1 means container is wider than logical space
+    // <1 means container is taller than logical space
+    aspectRatio = scaleX / scaleY;
+
+    // Recalculate text sizing on resize (implement this in SECTION 3)
+    if (typeof recalculateTextSizing === 'function') {
+      recalculateTextSizing();
+    }
+  }
+
+  // === ASPECT-RATIO-AWARE TEXT WITH CLAMPED SCALING ===
+  // Text gets stretched by non-uniform scaling, so we compensate.
+  // Also clamp the effective scale to keep text legible at all sizes.
+  const TEXT_SCALE_MIN = 0.75;
+  const TEXT_SCALE_MAX = 1.4;
+
+  function getTextScaleAdjustment() {
+    const baseScale = window.innerHeight / H;
+    const clampedScale = Math.min(TEXT_SCALE_MAX, Math.max(TEXT_SCALE_MIN, baseScale));
+    return clampedScale / baseScale;
+  }
+
+  /**
+   * Draw text with aspect-ratio compensation and clamped scaling.
+   * Use this instead of raw ctx.fillText() to prevent text stretching.
+   * Default font is 16px (minimum for answer text). Use 18-20px for better readability.
+   */
+  function drawText(text, x, y, options = {}) {
+    const { font = "500 16px system-ui, sans-serif", color = '#F5F5F0', align = 'center', baseline = 'middle' } = options;
+    ctx.save();
+    ctx.translate(x, y);
+    const adj = getTextScaleAdjustment();
+    ctx.scale(adj / aspectRatio, adj);
+    ctx.font = font;
+    ctx.fillStyle = color;
+    ctx.textAlign = align;
+    ctx.textBaseline = baseline;
+    ctx.fillText(text, 0, 0);
+    ctx.restore();
+  }
+
+  /**
+   * Convert screen coordinates to logical coordinates.
+   * Use this in handleTouch to get positions in 360×640 space.
+   */
+  function screenToLogical(screenX, screenY) {
+    const dpr = window.devicePixelRatio || 1;
+    const rect = canvas.getBoundingClientRect();
+    const canvasX = (screenX - rect.left) * dpr;
+    const canvasY = (screenY - rect.top) * dpr;
+    return {
+      x: canvasX / scaleX,
+      y: canvasY / scaleY
+    };
+  }
+
+  /**
+   * Check if a point is inside a rectangle (logical coordinates).
+   */
+  function pointInRect(px, py, rect) {
+    return px >= rect.x && px <= rect.x + rect.w &&
+           py >= rect.y && py <= rect.y + rect.h;
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // TEXT UTILITIES - Dynamic wrapping and font sizing
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  /**
+   * Wrap text to fit within a maximum width (in logical coordinates).
+   * Accounts for canvas transforms applied by drawText().
+   *
+   * @param {string} text - The text to wrap
+   * @param {number} maxWidth - Maximum width in logical coordinates
+   * @param {string} font - CSS font string (e.g., "16px 'Nunito', sans-serif")
+   * @param {number} maxLines - Maximum number of lines (default 3)
+   * @returns {string[]} Array of text lines
+   */
+  function wrapText(text, maxWidth, font, maxLines = 3) {
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.font = font;
+    const adj = getTextScaleAdjustment();
+    const maxRawWidth = maxWidth * aspectRatio / adj;
+    const words = text.split(' ');
+    const lines = [];
+    let currentLine = '';
+    words.forEach(word => {
+      const testLine = currentLine ? currentLine + ' ' + word : word;
+      if (ctx.measureText(testLine).width > maxRawWidth && currentLine) {
+        lines.push(currentLine);
+        currentLine = word;
+      } else {
+        currentLine = testLine;
+      }
+    });
+    if (currentLine) lines.push(currentLine);
+    ctx.restore();
+    return lines.slice(0, maxLines);
+  }
+
+  /**
+   * Find the optimal font size to fit content in available space.
+   * Tries font sizes from max to min until content fits.
+   *
+   * @param {Object} options
+   * @param {string[]} options.texts - Array of text strings to fit
+   * @param {number} options.maxWidth - Maximum width for text wrapping
+   * @param {number} options.availableHeight - Total height available for all texts
+   * @param {number} options.minFont - Minimum font size (default 12)
+   * @param {number} options.maxFont - Maximum font size (default 18)
+   * @param {number} options.itemPadding - Vertical padding per text item (default 4)
+   * @param {string} options.fontFamily - Font family (default "'Nunito Sans', sans-serif")
+   * @returns {{ fontSize: number, wrappedTexts: string[][] }} Optimal font size and pre-wrapped texts
+   */
+  function findOptimalFontSize(options) {
+    const {
+      texts,
+      maxWidth,
+      availableHeight,
+      minFont = 12,
+      maxFont = 18,
+      itemPadding = 4,
+      fontFamily = "'Nunito Sans', sans-serif"
+    } = options;
+
+    let bestFontSize = minFont;
+    let bestWrappedTexts = [];
+
+    for (let fontSize = maxFont; fontSize >= minFont; fontSize -= 0.5) {
+      const font = `${fontSize}px ${fontFamily}`;
+      const lineHeight = fontSize + 2;
+
+      let totalHeight = 0;
+      const wrappedTexts = [];
+
+      for (const text of texts) {
+        const lines = wrapText(text, maxWidth, font);
+        wrappedTexts.push(lines);
+        totalHeight += itemPadding + lines.length * lineHeight;
+      }
+
+      if (totalHeight <= availableHeight) {
+        bestFontSize = fontSize;
+        bestWrappedTexts = wrappedTexts;
+        break;
+      }
+
+      bestWrappedTexts = wrappedTexts;
+    }
+
+    return { fontSize: bestFontSize, wrappedTexts: bestWrappedTexts };
+  }
+
+  const engine = {
+    /** Call this to end the game. DO NOT draw your own end screen. */
+    end(isCorrect, explanation) {
+      if (gameState === 'ended') return;
+      gameState = 'ended';
+      gameResult = isCorrect;
+      gameExplanation = explanation || '';
+      endScreenTime = 0;
+
+      // Spawn confetti for correct answers
+      if (isCorrect) {
+        for (let i = 0; i < 50; i++) {
+          confettiParticles.push({
+            x: W / 2,
+            y: H / 2,
+            vx: (Math.random() - 0.5) * 400,
+            vy: -Math.random() * 300 - 80,
+            size: 4 + Math.random() * 6,
+            color: ['#FFD700', '#FF6B6B', '#4ECDC4', '#95E1D3', '#F38181'][Math.floor(Math.random() * 5)],
+            rotation: Math.random() * Math.PI * 2,
+            rotationSpeed: (Math.random() - 0.5) * 10
+          });
+        }
+      }
+
+      // Notify parent frame
+      if (window.parent && window.parent !== window) {
+        window.parent.postMessage({
+          type: 'quiz-end',
+          isCorrect: isCorrect,
+          explanation: explanation || ''
+        }, '*');
+      }
+    }
+  };
+
+  /** STANDARD END SCREEN (MOBILE) - DO NOT MODIFY */
+  function drawEndScreen(dt) {
+    endScreenTime += dt;
+
+    // Update confetti
+    confettiParticles = confettiParticles.filter(p => {
+      p.vy += 600 * dt; // gravity
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.rotation += p.rotationSpeed * dt;
+      p.vx *= 0.99;
+      return p.y < H + 50;
+    });
+
+    // Dark overlay
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
+    ctx.fillRect(0, 0, W, H);
+
+    // Draw confetti
+    confettiParticles.forEach(p => {
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rotation);
+      ctx.fillStyle = p.color;
+      ctx.fillRect(-p.size / 2, -p.size / 4, p.size, p.size / 2);
+      ctx.restore();
+    });
+
+    // Result emoji (aspect-ratio aware)
+    const textAdj = getTextScaleAdjustment();
+    ctx.save();
+    ctx.translate(W / 2, H / 2 - 80);
+    ctx.scale(textAdj / aspectRatio, textAdj);
+    ctx.font = '64px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(gameResult ? '🎉' : '😢', 0, 0);
+    ctx.restore();
+
+    // Result text (aspect-ratio aware)
+    ctx.save();
+    ctx.translate(W / 2, H / 2 - 10);
+    ctx.scale(textAdj / aspectRatio, textAdj);
+    ctx.fillStyle = gameResult ? '#4ADE80' : '#F87171';
+    ctx.font = 'bold 32px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(gameResult ? 'Correct!' : 'Wrong!', 0, 0);
+    ctx.restore();
+
+    // Buttons
+    if (gameResult) {
+      // Correct: show both Restart and Next/Finish
+      drawMobileButton(restartButton, 'Restart', '#E87A3E', true);
+      const nextLabel = QUESTION.isLastQuestion ? 'Finish' : 'Next';
+      drawMobileButton(nextButton, nextLabel, '#4ECDC4', true);
+    } else {
+      // Wrong: show only centered Restart button
+      drawMobileButton(centeredRestartButton, 'Restart', '#E87A3E', true);
+    }
+  }
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 3: YOUR GAME CODE - IMPLEMENT THESE FUNCTIONS                     ║
+  // ║  Boulder Blaster - Tank shooting game with MCQ boulders                    ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+
+  // === COLORS ===
+  const COLORS = {
+    bgPrimary: '#2D2518',      // Dark desert sand
+    bgSurface: '#3D3525',      // Lighter sand
+    orange: '#E87A3E',
+    amber: '#F5A742',
+    cyan: '#4ECDC4',
+    success: '#6BBF59',
+    error: '#E85D4A',
+    textPrimary: '#F5F5F0',
+    textSecondary: '#C2C2B8',
+    tankBody: '#4A5D23',       // Olive green
+    tankDark: '#3A4A1B',       // Darker olive
+    boulderGray: '#6B5B4F',    // Rocky brown-gray
+    boulderDark: '#4A3F37',    // Dark rock
+    boulderCrack: '#3A2F27',   // Crack color
+  };
+
+  // === AUDIO SYSTEM ===
+  let audioCtx = null;
+
+  function initAudio() {
+    if (audioCtx) return;
+    try {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    } catch (e) {
+      console.warn('Web Audio not supported');
+    }
+  }
+
+  function playSound(type) {
+    if (!audioCtx) return;
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+
+    const now = audioCtx.currentTime;
+
+    if (type === 'shoot') {
+      // Tank cannon shot
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      const noise = audioCtx.createBufferSource();
+
+      // Create noise buffer
+      const noiseBuffer = audioCtx.createBuffer(1, audioCtx.sampleRate * 0.1, audioCtx.sampleRate);
+      const data = noiseBuffer.getChannelData(0);
+      for (let i = 0; i < data.length; i++) {
+        data[i] = Math.random() * 2 - 1;
+      }
+      noise.buffer = noiseBuffer;
+
+      const noiseGain = audioCtx.createGain();
+      noise.connect(noiseGain);
+      noiseGain.connect(audioCtx.destination);
+      noiseGain.gain.setValueAtTime(0.3, now);
+      noiseGain.gain.exponentialDecayTo && noiseGain.gain.exponentialDecayTo(0.01, now + 0.1);
+      noiseGain.gain.linearRampToValueAtTime(0.01, now + 0.1);
+
+      osc.type = 'square';
+      osc.frequency.setValueAtTime(150, now);
+      osc.frequency.exponentialRampToValueAtTime(50, now + 0.1);
+      gain.gain.setValueAtTime(0.2, now);
+      gain.gain.exponentialRampToValueAtTime(0.01, now + 0.15);
+
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+
+      osc.start(now);
+      osc.stop(now + 0.15);
+      noise.start(now);
+      noise.stop(now + 0.1);
+
+    } else if (type === 'hit') {
+      // Boulder hit
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(200, now);
+      osc.frequency.exponentialRampToValueAtTime(80, now + 0.15);
+      gain.gain.setValueAtTime(0.25, now);
+      gain.gain.exponentialRampToValueAtTime(0.01, now + 0.15);
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      osc.start(now);
+      osc.stop(now + 0.15);
+
+    } else if (type === 'destroy') {
+      // Boulder explosion
+      const noise = audioCtx.createBufferSource();
+      const noiseBuffer = audioCtx.createBuffer(1, audioCtx.sampleRate * 0.4, audioCtx.sampleRate);
+      const data = noiseBuffer.getChannelData(0);
+      for (let i = 0; i < data.length; i++) {
+        data[i] = Math.random() * 2 - 1;
+      }
+      noise.buffer = noiseBuffer;
+
+      const filter = audioCtx.createBiquadFilter();
+      filter.type = 'lowpass';
+      filter.frequency.setValueAtTime(1000, now);
+      filter.frequency.exponentialRampToValueAtTime(100, now + 0.4);
+
+      const gain = audioCtx.createGain();
+      gain.gain.setValueAtTime(0.4, now);
+      gain.gain.exponentialRampToValueAtTime(0.01, now + 0.4);
+
+      noise.connect(filter);
+      filter.connect(gain);
+      gain.connect(audioCtx.destination);
+      noise.start(now);
+      noise.stop(now + 0.4);
+
+    } else if (type === 'engine') {
+      // Engine rumble (short burst)
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(40 + Math.random() * 10, now);
+      gain.gain.setValueAtTime(0.05, now);
+      gain.gain.linearRampToValueAtTime(0, now + 0.05);
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      osc.start(now);
+      osc.stop(now + 0.05);
+    }
+  }
+
+  // === GAME STATE ===
+  let tank = null;
+  let boulders = [];
+  let projectiles = [];
+  let particles = [];
+  let dustParticles = [];
+  let gameTime = 0;
+  let engineSoundTimer = 0;
+
+  // Control state
+  let steeringAngle = 0;      // Current steering wheel angle (-1 to 1)
+  let isMovingForward = false;
+  let isMovingBackward = false;
+  let orientationEnabled = false;
+  let steeringTouchId = null;
+  let steeringStartX = 0;
+
+  // Animation state
+  let controlsEntranceProgress = 0;
+
+  // Game area bounds (leaving space for question at top and controls at bottom)
+  const GAME_TOP = 80;
+  const GAME_BOTTOM = 520;
+  const GAME_LEFT = 10;
+  const GAME_RIGHT = 350;
+
+  // Control bar
+  const CONTROL_BAR_Y = 550;
+  const BUTTON_SIZE = 60;
+
+  // Control buttons
+  const backwardBtn = { x: 20, y: CONTROL_BAR_Y, w: BUTTON_SIZE, h: BUTTON_SIZE };
+  const forwardBtn = { x: W - BUTTON_SIZE - 20, y: CONTROL_BAR_Y, w: BUTTON_SIZE, h: BUTTON_SIZE };
+  const shootBtn = { x: W / 2 + 40, y: CONTROL_BAR_Y, w: BUTTON_SIZE, h: BUTTON_SIZE };
+  const steeringWheel = { x: W / 2 - 50, y: CONTROL_BAR_Y + 30, r: 35 };
+
+  // Boulder corner positions (adjusted for larger boulders)
+  const BOULDER_POSITIONS = [
+    { x: 70, y: 145 },         // Top-left (A)
+    { x: 290, y: 145 },        // Top-right (B)
+    { x: 70, y: 405 },         // Bottom-left (C)
+    { x: 290, y: 405 },        // Bottom-right (D)
+  ];
+
+  function initGame() {
+    // Initialize audio on first interaction
+    initAudio();
+
+    // Initialize tank in center of game area
+    tank = {
+      x: W / 2,
+      y: (GAME_TOP + GAME_BOTTOM) / 2 + 50,
+      angle: -Math.PI / 2,    // Facing up
+      speed: 0,
+      width: 32,
+      height: 44,
+      turnSpeed: 2.5,
+      maxSpeed: 100,
+      acceleration: 200,
+      friction: 0.92,
+      scale: 0,               // Entrance animation
+      entranceTime: 0,
+      recoil: 0               // Shooting recoil
+    };
+
+    // Initialize boulders in corners with staggered entrance
+    boulders = QUESTION.choices.map((choice, i) => ({
+      x: BOULDER_POSITIONS[i].x,
+      y: BOULDER_POSITIONS[i].y,
+      width: 120,
+      height: 100,
+      health: 3,
+      maxHealth: 3,
+      choice: choice,
+      label: ['A', 'B', 'C', 'D'][i],
+      shakeOffset: 0,
+      shakeTime: 0,
+      flashTime: 0,
+      scale: 0,
+      entranceDelay: 200 + i * 150,  // Staggered entrance after tank
+      bobOffset: Math.random() * Math.PI * 2,  // Idle bobbing phase
+      // Pre-generate craggle offsets for consistent rocky edges
+      craggles: Array.from({ length: 8 }, () => ({
+        offset: (Math.random() - 0.5) * 8,
+        size: 3 + Math.random() * 5
+      })),
+      // Pre-generate crack patterns for each damage level (shown cumulatively)
+      cracks: Array.from({ length: 9 }, () => ({
+        startX: (Math.random() - 0.5) * 0.6,  // Normalized positions
+        startY: (Math.random() - 0.5) * 0.6,
+        len: 15 + Math.random() * 25,
+        angle: Math.random() * Math.PI * 2,
+        branchAngle: (Math.random() - 0.5) * 0.8,
+        branchLen: 8 + Math.random() * 12
+      }))
+    }));
+
+    // Reset state
+    projectiles = [];
+    particles = [];
+    dustParticles = [];
+    steeringAngle = 0;
+    isMovingForward = false;
+    isMovingBackward = false;
+    gameTime = 0;
+    engineSoundTimer = 0;
+    controlsEntranceProgress = 0;
+
+    // Request device orientation permission on iOS
+    requestOrientationPermission();
+  }
+
+  function requestOrientationPermission() {
+    if (typeof DeviceOrientationEvent !== 'undefined' &&
+        typeof DeviceOrientationEvent.requestPermission === 'function') {
+      // iOS 13+ requires permission
+      DeviceOrientationEvent.requestPermission()
+        .then(response => {
+          if (response === 'granted') {
+            orientationEnabled = true;
+            window.addEventListener('deviceorientation', handleOrientation);
+          }
+        })
+        .catch(console.error);
+    } else if ('DeviceOrientationEvent' in window) {
+      // Non-iOS or older iOS
+      orientationEnabled = true;
+      window.addEventListener('deviceorientation', handleOrientation);
+    }
+  }
+
+  function handleOrientation(event) {
+    if (!orientationEnabled || gameState !== 'playing') return;
+
+    // gamma is left/right tilt (-90 to 90)
+    const gamma = event.gamma || 0;
+    // Normalize to -1 to 1 range (clamp at +-30 degrees)
+    steeringAngle = Math.max(-1, Math.min(1, gamma / 30));
+  }
+
+  function updateGame(dt) {
+    if (gameState !== 'playing') return;
+
+    gameTime += dt;
+
+    // Update controls entrance animation
+    if (controlsEntranceProgress < 1) {
+      controlsEntranceProgress = Math.min(1, controlsEntranceProgress + dt * 2);
+    }
+
+    // Update tank entrance animation with spring effect
+    if (tank.scale < 1) {
+      tank.entranceTime += dt;
+      if (tank.entranceTime > 0.1) {  // Small delay before tank appears
+        const t = Math.min(1, (tank.entranceTime - 0.1) * 3);
+        // Spring easing
+        const spring = 1 + Math.sin(t * Math.PI * 2) * 0.2 * (1 - t);
+        tank.scale = t * spring;
+        if (t >= 1) tank.scale = 1;
+      }
+    }
+
+    // Update tank recoil
+    if (tank.recoil > 0) {
+      tank.recoil *= 0.85;
+      if (tank.recoil < 0.5) tank.recoil = 0;
+    }
+
+    // Update boulder entrance animations with spring effect
+    boulders.forEach(b => {
+      if (b.scale < 1) {
+        const elapsed = gameTime * 1000;
+        if (elapsed > b.entranceDelay) {
+          const t = Math.min(1, (elapsed - b.entranceDelay) / 300);
+          // Spring overshoot
+          const spring = 1 + Math.sin(t * Math.PI * 1.5) * 0.3 * (1 - t);
+          b.scale = t * spring;
+          if (t >= 1) b.scale = 1;
+        }
+      }
+      // Update shake
+      if (b.shakeTime > 0) {
+        b.shakeTime -= dt;
+        b.shakeOffset = Math.sin(b.shakeTime * 50) * 5 * (b.shakeTime / 0.3);
+      } else {
+        b.shakeOffset = 0;
+      }
+      // Update flash
+      if (b.flashTime > 0) {
+        b.flashTime -= dt;
+      }
+    });
+
+    // Apply steering to tank rotation while moving
+    if (isMovingForward || isMovingBackward) {
+      const direction = isMovingForward ? 1 : -1;
+      tank.angle += steeringAngle * tank.turnSpeed * dt * direction;
+    }
+
+    // Apply acceleration/deceleration
+    if (isMovingForward) {
+      tank.speed = Math.min(tank.maxSpeed, tank.speed + tank.acceleration * dt);
+    } else if (isMovingBackward) {
+      tank.speed = Math.max(-tank.maxSpeed * 0.6, tank.speed - tank.acceleration * dt);
+    } else {
+      tank.speed *= tank.friction;
+      if (Math.abs(tank.speed) < 1) tank.speed = 0;
+    }
+
+    // Move tank
+    if (Math.abs(tank.speed) > 0.1) {
+      tank.x += Math.cos(tank.angle) * tank.speed * dt;
+      tank.y += Math.sin(tank.angle) * tank.speed * dt;
+
+      // Engine sound
+      engineSoundTimer += dt;
+      if (engineSoundTimer > 0.1) {
+        playSound('engine');
+        engineSoundTimer = 0;
+      }
+
+      // Spawn dust particles when moving
+      if (Math.random() < 0.4) {
+        dustParticles.push({
+          x: tank.x - Math.cos(tank.angle) * 20,
+          y: tank.y - Math.sin(tank.angle) * 20,
+          vx: (Math.random() - 0.5) * 40 - Math.cos(tank.angle) * 20,
+          vy: (Math.random() - 0.5) * 40 - Math.sin(tank.angle) * 20,
+          size: 3 + Math.random() * 5,
+          alpha: 0.7,
+          life: 0.6
+        });
+      }
+    }
+
+    // Constrain tank to game area
+    tank.x = Math.max(GAME_LEFT + tank.width/2, Math.min(GAME_RIGHT - tank.width/2, tank.x));
+    tank.y = Math.max(GAME_TOP + tank.height/2, Math.min(GAME_BOTTOM - tank.height/2, tank.y));
+
+    // Update projectiles
+    projectiles.forEach(p => {
+      p.x += Math.cos(p.angle) * p.speed * dt;
+      p.y += Math.sin(p.angle) * p.speed * dt;
+      p.life -= dt;
+    });
+
+    // Remove dead projectiles
+    projectiles = projectiles.filter(p => p.life > 0 &&
+      p.x > 0 && p.x < W && p.y > 0 && p.y < H);
+
+    // Check projectile-boulder collisions
+    projectiles.forEach(p => {
+      boulders.forEach(b => {
+        if (b.health <= 0) return;
+
+        // Rectangle collision detection
+        const bx = b.x + b.shakeOffset;
+        const halfW = (b.width / 2) * b.scale;
+        const halfH = (b.height / 2) * b.scale;
+        const inBounds = p.x > bx - halfW && p.x < bx + halfW &&
+                         p.y > b.y - halfH && p.y < b.y + halfH;
+
+        if (inBounds) {
+          // Hit!
+          p.life = 0;
+          b.health--;
+          b.shakeTime = 0.3;
+          b.flashTime = 0.15;
+          playSound('hit');
+
+          // Spawn hit particles
+          for (let i = 0; i < 8; i++) {
+            particles.push({
+              x: p.x,
+              y: p.y,
+              vx: (Math.random() - 0.5) * 150,
+              vy: (Math.random() - 0.5) * 150,
+              size: 3 + Math.random() * 4,
+              color: COLORS.boulderGray,
+              alpha: 1,
+              life: 0.5,
+              rotation: Math.random() * Math.PI * 2,
+              rotationSpeed: (Math.random() - 0.5) * 10
+            });
+          }
+
+          // Boulder destroyed?
+          if (b.health <= 0) {
+            playSound('destroy');
+
+            // Big explosion particles
+            for (let i = 0; i < 20; i++) {
+              particles.push({
+                x: b.x,
+                y: b.y,
+                vx: (Math.random() - 0.5) * 250,
+                vy: (Math.random() - 0.5) * 250,
+                size: 5 + Math.random() * 10,
+                color: Math.random() > 0.5 ? COLORS.boulderGray : COLORS.boulderDark,
+                alpha: 1,
+                life: 0.8,
+                rotation: Math.random() * Math.PI * 2,
+                rotationSpeed: (Math.random() - 0.5) * 8
+              });
+            }
+
+            // End game with this answer
+            setTimeout(() => {
+              engine.end(b.choice.is_correct, b.choice.explanation);
+            }, 300);
+          }
+        }
+      });
+    });
+
+    // Update particles
+    particles.forEach(p => {
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.vy += 200 * dt; // Gravity
+      p.alpha -= dt * 1.5;
+      p.life -= dt;
+      p.rotation += p.rotationSpeed * dt;
+    });
+    particles = particles.filter(p => p.life > 0 && p.alpha > 0);
+
+    // Update dust particles
+    dustParticles.forEach(p => {
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.alpha -= dt * 1.2;
+      p.life -= dt;
+      p.size *= 1.02;
+    });
+    dustParticles = dustParticles.filter(p => p.life > 0 && p.alpha > 0);
+  }
+
+  function fireProjectile() {
+    if (gameState !== 'playing') return;
+
+    // Play shoot sound
+    playSound('shoot');
+
+    // Create projectile from tank barrel
+    const barrelLength = tank.height / 2 + 10;
+    projectiles.push({
+      x: tank.x + Math.cos(tank.angle) * barrelLength,
+      y: tank.y + Math.sin(tank.angle) * barrelLength,
+      angle: tank.angle,
+      speed: 350,
+      life: 2,
+      size: 6
+    });
+
+    // Muzzle flash particles
+    for (let i = 0; i < 5; i++) {
+      particles.push({
+        x: tank.x + Math.cos(tank.angle) * barrelLength,
+        y: tank.y + Math.sin(tank.angle) * barrelLength,
+        vx: Math.cos(tank.angle + (Math.random() - 0.5) * 0.5) * (100 + Math.random() * 50),
+        vy: Math.sin(tank.angle + (Math.random() - 0.5) * 0.5) * (100 + Math.random() * 50),
+        size: 3 + Math.random() * 3,
+        color: '#FFD700',
+        alpha: 1,
+        life: 0.2,
+        rotation: 0,
+        rotationSpeed: 0
+      });
+    }
+  }
+
+  function drawGame() {
+    // Clear canvas with desert background
+    ctx.fillStyle = COLORS.bgPrimary;
+    ctx.fillRect(0, 0, W, H);
+
+    // Draw game area with subtle texture
+    ctx.fillStyle = COLORS.bgSurface;
+    ctx.fillRect(GAME_LEFT, GAME_TOP, GAME_RIGHT - GAME_LEFT, GAME_BOTTOM - GAME_TOP);
+
+    // Draw grid pattern for depth
+    ctx.strokeStyle = 'rgba(0,0,0,0.1)';
+    ctx.lineWidth = 1;
+    for (let x = GAME_LEFT; x < GAME_RIGHT; x += 40) {
+      ctx.beginPath();
+      ctx.moveTo(x, GAME_TOP);
+      ctx.lineTo(x, GAME_BOTTOM);
+      ctx.stroke();
+    }
+    for (let y = GAME_TOP; y < GAME_BOTTOM; y += 40) {
+      ctx.beginPath();
+      ctx.moveTo(GAME_LEFT, y);
+      ctx.lineTo(GAME_RIGHT, y);
+      ctx.stroke();
+    }
+
+    // Draw dust particles (behind everything)
+    dustParticles.forEach(p => {
+      ctx.save();
+      ctx.globalAlpha = p.alpha;
+      ctx.fillStyle = '#8B7355';
+      ctx.beginPath();
+      ctx.ellipse(p.x, p.y, p.size, p.size * aspectRatio, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    });
+
+    // Draw boulders
+    boulders.forEach(b => {
+      if (b.health <= 0) return;
+
+      const healthPercent = b.health / b.maxHealth;
+      const sizeScale = 0.85 + healthPercent * 0.15;
+      const w = b.width * sizeScale;
+      const h = b.height * sizeScale;
+
+      ctx.save();
+      ctx.translate(b.x + b.shakeOffset, b.y);
+      ctx.scale(b.scale, b.scale);
+
+      // Helper to draw craggy boulder path
+      function drawCraggyBoulder(offsetX, offsetY) {
+        const c = b.craggles;
+        ctx.beginPath();
+        // Start top-left with craggle
+        ctx.moveTo(-w/2 + 10 + c[0].offset, -h/2 + offsetY);
+        // Top edge with subtle bumps
+        ctx.lineTo(-w/4 + c[1].offset, -h/2 - c[1].size/2 + offsetY);
+        ctx.lineTo(w/4 + c[2].offset, -h/2 - c[2].size/3 + offsetY);
+        ctx.lineTo(w/2 - 10 + c[3].offset, -h/2 + offsetY);
+        // Right edge
+        ctx.lineTo(w/2 + offsetX, -h/4 + c[4].offset);
+        ctx.lineTo(w/2 + c[4].size/3 + offsetX, h/4 + c[5].offset);
+        ctx.lineTo(w/2 - 10 + offsetX, h/2);
+        // Bottom edge with bumps
+        ctx.lineTo(w/4 + c[6].offset, h/2 + c[6].size/3);
+        ctx.lineTo(-w/4 + c[7].offset, h/2 + c[7].size/2);
+        ctx.lineTo(-w/2 + 10, h/2);
+        // Left edge
+        ctx.lineTo(-w/2, h/4 + c[5].offset);
+        ctx.lineTo(-w/2 - c[0].size/3, -h/4 + c[1].offset);
+        ctx.closePath();
+      }
+
+      // Boulder shadow
+      ctx.fillStyle = 'rgba(0,0,0,0.3)';
+      drawCraggyBoulder(4, 4);
+      ctx.fill();
+
+      // Main boulder background
+      const grad = ctx.createLinearGradient(-w/2, -h/2, w/2, h/2);
+      grad.addColorStop(0, b.flashTime > 0 ? '#FFFFFF' : '#8B7B6F');
+      grad.addColorStop(0.5, COLORS.boulderGray);
+      grad.addColorStop(1, COLORS.boulderDark);
+
+      ctx.fillStyle = grad;
+      drawCraggyBoulder(0, 0);
+      ctx.fill();
+
+      // Boulder border
+      ctx.strokeStyle = COLORS.boulderDark;
+      ctx.lineWidth = 3;
+      ctx.stroke();
+
+      // Add subtle rocky texture lines
+      ctx.strokeStyle = 'rgba(0,0,0,0.15)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(-w/3, -h/4);
+      ctx.lineTo(-w/4, h/5);
+      ctx.moveTo(w/5, -h/3);
+      ctx.lineTo(w/4, h/4);
+      ctx.stroke();
+
+      // Cracks based on damage (using pre-generated patterns)
+      if (b.health < b.maxHealth) {
+        const damage = b.maxHealth - b.health;  // 1, 2, or 3
+        const crackCount = damage * 3;  // Show 3, 6, or 9 cracks
+
+        for (let i = 0; i < crackCount; i++) {
+          const crack = b.cracks[i];
+          const startX = crack.startX * w;
+          const startY = crack.startY * h;
+          const endX = startX + Math.cos(crack.angle) * crack.len;
+          const endY = startY + Math.sin(crack.angle) * crack.len;
+
+          // Main crack line
+          ctx.strokeStyle = COLORS.boulderCrack;
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.moveTo(startX, startY);
+          ctx.lineTo(endX, endY);
+          ctx.stroke();
+
+          // Branch off the crack for more realism
+          ctx.lineWidth = 1.5;
+          ctx.beginPath();
+          ctx.moveTo(endX, endY);
+          ctx.lineTo(
+            endX + Math.cos(crack.angle + crack.branchAngle) * crack.branchLen,
+            endY + Math.sin(crack.angle + crack.branchAngle) * crack.branchLen
+          );
+          ctx.stroke();
+        }
+      }
+
+      ctx.restore();
+
+      // Draw answer text centered inside boulder (no label needed)
+      // Clamp text to fit within boulder bounds
+      drawWrappedText(b.choice.text, b.x + b.shakeOffset, b.y, w * 0.75, {
+        font: "600 13px 'Nunito', sans-serif",
+        color: COLORS.textPrimary,
+        lineHeight: 15,
+        maxLines: 5  // Limit lines to stay inside boulder
+      });
+    });
+
+    // Draw projectiles
+    projectiles.forEach(p => {
+      ctx.save();
+      ctx.translate(p.x, p.y);
+
+      // Projectile glow
+      ctx.fillStyle = 'rgba(255, 200, 100, 0.5)';
+      ctx.beginPath();
+      ctx.ellipse(0, 0, p.size * 1.5, p.size * 1.5 * aspectRatio, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Projectile core
+      ctx.fillStyle = '#FFD700';
+      ctx.beginPath();
+      ctx.ellipse(0, 0, p.size, p.size * aspectRatio, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.restore();
+    });
+
+    // Draw particles
+    particles.forEach(p => {
+      ctx.save();
+      ctx.globalAlpha = p.alpha;
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rotation);
+      ctx.fillStyle = p.color;
+      ctx.fillRect(-p.size / 2, -p.size / 2, p.size, p.size);
+      ctx.restore();
+    });
+
+    // Draw tank
+    drawTank();
+
+    // Draw control bar background
+    ctx.fillStyle = 'rgba(0,0,0,0.7)';
+    ctx.fillRect(0, CONTROL_BAR_Y - 15, W, H - CONTROL_BAR_Y + 15);
+
+    // Draw control buttons
+    drawControlButton(backwardBtn, isMovingBackward, '\u2193');  // Down arrow
+    drawControlButton(forwardBtn, isMovingForward, '\u2191');    // Up arrow
+    drawControlButton(shootBtn, false, '\u2022');                 // Bullet symbol
+
+    // Draw steering wheel
+    drawSteeringWheel();
+  }
+
+  function drawTank() {
+    ctx.save();
+    ctx.translate(tank.x, tank.y);
+    ctx.scale(1, aspectRatio);
+    ctx.rotate(tank.angle + Math.PI / 2);  // +90° to align sprite with movement direction
+
+    // Tank shadow
+    ctx.fillStyle = 'rgba(0,0,0,0.3)';
+    ctx.fillRect(-tank.width/2 + 3, -tank.height/2 + 3, tank.width, tank.height);
+
+    // Tank tracks
+    ctx.fillStyle = COLORS.tankDark;
+    ctx.fillRect(-tank.width/2 - 4, -tank.height/2, 6, tank.height);
+    ctx.fillRect(tank.width/2 - 2, -tank.height/2, 6, tank.height);
+
+    // Track details
+    ctx.strokeStyle = '#2A3A12';
+    ctx.lineWidth = 1;
+    for (let i = 0; i < 6; i++) {
+      const y = -tank.height/2 + 4 + i * 7;
+      ctx.beginPath();
+      ctx.moveTo(-tank.width/2 - 4, y);
+      ctx.lineTo(-tank.width/2 + 2, y);
+      ctx.moveTo(tank.width/2 - 2, y);
+      ctx.lineTo(tank.width/2 + 4, y);
+      ctx.stroke();
+    }
+
+    // Tank body
+    ctx.fillStyle = COLORS.tankBody;
+    ctx.fillRect(-tank.width/2, -tank.height/2, tank.width, tank.height);
+
+    // Tank body detail
+    ctx.fillStyle = COLORS.tankDark;
+    ctx.fillRect(-tank.width/2 + 4, -tank.height/2 + 4, tank.width - 8, tank.height - 8);
+
+    // Turret base
+    ctx.fillStyle = COLORS.tankBody;
+    ctx.beginPath();
+    ctx.arc(0, 0, 10, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Barrel
+    ctx.fillStyle = COLORS.tankDark;
+    ctx.fillRect(-3, -tank.height/2 - 12, 6, tank.height/2 + 5);
+
+    // Barrel tip
+    ctx.fillStyle = '#2A3A12';
+    ctx.fillRect(-4, -tank.height/2 - 12, 8, 4);
+
+    ctx.restore();
+  }
+
+  function drawControlButton(btn, isPressed, symbol) {
+    ctx.save();
+
+    // Button background
+    ctx.fillStyle = isPressed ? COLORS.orange : 'rgba(255,255,255,0.2)';
+    ctx.beginPath();
+    ctx.roundRect(btn.x, btn.y, btn.w, btn.h, 12);
+    ctx.fill();
+
+    // Button border
+    ctx.strokeStyle = isPressed ? COLORS.orange : 'rgba(255,255,255,0.4)';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    // Button symbol
+    drawText(symbol, btn.x + btn.w/2, btn.y + btn.h/2, {
+      font: "700 24px 'Nunito Sans', sans-serif",
+      color: isPressed ? '#FFFFFF' : '#CCCCCC'
+    });
+
+    ctx.restore();
+  }
+
+  function drawSteeringWheel() {
+    ctx.save();
+    ctx.translate(steeringWheel.x, steeringWheel.y);
+    ctx.scale(1, aspectRatio);
+
+    // Wheel rotation based on steering angle
+    ctx.rotate(steeringAngle * Math.PI / 3);  // Max 60 degree rotation
+
+    // Outer ring
+    ctx.strokeStyle = 'rgba(255,255,255,0.6)';
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.arc(0, 0, steeringWheel.r, 0, Math.PI * 2);
+    ctx.stroke();
+
+    // Inner hub
+    ctx.fillStyle = 'rgba(255,255,255,0.3)';
+    ctx.beginPath();
+    ctx.arc(0, 0, 12, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Spokes
+    ctx.strokeStyle = 'rgba(255,255,255,0.5)';
+    ctx.lineWidth = 3;
+    for (let i = 0; i < 3; i++) {
+      const angle = (i / 3) * Math.PI * 2;
+      ctx.beginPath();
+      ctx.moveTo(Math.cos(angle) * 12, Math.sin(angle) * 12);
+      ctx.lineTo(Math.cos(angle) * steeringWheel.r, Math.sin(angle) * steeringWheel.r);
+      ctx.stroke();
+    }
+
+    // Top marker (shows current orientation)
+    ctx.fillStyle = COLORS.orange;
+    ctx.beginPath();
+    ctx.arc(0, -steeringWheel.r + 6, 5, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.restore();
+  }
+
+  function drawWrappedText(text, x, y, maxWidth, options = {}) {
+    const { font = "500 16px 'Nunito', sans-serif", color = '#F5F5F0', lineHeight = 18, maxLines = 999 } = options;
+
+    // Measure text and wrap if needed
+    ctx.save();
+    ctx.font = font;
+
+    const words = text.split(' ');
+    let lines = [];
+    let currentLine = '';
+
+    words.forEach(word => {
+      const testLine = currentLine ? currentLine + ' ' + word : word;
+      const metrics = ctx.measureText(testLine);
+      if (metrics.width > maxWidth && currentLine) {
+        lines.push(currentLine);
+        currentLine = word;
+      } else {
+        currentLine = testLine;
+      }
+    });
+    if (currentLine) lines.push(currentLine);
+
+    // Limit to maxLines
+    if (lines.length > maxLines) {
+      lines = lines.slice(0, maxLines);
+      // Add ellipsis to last line if truncated
+      lines[maxLines - 1] = lines[maxLines - 1].slice(0, -3) + '...';
+    }
+
+    ctx.restore();
+
+    // Center text block vertically around y
+    const totalHeight = lines.length * lineHeight;
+    const startY = y - totalHeight / 2 + lineHeight / 2;
+
+    // Draw all lines centered
+    lines.forEach((line, i) => {
+      drawText(line, x, startY + i * lineHeight, {
+        font,
+        color,
+        align: 'center'
+      });
+    });
+  }
+
+  function handleTouch(e, type) {
+    if (gameState !== 'playing') return;
+
+    const touches = e.touches || [];
+    const changedTouches = e.changedTouches || [];
+
+    if (type === 'start') {
+      for (let i = 0; i < changedTouches.length; i++) {
+        const touch = changedTouches[i];
+        const { x, y } = screenToLogical(touch.clientX, touch.clientY);
+
+        // Check control buttons
+        if (pointInRect(x, y, forwardBtn)) {
+          isMovingForward = true;
+        } else if (pointInRect(x, y, backwardBtn)) {
+          isMovingBackward = true;
+        } else if (pointInRect(x, y, shootBtn)) {
+          fireProjectile();
+        }
+
+        // Check steering wheel (for manual control fallback)
+        const dx = x - steeringWheel.x;
+        const dy = y - steeringWheel.y;
+        if (Math.sqrt(dx * dx + dy * dy) < steeringWheel.r + 20) {
+          steeringTouchId = touch.identifier;
+          steeringStartX = x;
+        }
+      }
+    } else if (type === 'move') {
+      // Handle steering wheel drag (fallback when no orientation)
+      if (!orientationEnabled && steeringTouchId !== null) {
+        for (let i = 0; i < touches.length; i++) {
+          const touch = touches[i];
+          if (touch.identifier === steeringTouchId) {
+            const { x } = screenToLogical(touch.clientX, touch.clientY);
+            const delta = (x - steeringStartX) / 50;  // Sensitivity
+            steeringAngle = Math.max(-1, Math.min(1, delta));
+            break;
+          }
+        }
+      }
+    } else if (type === 'end') {
+      for (let i = 0; i < changedTouches.length; i++) {
+        const touch = changedTouches[i];
+        const { x, y } = screenToLogical(touch.clientX, touch.clientY);
+
+        // Check which button was released
+        if (pointInRect(x, y, forwardBtn)) {
+          isMovingForward = false;
+        } else if (pointInRect(x, y, backwardBtn)) {
+          isMovingBackward = false;
+        }
+
+        // Release steering
+        if (touch.identifier === steeringTouchId) {
+          steeringTouchId = null;
+          if (!orientationEnabled) {
+            // Return steering to center
+            steeringAngle = 0;
+          }
+        }
+      }
+
+      // Also check if all touches are gone
+      if (touches.length === 0) {
+        isMovingForward = false;
+        isMovingBackward = false;
+        if (!orientationEnabled) {
+          steeringAngle = 0;
+        }
+      }
+    }
+  }
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 4: GAME LOOP - DO NOT MODIFY                                      ║
+  // ║  Standard loop with responsive scaling and touch handling.                 ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  let lastTime = performance.now();
+
+  function gameLoop(now) {
+    const dt = Math.min((now - lastTime) / 1000, 0.05); // Cap at 50ms
+    lastTime = now;
+
+    // Apply transform for logical coordinate system (non-uniform scaling)
+    ctx.setTransform(scaleX, 0, 0, scaleY, 0, 0);
+
+    if (gameState === 'playing') {
+      updateGame(dt);
+      drawGame();
+    } else {
+      drawGame(); // Draw game state behind overlay
+      drawEndScreen(dt);
+    }
+
+    // Reset transform for next frame
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+    requestAnimationFrame(gameLoop);
+  }
+
+  // Touch handlers
+  function onTouchStart(e) {
+    e.preventDefault();
+    if (gameState === 'ended') {
+      const touch = e.touches[0];
+      const { x, y } = screenToLogical(touch.clientX, touch.clientY);
+
+      if (gameResult) {
+        // Correct answer: check both buttons
+        if (pointInRect(x, y, restartButton)) {
+          gameState = 'playing';
+          gameResult = null;
+          gameExplanation = '';
+          confettiParticles = [];
+          initGame();
+          return;
+        }
+        if (pointInRect(x, y, nextButton)) {
+          // Notify parent to go to next question
+          if (window.parent && window.parent !== window) {
+            window.parent.postMessage({ type: 'quiz-next' }, '*');
+          }
+          return;
+        }
+      } else {
+        // Wrong answer: check centered restart button
+        if (pointInRect(x, y, centeredRestartButton)) {
+          gameState = 'playing';
+          gameResult = null;
+          gameExplanation = '';
+          confettiParticles = [];
+          initGame();
+          return;
+        }
+      }
+    }
+    handleTouch(e, 'start');
+  }
+
+  function onTouchMove(e) {
+    e.preventDefault();
+    handleTouch(e, 'move');
+  }
+
+  function onTouchEnd(e) {
+    e.preventDefault();
+    handleTouch(e, 'end');
+  }
+
+  canvas.addEventListener('touchstart', onTouchStart, { passive: false });
+  canvas.addEventListener('touchmove', onTouchMove, { passive: false });
+  canvas.addEventListener('touchend', onTouchEnd, { passive: false });
+
+  // Also support mouse for testing in browser
+  canvas.addEventListener('mousedown', (e) => {
+    const fakeTouch = { touches: [{ clientX: e.clientX, clientY: e.clientY }], changedTouches: [{ clientX: e.clientX, clientY: e.clientY }] };
+    onTouchStart(fakeTouch);
+  });
+
+  canvas.addEventListener('mouseup', (e) => {
+    const fakeTouch = { touches: [], changedTouches: [{ clientX: e.clientX, clientY: e.clientY }] };
+    onTouchEnd(fakeTouch);
+  });
+
+
+  // Cursor change handler for end screen buttons
+  canvas.addEventListener('mousemove', (e) => {
+    if (gameState !== 'ended') {
+      canvas.style.cursor = 'default';
+      return;
+    }
+    const { x, y } = screenToLogical(e.clientX, e.clientY);
+    if (gameResult) {
+      if (pointInRect(x, y, restartButton) || pointInRect(x, y, nextButton)) {
+        canvas.style.cursor = 'pointer';
+        return;
+      }
+    } else {
+      if (pointInRect(x, y, centeredRestartButton)) {
+        canvas.style.cursor = 'pointer';
+        return;
+      }
+    }
+    canvas.style.cursor = 'default';
+  });
+
+  // Handle resize
+  window.addEventListener('resize', resizeCanvas);
+  window.addEventListener('orientationchange', () => {
+    setTimeout(resizeCanvas, 100); // Delay for orientation change to complete
+  });
+
+  // Prevent pull-to-refresh and overscroll
+  document.body.addEventListener('touchmove', (e) => e.preventDefault(), { passive: false });
+
+  // Initialize
+  resizeCanvas();
+  initGame();
+  requestAnimationFrame(gameLoop);
+  </script>
+</body>
+</html>

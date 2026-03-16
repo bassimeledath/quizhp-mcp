@@ -1,0 +1,964 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <title>Celestial Gate Alignment</title>
+  <link href="https://fonts.googleapis.com/css2?family=Belanosima:wght@400;600;700&family=Nunito+Sans:wght@400;500;600;700&family=Nunito:wght@400;500;600&display=swap" rel="stylesheet">
+  <!--
+  ╔══════════════════════════════════════════════════════════════════════════════╗
+  ║  GAME FACTORY TEMPLATE - MOBILE                                              ║
+  ║  Fills 100% of container, non-uniform scaling, touch input.                  ║
+  ║  Logical dimensions: 360×640 (use aspectRatio for proportional shapes)       ║
+  ╚══════════════════════════════════════════════════════════════════════════════╝
+  -->
+  <style>
+    /* ═══════════════════════════════════════════════════════════════════════════
+       BASE STYLES - Can be extended, not removed
+       ═══════════════════════════════════════════════════════════════════════════ */
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      touch-action: none; /* Prevent default touch behaviors */
+      -webkit-touch-callout: none;
+      -webkit-user-select: none;
+      user-select: none;
+    }
+    body {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      background: #1a1a2e;
+      font-family: 'Nunito Sans', system-ui, -apple-system, sans-serif;
+    }
+    #gameCanvas {
+      background: #0a0a1a;
+      /* Canvas fills viewport via JS, these are fallbacks */
+      width: 100vw;
+      height: 100vh;
+    }
+  </style>
+</head>
+<body>
+  <!-- ═══════════════════════════════════════════════════════════════════════════
+       CANVAS - Sized dynamically to fill viewport
+       ═══════════════════════════════════════════════════════════════════════════ -->
+  <canvas id="gameCanvas"></canvas>
+
+  <script>
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 1: QUESTION PLACEHOLDER - DO NOT MODIFY FORMAT                    ║
+  // ║  Platform replaces this at runtime. Use these exact 60-char answers.       ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  const QUESTION = {
+    type: "true_false",
+    prompt: "Sample question text",
+    choices: [
+      { text: "This is sample answer A which is long enough to test text overflow", is_correct: true, explanation: "Why A is correct" },
+      { text: "This is sample answer B which is long enough to test text overflow", is_correct: false, explanation: "Why B is wrong" }
+    ],
+    isLastQuestion: false
+  };
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 2: ENGINE CORE (MOBILE) - DO NOT MODIFY                           ║
+  // ║  Non-uniform scaling (fills container), touch input, tap-to-restart.       ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  const canvas = document.getElementById('gameCanvas');
+  const ctx = canvas.getContext('2d');
+
+  // Logical dimensions (game code works in this coordinate space)
+  const W = 360, H = 640;
+
+  // Scaling state (computed on resize)
+  let scaleX = 1;
+  let scaleY = 1;
+  let aspectRatio = 1;  // scaleX/scaleY - use for proportional shapes
+
+  // Game state
+  let gameState = 'playing'; // 'playing' | 'ended'
+  let gameResult = null;     // true (correct) | false (wrong)
+  let gameExplanation = '';
+  let endScreenTime = 0;
+  let confettiParticles = [];
+
+  // End screen button bounds (logical coordinates)
+  const restartButton = { x: 20, y: H / 2 + 50, w: 155, h: 56 };
+  const nextButton = { x: 185, y: H / 2 + 50, w: 155, h: 56 };
+  // Centered restart button for wrong answers
+  const centeredRestartButton = { x: W / 2 - 100, y: H / 2 + 50, w: 200, h: 56 };
+
+  /** Draw a styled button with aspect-ratio aware text */
+  function drawMobileButton(rect, label, color, pulse) {
+    const textAdj = getTextScaleAdjustment();
+    const p = pulse ? 1 + Math.sin(endScreenTime * 4) * 0.03 : 1;
+
+    ctx.save();
+    ctx.translate(rect.x + rect.w / 2, rect.y + rect.h / 2);
+    ctx.scale(p, p);
+    ctx.translate(-(rect.x + rect.w / 2), -(rect.y + rect.h / 2));
+
+    // Button background
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.roundRect(rect.x, rect.y, rect.w, rect.h, 12);
+    ctx.fill();
+
+    // Button text (aspect-ratio aware)
+    ctx.save();
+    ctx.translate(rect.x + rect.w / 2, rect.y + rect.h / 2);
+    ctx.scale(textAdj / aspectRatio, textAdj);
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = 'bold 18px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, 0, 0);
+    ctx.restore();
+
+    ctx.restore();
+  }
+
+  /**
+   * Resize canvas to fill viewport completely (no letterboxing).
+   * Uses non-uniform scaling - game code works in 360×640 logical space.
+   * Use aspectRatio to draw proportionally correct shapes.
+   */
+  function resizeCanvas() {
+    const dpr = window.devicePixelRatio || 1;
+
+    // Physical canvas size (actual pixels)
+    canvas.width = window.innerWidth * dpr;
+    canvas.height = window.innerHeight * dpr;
+
+    // CSS size (fills viewport)
+    canvas.style.width = window.innerWidth + 'px';
+    canvas.style.height = window.innerHeight + 'px';
+
+    // Non-uniform scaling to fill entire canvas
+    scaleX = canvas.width / W;
+    scaleY = canvas.height / H;
+
+    // Aspect ratio for proportional shape drawing
+    // >1 means container is wider than logical space
+    // <1 means container is taller than logical space
+    aspectRatio = scaleX / scaleY;
+
+    // Recalculate text sizing on resize (implement this in SECTION 3)
+    if (typeof recalculateTextSizing === 'function') {
+      recalculateTextSizing();
+    }
+  }
+
+  // === ASPECT-RATIO-AWARE TEXT WITH CLAMPED SCALING ===
+  // Text gets stretched by non-uniform scaling, so we compensate.
+  // Also clamp the effective scale to keep text legible at all sizes.
+  const TEXT_SCALE_MIN = 0.75;
+  const TEXT_SCALE_MAX = 1.4;
+
+  function getTextScaleAdjustment() {
+    const baseScale = window.innerHeight / H;
+    const clampedScale = Math.min(TEXT_SCALE_MAX, Math.max(TEXT_SCALE_MIN, baseScale));
+    return clampedScale / baseScale;
+  }
+
+  /**
+   * Draw text with aspect-ratio compensation and clamped scaling.
+   * Use this instead of raw ctx.fillText() to prevent text stretching.
+   * Default font is 16px (minimum for answer text). Use 18-20px for better readability.
+   */
+  function drawText(text, x, y, options = {}) {
+    const { font = "500 16px system-ui, sans-serif", color = '#F5F5F0', align = 'center', baseline = 'middle' } = options;
+    ctx.save();
+    ctx.translate(x, y);
+    const adj = getTextScaleAdjustment();
+    ctx.scale(adj / aspectRatio, adj);
+    ctx.font = font;
+    ctx.fillStyle = color;
+    ctx.textAlign = align;
+    ctx.textBaseline = baseline;
+    ctx.fillText(text, 0, 0);
+    ctx.restore();
+  }
+
+  /**
+   * Convert screen coordinates to logical coordinates.
+   * Use this in handleTouch to get positions in 360×640 space.
+   */
+  function screenToLogical(screenX, screenY) {
+    const dpr = window.devicePixelRatio || 1;
+    const rect = canvas.getBoundingClientRect();
+    const canvasX = (screenX - rect.left) * dpr;
+    const canvasY = (screenY - rect.top) * dpr;
+    return {
+      x: canvasX / scaleX,
+      y: canvasY / scaleY
+    };
+  }
+
+  /**
+   * Check if a point is inside a rectangle (logical coordinates).
+   */
+  function pointInRect(px, py, rect) {
+    return px >= rect.x && px <= rect.x + rect.w &&
+           py >= rect.y && py <= rect.y + rect.h;
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // TEXT UTILITIES - Dynamic wrapping and font sizing
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  /**
+   * Wrap text to fit within a maximum width (in logical coordinates).
+   * Accounts for canvas transforms applied by drawText().
+   */
+  function wrapText(text, maxWidth, font, maxLines = 3) {
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.font = font;
+    const adj = getTextScaleAdjustment();
+    const maxRawWidth = maxWidth * aspectRatio / adj;
+    const words = text.split(' ');
+    const lines = [];
+    let currentLine = '';
+    words.forEach(word => {
+      const testLine = currentLine ? currentLine + ' ' + word : word;
+      if (ctx.measureText(testLine).width > maxRawWidth && currentLine) {
+        lines.push(currentLine);
+        currentLine = word;
+      } else {
+        currentLine = testLine;
+      }
+    });
+    if (currentLine) lines.push(currentLine);
+    ctx.restore();
+    return lines.slice(0, maxLines);
+  }
+
+  /**
+   * Find the optimal font size to fit content in available space.
+   */
+  function findOptimalFontSize(options) {
+    const {
+      texts,
+      maxWidth,
+      availableHeight,
+      minFont = 12,
+      maxFont = 18,
+      itemPadding = 4,
+      fontFamily = "'Nunito Sans', sans-serif"
+    } = options;
+
+    let bestFontSize = minFont;
+    let bestWrappedTexts = [];
+
+    for (let fontSize = maxFont; fontSize >= minFont; fontSize -= 0.5) {
+      const font = `${fontSize}px ${fontFamily}`;
+      const lineHeight = fontSize + 2;
+
+      let totalHeight = 0;
+      const wrappedTexts = [];
+
+      for (const text of texts) {
+        const lines = wrapText(text, maxWidth, font);
+        wrappedTexts.push(lines);
+        totalHeight += itemPadding + lines.length * lineHeight;
+      }
+
+      if (totalHeight <= availableHeight) {
+        bestFontSize = fontSize;
+        bestWrappedTexts = wrappedTexts;
+        break;
+      }
+
+      bestWrappedTexts = wrappedTexts;
+    }
+
+    return { fontSize: bestFontSize, wrappedTexts: bestWrappedTexts };
+  }
+
+  const engine = {
+    /** Call this to end the game. DO NOT draw your own end screen. */
+    end(isCorrect, explanation) {
+      if (gameState === 'ended') return;
+      gameState = 'ended';
+      gameResult = isCorrect;
+      gameExplanation = explanation || '';
+      endScreenTime = 0;
+
+      // Spawn confetti for correct answers
+      if (isCorrect) {
+        for (let i = 0; i < 50; i++) {
+          confettiParticles.push({
+            x: W / 2,
+            y: H / 2,
+            vx: (Math.random() - 0.5) * 400,
+            vy: -Math.random() * 300 - 80,
+            size: 4 + Math.random() * 6,
+            color: ['#FFD700', '#FF6B6B', '#4ECDC4', '#95E1D3', '#F38181'][Math.floor(Math.random() * 5)],
+            rotation: Math.random() * Math.PI * 2,
+            rotationSpeed: (Math.random() - 0.5) * 10
+          });
+        }
+      }
+
+      // Notify parent frame
+      if (window.parent && window.parent !== window) {
+        window.parent.postMessage({
+          type: 'quiz-end',
+          isCorrect: isCorrect,
+          explanation: explanation || ''
+        }, '*');
+      }
+    }
+  };
+
+  /** STANDARD END SCREEN (MOBILE) - DO NOT MODIFY */
+  function drawEndScreen(dt) {
+    endScreenTime += dt;
+
+    // Update confetti
+    confettiParticles = confettiParticles.filter(p => {
+      p.vy += 600 * dt; // gravity
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.rotation += p.rotationSpeed * dt;
+      p.vx *= 0.99;
+      return p.y < H + 50;
+    });
+
+    // Dark overlay
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
+    ctx.fillRect(0, 0, W, H);
+
+    // Draw confetti
+    confettiParticles.forEach(p => {
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rotation);
+      ctx.fillStyle = p.color;
+      ctx.fillRect(-p.size / 2, -p.size / 4, p.size, p.size / 2);
+      ctx.restore();
+    });
+
+    // Result emoji (aspect-ratio aware)
+    const textAdj = getTextScaleAdjustment();
+    ctx.save();
+    ctx.translate(W / 2, H / 2 - 80);
+    ctx.scale(textAdj / aspectRatio, textAdj);
+    ctx.font = '64px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(gameResult ? '🎉' : '😢', 0, 0);
+    ctx.restore();
+
+    // Result text (aspect-ratio aware)
+    ctx.save();
+    ctx.translate(W / 2, H / 2 - 10);
+    ctx.scale(textAdj / aspectRatio, textAdj);
+    ctx.fillStyle = gameResult ? '#4ADE80' : '#F87171';
+    ctx.font = 'bold 32px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(gameResult ? 'Correct!' : 'Wrong!', 0, 0);
+    ctx.restore();
+
+    // Buttons
+    if (gameResult) {
+      // Correct: show both Restart and Next/Finish
+      drawMobileButton(restartButton, 'Restart', '#E87A3E', true);
+      const nextLabel = QUESTION.isLastQuestion ? 'Finish' : 'Next';
+      drawMobileButton(nextButton, nextLabel, '#4ECDC4', true);
+    } else {
+      // Wrong: show only centered Restart button
+      drawMobileButton(centeredRestartButton, 'Restart', '#E87A3E', true);
+    }
+  }
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 3: YOUR GAME CODE - IMPLEMENT THESE FUNCTIONS                     ║
+  // ║  Celestial Gate Alignment - True/False                                     ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+
+  // === AUDIO ===
+  const AudioCtx = window.AudioContext || window.webkitAudioContext;
+  let audioCtx = null;
+
+  function getAudioCtx() {
+    if (!audioCtx) audioCtx = new AudioCtx();
+    return audioCtx;
+  }
+
+  function playClickSound() {
+    try {
+      const ac = getAudioCtx();
+      const osc = ac.createOscillator();
+      const gain = ac.createGain();
+      osc.connect(gain);
+      gain.connect(ac.destination);
+      osc.frequency.setValueAtTime(600, ac.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(800, ac.currentTime + 0.08);
+      gain.gain.setValueAtTime(0.15, ac.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ac.currentTime + 0.12);
+      osc.start(ac.currentTime);
+      osc.stop(ac.currentTime + 0.12);
+    } catch(e) {}
+  }
+
+  function playCorrectSound() {
+    try {
+      const ac = getAudioCtx();
+      const osc = ac.createOscillator();
+      const gain = ac.createGain();
+      osc.connect(gain);
+      gain.connect(ac.destination);
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(523, ac.currentTime);
+      osc.frequency.setValueAtTime(659, ac.currentTime + 0.12);
+      osc.frequency.setValueAtTime(784, ac.currentTime + 0.24);
+      gain.gain.setValueAtTime(0.2, ac.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ac.currentTime + 0.5);
+      osc.start(ac.currentTime);
+      osc.stop(ac.currentTime + 0.5);
+    } catch(e) {}
+  }
+
+  function playWrongSound() {
+    try {
+      const ac = getAudioCtx();
+      const osc = ac.createOscillator();
+      const gain = ac.createGain();
+      osc.connect(gain);
+      gain.connect(ac.destination);
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(300, ac.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(150, ac.currentTime + 0.3);
+      gain.gain.setValueAtTime(0.12, ac.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ac.currentTime + 0.35);
+      osc.start(ac.currentTime);
+      osc.stop(ac.currentTime + 0.35);
+    } catch(e) {}
+  }
+
+  // === GAME STATE ===
+  let star = null;
+  let gates = [];
+  let bgStars = [];
+  let gameTime = 0;
+  let answered = false;
+  let answerAnim = { active: false, timer: 0, correct: false, gateIndex: -1 };
+  let starParticles = [];
+  let gateGlowPhase = 0;
+  let entranceProgress = 0;
+
+  // Text sizing cache
+  let gateTextData = [];
+
+  function recalculateTextSizing() {
+    if (!gates || gates.length === 0) return;
+    const { fontSize, wrappedTexts } = findOptimalFontSize({
+      texts: QUESTION.choices.map(c => c.text),
+      maxWidth: 130,
+      availableHeight: 100,
+      minFont: 14,
+      maxFont: 18,
+      fontFamily: "'Nunito', sans-serif"
+    });
+    gateTextData = wrappedTexts.map((lines, i) => ({
+      lines,
+      fontSize
+    }));
+  }
+
+  function initGame() {
+    gameTime = 0;
+    answered = false;
+    answerAnim = { active: false, timer: 0, correct: false, gateIndex: -1 };
+    starParticles = [];
+    gateGlowPhase = 0;
+    entranceProgress = 0;
+
+    // Guiding star in center
+    star = {
+      x: W / 2,
+      y: H / 2 - 30,
+      targetX: W / 2,
+      vx: 0,
+      radius: 14,
+      trail: [],
+      pulse: 0
+    };
+
+    // Two celestial gates - left (choice 0) and right (choice 1)
+    const gateW = 140;
+    const gateH = 180;
+    const gateY = H / 2 - gateH / 2 - 30;
+
+    gates = QUESTION.choices.map((choice, i) => ({
+      x: i === 0 ? -gateW : W + gateW, // Start offscreen
+      targetX: i === 0 ? 20 : W - 20 - gateW,
+      y: gateY,
+      w: gateW,
+      h: gateH,
+      choice: choice,
+      rotation: i === 0 ? -0.15 : 0.15,
+      targetRotation: 0,
+      glowIntensity: 0,
+      scale: 0.6,
+      alpha: 0,
+      hovered: false
+    }));
+
+    // Background stars
+    bgStars = [];
+    for (let i = 0; i < 60; i++) {
+      bgStars.push({
+        x: Math.random() * W,
+        y: Math.random() * H,
+        size: Math.random() * 2 + 0.5,
+        twinkleSpeed: Math.random() * 3 + 1,
+        twinkleOffset: Math.random() * Math.PI * 2,
+        brightness: Math.random() * 0.5 + 0.5
+      });
+    }
+
+    recalculateTextSizing();
+  }
+
+  function updateGame(dt) {
+    if (gameState !== 'playing') return;
+
+    gameTime += dt;
+    gateGlowPhase += dt * 2;
+
+    // Entrance animation (first 1.2 seconds)
+    if (entranceProgress < 1) {
+      entranceProgress = Math.min(1, entranceProgress + dt / 1.2);
+      const t = entranceProgress;
+      // Spring easing
+      const spring = t < 1 ? 1 + Math.sin(t * Math.PI * 2) * 0.15 * (1 - t) : 1;
+
+      gates.forEach((gate, i) => {
+        const startX = i === 0 ? -140 : W + 140;
+        gate.x = startX + (gate.targetX - startX) * t * spring;
+        gate.rotation = (i === 0 ? -0.15 : 0.15) * (1 - t);
+        gate.scale = 0.6 + 0.4 * t;
+        gate.alpha = t;
+      });
+    }
+
+    // Star physics: smooth follow towards targetX
+    const dx = star.targetX - star.x;
+    star.vx += dx * 8 * dt;
+    star.vx *= 0.9; // Damping
+    star.x += star.vx * dt * 60;
+    star.x = Math.max(20, Math.min(W - 20, star.x));
+    star.pulse += dt * 4;
+
+    // Star trail particles
+    if (Math.random() < 0.4) {
+      starParticles.push({
+        x: star.x + (Math.random() - 0.5) * 8,
+        y: star.y + (Math.random() - 0.5) * 8,
+        size: Math.random() * 4 + 2,
+        alpha: 0.8,
+        life: 0,
+        maxLife: 0.5 + Math.random() * 0.5,
+        color: Math.random() > 0.5 ? '#F5A742' : '#FFFFFF'
+      });
+    }
+
+    // Update star particles
+    starParticles = starParticles.filter(p => {
+      p.life += dt;
+      p.alpha = 0.8 * (1 - p.life / p.maxLife);
+      p.y += 15 * dt;
+      p.size *= 0.98;
+      return p.life < p.maxLife;
+    });
+
+    // Gate hover detection
+    gates.forEach(gate => {
+      const cx = gate.x + gate.w / 2;
+      const starDist = Math.abs(star.x - cx);
+      gate.hovered = starDist < gate.w / 2 + 20;
+      gate.glowIntensity += ((gate.hovered ? 1 : 0.3) - gate.glowIntensity) * 4 * dt;
+    });
+
+    // Answer animation
+    if (answerAnim.active) {
+      answerAnim.timer += dt;
+      if (answerAnim.timer > 0.8) {
+        const gate = gates[answerAnim.gateIndex];
+        if (answerAnim.correct) {
+          playCorrectSound();
+        } else {
+          playWrongSound();
+        }
+        engine.end(gate.choice.is_correct, gate.choice.explanation);
+      }
+    }
+  }
+
+  function drawGame() {
+    // Deep space background
+    const grad = ctx.createLinearGradient(0, 0, 0, H);
+    grad.addColorStop(0, '#0a0a1e');
+    grad.addColorStop(0.4, '#0d0d2b');
+    grad.addColorStop(0.7, '#121230');
+    grad.addColorStop(1, '#0a0a1e');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, W, H);
+
+    // Background stars
+    bgStars.forEach(s => {
+      const twinkle = 0.5 + 0.5 * Math.sin(gameTime * s.twinkleSpeed + s.twinkleOffset);
+      const alpha = s.brightness * twinkle;
+      ctx.fillStyle = `rgba(255, 255, 240, ${alpha})`;
+      ctx.beginPath();
+      ctx.ellipse(s.x, s.y, s.size, s.size * aspectRatio, 0, 0, Math.PI * 2);
+      ctx.fill();
+    });
+
+    // Subtle nebula glow
+    const nebulaGrad = ctx.createRadialGradient(W / 2, H / 2 - 50, 20, W / 2, H / 2 - 50, 200);
+    nebulaGrad.addColorStop(0, 'rgba(78, 205, 196, 0.06)');
+    nebulaGrad.addColorStop(0.5, 'rgba(232, 122, 62, 0.03)');
+    nebulaGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+    ctx.fillStyle = nebulaGrad;
+    ctx.fillRect(0, 0, W, H);
+
+    // Draw gates
+    gates.forEach((gate, i) => {
+      if (gate.alpha <= 0) return;
+
+      ctx.save();
+      ctx.globalAlpha = gate.alpha;
+
+      const cx = gate.x + gate.w / 2;
+      const cy = gate.y + gate.h / 2;
+
+      // Gate outer glow
+      const glowColor = i === 0 ? '#4ECDC4' : '#E87A3E';
+      const glowAlpha = 0.15 + 0.15 * gate.glowIntensity * Math.sin(gateGlowPhase + i * Math.PI);
+      const glow = ctx.createRadialGradient(cx, cy, 10, cx, cy, gate.w * 0.8);
+      glow.addColorStop(0, glowColor + Math.floor(glowAlpha * 255).toString(16).padStart(2, '0'));
+      glow.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = glow;
+      ctx.fillRect(gate.x - 30, gate.y - 30, gate.w + 60, gate.h + 60);
+
+      // Gate body
+      ctx.save();
+      ctx.translate(cx, cy);
+      ctx.rotate(gate.rotation);
+      ctx.scale(gate.scale, gate.scale);
+
+      // Gate arch shape
+      const hw = gate.w / 2;
+      const hh = gate.h / 2;
+
+      // Outer frame
+      ctx.beginPath();
+      ctx.moveTo(-hw, hh);
+      ctx.lineTo(-hw, -hh + 30);
+      ctx.quadraticCurveTo(-hw, -hh, -hw + 30, -hh);
+      ctx.lineTo(hw - 30, -hh);
+      ctx.quadraticCurveTo(hw, -hh, hw, -hh + 30);
+      ctx.lineTo(hw, hh);
+      ctx.closePath();
+
+      // Fill with gradient
+      const gateGrad = ctx.createLinearGradient(0, -hh, 0, hh);
+      const baseColor = i === 0 ? 'rgba(78, 205, 196,' : 'rgba(232, 122, 62,';
+      gateGrad.addColorStop(0, baseColor + '0.3)');
+      gateGrad.addColorStop(0.5, baseColor + (0.15 + 0.1 * gate.glowIntensity) + ')');
+      gateGrad.addColorStop(1, baseColor + '0.05)');
+      ctx.fillStyle = gateGrad;
+      ctx.fill();
+
+      // Border glow
+      ctx.strokeStyle = glowColor;
+      ctx.lineWidth = 2.5;
+      ctx.shadowColor = glowColor;
+      ctx.shadowBlur = 8 * gate.glowIntensity;
+      ctx.stroke();
+      ctx.shadowBlur = 0;
+
+      // Inner arch (portal opening)
+      const innerPad = 15;
+      ctx.beginPath();
+      ctx.moveTo(-hw + innerPad, hh - 5);
+      ctx.lineTo(-hw + innerPad, -hh + 30 + innerPad);
+      ctx.quadraticCurveTo(-hw + innerPad, -hh + innerPad, -hw + innerPad + 20, -hh + innerPad);
+      ctx.lineTo(hw - innerPad - 20, -hh + innerPad);
+      ctx.quadraticCurveTo(hw - innerPad, -hh + innerPad, hw - innerPad, -hh + 30 + innerPad);
+      ctx.lineTo(hw - innerPad, hh - 5);
+      ctx.closePath();
+
+      const innerGrad = ctx.createLinearGradient(0, -hh, 0, hh);
+      innerGrad.addColorStop(0, 'rgba(10, 10, 30, 0.8)');
+      innerGrad.addColorStop(1, baseColor + '0.15)');
+      ctx.fillStyle = innerGrad;
+      ctx.fill();
+
+      // Decorative runes/dots on gate frame
+      const runeColor = glowColor;
+      const runeAlpha = 0.4 + 0.3 * Math.sin(gateGlowPhase * 1.5 + i);
+      ctx.fillStyle = runeColor;
+      ctx.globalAlpha = gate.alpha * runeAlpha;
+      for (let r = 0; r < 5; r++) {
+        const ry = -hh + 20 + r * (gate.h - 40) / 4;
+        ctx.beginPath();
+        ctx.ellipse(-hw + 6, ry, 2.5, 2.5 * aspectRatio, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.ellipse(hw - 6, ry, 2.5, 2.5 * aspectRatio, 0, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.globalAlpha = gate.alpha;
+
+      ctx.restore(); // Restore from gate transform
+
+      // Gate label text below the gate
+      const textData = gateTextData[i];
+      if (textData) {
+        const labelY = gate.y + gate.h + 18;
+        textData.lines.forEach((line, li) => {
+          drawText(line, cx, labelY + li * (textData.fontSize + 3), {
+            font: `500 ${textData.fontSize}px 'Nunito', sans-serif`,
+            color: '#F5F5F0',
+            align: 'center'
+          });
+        });
+      }
+
+      ctx.restore(); // Restore global alpha
+    });
+
+    // Star trail particles
+    starParticles.forEach(p => {
+      ctx.globalAlpha = p.alpha;
+      ctx.fillStyle = p.color;
+      ctx.beginPath();
+      ctx.ellipse(p.x, p.y, p.size, p.size * aspectRatio, 0, 0, Math.PI * 2);
+      ctx.fill();
+    });
+    ctx.globalAlpha = 1;
+
+    // Draw guiding star
+    if (star) {
+      const pulseSize = 1 + 0.1 * Math.sin(star.pulse);
+
+      // Star outer glow
+      const starGlow = ctx.createRadialGradient(star.x, star.y, 0, star.x, star.y, star.radius * 3);
+      starGlow.addColorStop(0, 'rgba(245, 167, 66, 0.4)');
+      starGlow.addColorStop(0.5, 'rgba(245, 167, 66, 0.1)');
+      starGlow.addColorStop(1, 'rgba(245, 167, 66, 0)');
+      ctx.fillStyle = starGlow;
+      ctx.beginPath();
+      ctx.ellipse(star.x, star.y, star.radius * 3 * pulseSize, star.radius * 3 * pulseSize * aspectRatio, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Star body - draw a multi-pointed star shape
+      ctx.save();
+      ctx.translate(star.x, star.y);
+      ctx.scale(1, aspectRatio);
+      ctx.rotate(gameTime * 0.5);
+
+      const r = star.radius * pulseSize;
+      const points = 5;
+      ctx.beginPath();
+      for (let p = 0; p < points * 2; p++) {
+        const angle = (p * Math.PI) / points - Math.PI / 2;
+        const rad = p % 2 === 0 ? r : r * 0.45;
+        const px = Math.cos(angle) * rad;
+        const py = Math.sin(angle) * rad;
+        if (p === 0) ctx.moveTo(px, py);
+        else ctx.lineTo(px, py);
+      }
+      ctx.closePath();
+
+      const starFill = ctx.createRadialGradient(0, 0, 0, 0, 0, r);
+      starFill.addColorStop(0, '#FFFFFF');
+      starFill.addColorStop(0.4, '#F5A742');
+      starFill.addColorStop(1, '#E87A3E');
+      ctx.fillStyle = starFill;
+      ctx.fill();
+
+      ctx.restore();
+
+      // Inner bright core
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+      ctx.beginPath();
+      ctx.ellipse(star.x, star.y, 4, 4 * aspectRatio, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Answer animation overlay
+    if (answerAnim.active) {
+      const gate = gates[answerAnim.gateIndex];
+      const cx = gate.x + gate.w / 2;
+      const cy = gate.y + gate.h / 2;
+      const t = Math.min(answerAnim.timer / 0.5, 1);
+
+      // Flash ring
+      ctx.save();
+      ctx.globalAlpha = (1 - t) * 0.8;
+      const ringColor = answerAnim.correct ? '#6BBF59' : '#E85D4A';
+      ctx.strokeStyle = ringColor;
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.ellipse(cx, cy, 30 + t * 80, (30 + t * 80) * aspectRatio, 0, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    }
+  }
+
+  function handleTouch(e, type) {
+    if (gameState !== 'playing') return;
+    if (answered) return;
+
+    const touch = e.touches[0] || e.changedTouches[0];
+    if (!touch) return;
+    const { x, y } = screenToLogical(touch.clientX, touch.clientY);
+
+    if (type === 'start' || type === 'move') {
+      // Move star horizontally by touch position
+      star.targetX = x;
+    }
+
+    if (type === 'end') {
+      // Check if star is within a gate
+      gates.forEach((gate, i) => {
+        const gateRect = { x: gate.x, y: gate.y - 20, w: gate.w, h: gate.h + 60 };
+        if (star.x >= gate.x && star.x <= gate.x + gate.w) {
+          answered = true;
+          playClickSound();
+          answerAnim = {
+            active: true,
+            timer: 0,
+            correct: gate.choice.is_correct,
+            gateIndex: i
+          };
+        }
+      });
+    }
+  }
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 4: GAME LOOP - DO NOT MODIFY                                      ║
+  // ║  Standard loop with responsive scaling and touch handling.                 ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  let lastTime = performance.now();
+
+  function gameLoop(now) {
+    const dt = Math.min((now - lastTime) / 1000, 0.05); // Cap at 50ms
+    lastTime = now;
+
+    // Apply transform for logical coordinate system (non-uniform scaling)
+    ctx.setTransform(scaleX, 0, 0, scaleY, 0, 0);
+
+    if (gameState === 'playing') {
+      updateGame(dt);
+      drawGame();
+    } else {
+      drawGame(); // Draw game state behind overlay
+      drawEndScreen(dt);
+    }
+
+    // Reset transform for next frame
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+    requestAnimationFrame(gameLoop);
+  }
+
+  // Touch handlers
+  function onTouchStart(e) {
+    e.preventDefault();
+    if (gameState === 'ended') {
+      const touch = e.touches[0];
+      const { x, y } = screenToLogical(touch.clientX, touch.clientY);
+
+      if (gameResult) {
+        // Correct answer: check both buttons
+        if (pointInRect(x, y, restartButton)) {
+          gameState = 'playing';
+          gameResult = null;
+          gameExplanation = '';
+          confettiParticles = [];
+          initGame();
+          return;
+        }
+        if (pointInRect(x, y, nextButton)) {
+          // Notify parent to go to next question
+          if (window.parent && window.parent !== window) {
+            window.parent.postMessage({ type: 'quiz-next' }, '*');
+          }
+          return;
+        }
+      } else {
+        // Wrong answer: check centered restart button
+        if (pointInRect(x, y, centeredRestartButton)) {
+          gameState = 'playing';
+          gameResult = null;
+          gameExplanation = '';
+          confettiParticles = [];
+          initGame();
+          return;
+        }
+      }
+    }
+    handleTouch(e, 'start');
+  }
+
+  function onTouchMove(e) {
+    e.preventDefault();
+    handleTouch(e, 'move');
+  }
+
+  function onTouchEnd(e) {
+    e.preventDefault();
+    handleTouch(e, 'end');
+  }
+
+  canvas.addEventListener('touchstart', onTouchStart, { passive: false });
+  canvas.addEventListener('touchmove', onTouchMove, { passive: false });
+  canvas.addEventListener('touchend', onTouchEnd, { passive: false });
+
+  // Also support mouse for testing in browser
+  canvas.addEventListener('mousedown', (e) => {
+    const fakeTouch = { touches: [{ clientX: e.clientX, clientY: e.clientY }], changedTouches: [{ clientX: e.clientX, clientY: e.clientY }] };
+    onTouchStart(fakeTouch);
+  });
+
+  canvas.addEventListener('mouseup', (e) => {
+    const fakeTouch = { touches: [], changedTouches: [{ clientX: e.clientX, clientY: e.clientY }] };
+    onTouchEnd(fakeTouch);
+  });
+
+  // Mouse move for desktop testing
+  canvas.addEventListener('mousemove', (e) => {
+    if (gameState !== 'playing' || answered) return;
+    const { x } = screenToLogical(e.clientX, e.clientY);
+    star.targetX = x;
+  });
+
+  // Handle resize
+  window.addEventListener('resize', resizeCanvas);
+  window.addEventListener('orientationchange', () => {
+    setTimeout(resizeCanvas, 100); // Delay for orientation change to complete
+  });
+
+  // Prevent pull-to-refresh and overscroll
+  document.body.addEventListener('touchmove', (e) => e.preventDefault(), { passive: false });
+
+  // Initialize
+  resizeCanvas();
+  initGame();
+  requestAnimationFrame(gameLoop);
+  </script>
+</body>
+</html>

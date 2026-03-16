@@ -1,0 +1,1099 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Coral Reef Structure Build</title>
+  <link href="https://fonts.googleapis.com/css2?family=Belanosima:wght@400;600;700&family=Nunito+Sans:wght@400;500;600;700&family=Nunito:wght@400;500;600&display=swap" rel="stylesheet">
+  <!--
+  ╔══════════════════════════════════════════════════════════════════════════════╗
+  ║  GAME FACTORY TEMPLATE                                                        ║
+  ║  This template enforces critical invariants. Follow the section markers.      ║
+  ╚══════════════════════════════════════════════════════════════════════════════╝
+  -->
+  <style>
+    /* ═══════════════════════════════════════════════════════════════════════════
+       BASE STYLES - Can be extended, not removed
+       ═══════════════════════════════════════════════════════════════════════════ */
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+    }
+    body {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      background: #1a1a2e;
+      font-family: system-ui, -apple-system, sans-serif;
+    }
+    #gameCanvas {
+      background: #16213e;
+      border-radius: 8px;
+      display: block;
+    }
+  </style>
+</head>
+<body>
+  <!-- ═══════════════════════════════════════════════════════════════════════════
+       CANVAS - Sized dynamically to fill available space
+       ═══════════════════════════════════════════════════════════════════════════ -->
+  <canvas id="gameCanvas"></canvas>
+
+  <script>
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 1: QUESTION PLACEHOLDER - DO NOT MODIFY FORMAT                    ║
+  // ║  Platform replaces this at runtime. Use these exact 60-char answers.       ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  const QUESTION = {
+    type: "mcq",
+    prompt: "Sample question text",
+    choices: [
+      { text: "This is sample answer A which is long enough to test text overflow", is_correct: true, explanation: "Why A is correct" },
+      { text: "This is sample answer B which is long enough to test text overflow", is_correct: false, explanation: "Why B is wrong" },
+      { text: "This is sample answer C which is long enough to test text overflow", is_correct: false, explanation: "Why C is wrong" },
+      { text: "This is sample answer D which is long enough to test text overflow", is_correct: false, explanation: "Why D is wrong" }
+    ],
+    isLastQuestion: false
+  };
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 2: ENGINE CORE - DO NOT MODIFY                                    ║
+  // ║  Standard engine interface and end screen. This is sacred.                 ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  const canvas = document.getElementById('gameCanvas');
+  const ctx = canvas.getContext('2d');
+
+  // Logical dimensions (game code works in this coordinate space)
+  const W = 720, H = 540;
+
+  // Scaling state (computed on resize)
+  let scale = 1;
+  let dpr = 1;
+
+  let gameState = 'playing'; // 'playing' | 'ended'
+  let gameResult = null;     // true (correct) | false (wrong)
+  let gameExplanation = '';
+  let endScreenTime = 0;
+  let confettiParticles = [];
+
+  // End screen button bounds (logical coordinates)
+  const restartButton = { x: W / 2 - 170, y: H / 2 + 60, w: 150, h: 48 };
+  const nextButton = { x: W / 2 + 20, y: H / 2 + 60, w: 150, h: 48 };
+
+  /** Check if point is inside rectangle */
+  function pointInRect(px, py, rect) {
+    return px >= rect.x && px <= rect.x + rect.w &&
+           py >= rect.y && py <= rect.y + rect.h;
+  }
+
+  /** Draw a styled button */
+  function drawButton(rect, label, color, pulse) {
+    const p = pulse ? 1 + Math.sin(endScreenTime * 4) * 0.03 : 1;
+    ctx.save();
+    ctx.translate(rect.x + rect.w / 2, rect.y + rect.h / 2);
+    ctx.scale(p, p);
+    ctx.translate(-(rect.x + rect.w / 2), -(rect.y + rect.h / 2));
+
+    // Button background
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.roundRect(rect.x, rect.y, rect.w, rect.h, 12);
+    ctx.fill();
+
+    // Button text
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = 'bold 18px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, rect.x + rect.w / 2, rect.y + rect.h / 2);
+
+    ctx.restore();
+  }
+
+  /**
+   * Resize canvas to fill available space with proper DPR scaling.
+   * Maintains logical coordinate system (720×540).
+   */
+  function resizeCanvas() {
+    dpr = window.devicePixelRatio || 1;
+
+    // Get available space
+    const availW = window.innerWidth;
+    const availH = window.innerHeight;
+
+    // Calculate scale to fit logical space (720×540) in available space
+    const scaleX = availW / W;
+    const scaleY = availH / H;
+    scale = Math.min(scaleX, scaleY);
+
+    // Physical canvas buffer (DPR-scaled for crisp rendering)
+    canvas.width = W * scale * dpr;
+    canvas.height = H * scale * dpr;
+
+    // CSS display size
+    canvas.style.width = (W * scale) + 'px';
+    canvas.style.height = (H * scale) + 'px';
+  }
+
+  /**
+   * Convert screen coordinates to logical coordinates.
+   * Use this for mouse/click events to get positions in 720×540 space.
+   */
+  function screenToLogical(screenX, screenY) {
+    const rect = canvas.getBoundingClientRect();
+    return {
+      x: (screenX - rect.left) * (W / rect.width),
+      y: (screenY - rect.top) * (H / rect.height)
+    };
+  }
+
+  const engine = {
+    /** Call this to end the game. DO NOT draw your own end screen. */
+    end(isCorrect, explanation) {
+      if (gameState === 'ended') return;
+      gameState = 'ended';
+      gameResult = isCorrect;
+      gameExplanation = explanation || '';
+      endScreenTime = 0;
+
+      // Spawn confetti for correct answers
+      if (isCorrect) {
+        for (let i = 0; i < 50; i++) {
+          confettiParticles.push({
+            x: W / 2,
+            y: H / 2,
+            vx: (Math.random() - 0.5) * 600,
+            vy: -Math.random() * 400 - 100,
+            size: 4 + Math.random() * 6,
+            color: ['#FFD700', '#FF6B6B', '#4ECDC4', '#95E1D3', '#F38181'][Math.floor(Math.random() * 5)],
+            rotation: Math.random() * Math.PI * 2,
+            rotationSpeed: (Math.random() - 0.5) * 10
+          });
+        }
+      }
+
+      // Notify parent frame
+      if (window.parent && window.parent !== window) {
+        window.parent.postMessage({
+          type: 'quiz-end',
+          isCorrect: isCorrect,
+          explanation: explanation || ''
+        }, '*');
+      }
+    }
+  };
+
+  /** STANDARD END SCREEN - DO NOT MODIFY */
+  function drawEndScreen(dt) {
+    endScreenTime += dt;
+
+    // Update confetti
+    confettiParticles = confettiParticles.filter(p => {
+      p.vy += 800 * dt; // gravity
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.rotation += p.rotationSpeed * dt;
+      p.vx *= 0.99;
+      return p.y < H + 50;
+    });
+
+    // Dark overlay
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
+    ctx.fillRect(0, 0, W, H);
+
+    // Draw confetti
+    confettiParticles.forEach(p => {
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rotation);
+      ctx.fillStyle = p.color;
+      ctx.fillRect(-p.size / 2, -p.size / 4, p.size, p.size / 2);
+      ctx.restore();
+    });
+
+    // Result emoji
+    ctx.font = '72px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(gameResult ? '🎉' : '😢', W / 2, H / 2 - 50);
+
+    // Result text
+    ctx.fillStyle = gameResult ? '#4ADE80' : '#F87171';
+    ctx.font = 'bold 36px system-ui, sans-serif';
+    ctx.fillText(gameResult ? 'Correct!' : 'Wrong!', W / 2, H / 2 + 20);
+
+    // Buttons
+    if (gameResult) {
+      // Correct: show both Restart and Next/Finish
+      drawButton(restartButton, 'Restart', '#E87A3E', true);
+      const nextLabel = QUESTION.isLastQuestion ? 'Finish' : 'Next';
+      drawButton(nextButton, nextLabel, '#4ECDC4', true);
+    } else {
+      // Wrong: show only centered Restart button
+      const centeredRestart = { x: W / 2 - 75, y: H / 2 + 60, w: 150, h: 48 };
+      drawButton(centeredRestart, 'Restart', '#E87A3E', true);
+    }
+  }
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 3: YOUR GAME CODE - IMPLEMENT THESE FUNCTIONS                     ║
+  // ║  This is where your game logic goes. See requirements below.               ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+
+  // === COLORS ===
+  const COLORS = {
+    bgPrimary: '#FAFAF7',
+    bgSurface: '#FFFFFF',
+    textPrimary: '#2B2B28',
+    textSecondary: '#5A5A54',
+    orange: '#E87A3E',
+    orangeHover: '#D66B31',
+    amber: '#F5A742',
+    cyan: '#4ECDC4',
+    cyanLight: '#E8F9F8',
+    success: '#6BBF59',
+    error: '#E85D4A',
+    borderSubtle: '#E6E6E0',
+    borderStrong: '#D4D4CC',
+    peach: '#FFB89D',
+    orangeLight: '#FFF4ED',
+  };
+
+  // === SOUND EFFECTS ===
+  const AudioCtx = window.AudioContext || window.webkitAudioContext;
+  let audioCtx = null;
+  function getAudioCtx() {
+    if (!audioCtx) audioCtx = new AudioCtx();
+    return audioCtx;
+  }
+
+  function playSelectSound() {
+    try {
+      const ctx = getAudioCtx();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(520, ctx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(620, ctx.currentTime + 0.08);
+      gain.gain.setValueAtTime(0.15, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.12);
+      osc.start(ctx.currentTime);
+      osc.stop(ctx.currentTime + 0.12);
+    } catch(e) {}
+  }
+
+  function playCorrectSound() {
+    try {
+      const ctx = getAudioCtx();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(440, ctx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(880, ctx.currentTime + 0.2);
+      gain.gain.setValueAtTime(0.2, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.4);
+      osc.start(ctx.currentTime);
+      osc.stop(ctx.currentTime + 0.4);
+    } catch(e) {}
+  }
+
+  function playWrongSound() {
+    try {
+      const ctx = getAudioCtx();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(200, ctx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(100, ctx.currentTime + 0.3);
+      gain.gain.setValueAtTime(0.15, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.35);
+      osc.start(ctx.currentTime);
+      osc.stop(ctx.currentTime + 0.35);
+    } catch(e) {}
+  }
+
+  function playBubbleSound() {
+    try {
+      const ctx = getAudioCtx();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(300 + Math.random() * 400, ctx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(800 + Math.random() * 200, ctx.currentTime + 0.06);
+      gain.gain.setValueAtTime(0.06, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.1);
+      osc.start(ctx.currentTime);
+      osc.stop(ctx.currentTime + 0.1);
+    } catch(e) {}
+  }
+
+  // === GAME STATE ===
+  const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  let selectedIndex = 0;
+  let polyps = [];
+  let reefSlots = [];
+  let bubbles = [];
+  let seaweedStrands = [];
+  let sandParticles = [];
+  let gameTime = 0;
+  let answerLocked = false;
+  let lockAnimTime = 0;
+  let lockResult = null; // 'correct' or 'wrong'
+  let fallingPolyp = null;
+  let correctGlowParticles = [];
+
+  // Polyp shapes for each answer
+  const POLYP_SHAPES = ['branch', 'fan', 'tube', 'brain'];
+
+  // Reef base position
+  const REEF_BASE_Y = 200;
+  const REEF_BASE_X = W / 2;
+
+  // Polyp card layout - vertical stack for 60-char text
+  const CARD_W = 480;
+  const CARD_H = 56;
+  const CARD_GAP = 8;
+  const CARDS_START_X = (W - CARD_W) / 2;
+  const CARDS_START_Y = 270;
+
+  function wrapText(text, maxWidth, font) {
+    ctx.font = font;
+    const words = text.split(' ');
+    const lines = [];
+    let currentLine = words[0];
+    for (let i = 1; i < words.length; i++) {
+      const testLine = currentLine + ' ' + words[i];
+      if (ctx.measureText(testLine).width <= maxWidth) {
+        currentLine = testLine;
+      } else {
+        lines.push(currentLine);
+        currentLine = words[i];
+      }
+    }
+    lines.push(currentLine);
+    return lines;
+  }
+
+  function initGame() {
+    selectedIndex = 0;
+    answerLocked = false;
+    lockAnimTime = 0;
+    lockResult = null;
+    fallingPolyp = null;
+    correctGlowParticles = [];
+    gameTime = 0;
+
+    // Initialize polyp cards from choices
+    polyps = QUESTION.choices.map((choice, i) => ({
+      choice,
+      index: i,
+      x: CARDS_START_X,
+      y: CARDS_START_Y + i * (CARD_H + CARD_GAP),
+      w: CARD_W,
+      h: CARD_H,
+      shape: POLYP_SHAPES[i],
+      scale: 0,
+      alpha: 0,
+      offsetX: 0,
+      hoverScale: 1,
+      color: getPolypColor(i),
+      entranceDelay: i * 80,
+      entranceStarted: false,
+    }));
+
+    // Reef slots (where polyps would attach)
+    reefSlots = QUESTION.choices.map((_, i) => ({
+      x: REEF_BASE_X - 80 + i * 55,
+      y: REEF_BASE_Y - 40 - Math.random() * 30,
+      size: 20 + Math.random() * 10,
+      filled: false,
+      pulsePhase: Math.random() * Math.PI * 2,
+    }));
+
+    // Bubbles
+    bubbles = [];
+    for (let i = 0; i < 15; i++) {
+      bubbles.push(createBubble());
+    }
+
+    // Seaweed
+    seaweedStrands = [];
+    for (let i = 0; i < 6; i++) {
+      seaweedStrands.push({
+        x: 40 + Math.random() * 640,
+        y: H,
+        height: 40 + Math.random() * 60,
+        width: 6 + Math.random() * 4,
+        phase: Math.random() * Math.PI * 2,
+        speed: 0.5 + Math.random() * 0.5,
+        color: i % 2 === 0 ? '#2d8a5e' : '#3aa06e',
+      });
+    }
+
+    // Sand particles along bottom
+    sandParticles = [];
+    for (let i = 0; i < 30; i++) {
+      sandParticles.push({
+        x: Math.random() * W,
+        y: H - 10 + Math.random() * 15,
+        size: 1 + Math.random() * 2,
+        alpha: 0.3 + Math.random() * 0.4,
+      });
+    }
+  }
+
+  function getPolypColor(index) {
+    const colors = [COLORS.orange, COLORS.cyan, COLORS.amber, COLORS.peach];
+    return colors[index % colors.length];
+  }
+
+  function createBubble() {
+    return {
+      x: 50 + Math.random() * 620,
+      y: H + Math.random() * 50,
+      size: 2 + Math.random() * 6,
+      speed: 30 + Math.random() * 40,
+      wobblePhase: Math.random() * Math.PI * 2,
+      wobbleAmp: 0.5 + Math.random() * 1.5,
+      alpha: 0.15 + Math.random() * 0.25,
+    };
+  }
+
+  function updateGame(dt) {
+    if (gameState !== 'playing') return;
+
+    gameTime += dt;
+
+    // Entrance animations for polyp cards
+    polyps.forEach((p) => {
+      if (!p.entranceStarted && gameTime * 1000 >= p.entranceDelay) {
+        p.entranceStarted = true;
+      }
+      if (p.entranceStarted && p.scale < 1) {
+        if (prefersReducedMotion) {
+          p.scale = 1;
+          p.alpha = 1;
+        } else {
+          p.scale = Math.min(p.scale + dt * 4, 1);
+          p.alpha = Math.min(p.alpha + dt * 4, 1);
+          // Spring overshoot
+          if (p.scale >= 0.9 && p.scale < 1) {
+            p.scale = Math.min(p.scale + dt * 2, 1);
+          }
+        }
+      }
+
+      // Hover scale for selected item
+      const isSelected = p.index === selectedIndex && !answerLocked;
+      const targetHover = isSelected ? 1.02 : 1.0;
+      p.hoverScale += (targetHover - p.hoverScale) * dt * 10;
+    });
+
+    // Update bubbles
+    bubbles.forEach(b => {
+      b.y -= b.speed * dt;
+      b.x += Math.sin(b.wobblePhase + gameTime * b.wobbleAmp) * 0.3;
+      if (b.y < -10) {
+        Object.assign(b, createBubble());
+        b.y = H + 5;
+      }
+    });
+
+    // Lock animation
+    if (answerLocked) {
+      lockAnimTime += dt;
+
+      if (lockResult === 'wrong' && fallingPolyp) {
+        fallingPolyp.y += fallingPolyp.vy * dt;
+        fallingPolyp.vy += 300 * dt; // gravity
+        fallingPolyp.rotation += fallingPolyp.rotSpeed * dt;
+        fallingPolyp.alpha = Math.max(0, fallingPolyp.alpha - dt * 0.8);
+      }
+
+      // Correct glow particles
+      if (lockResult === 'correct') {
+        correctGlowParticles.forEach(p => {
+          p.x += p.vx * dt;
+          p.y += p.vy * dt;
+          p.vy += 100 * dt;
+          p.alpha -= dt * 1.2;
+          p.size -= dt * 3;
+        });
+        correctGlowParticles = correctGlowParticles.filter(p => p.alpha > 0 && p.size > 0);
+      }
+
+      // End the game after animation completes
+      if (lockAnimTime > 1.2) {
+        const choice = QUESTION.choices[selectedIndex];
+        engine.end(choice.is_correct, choice.explanation);
+      }
+    }
+  }
+
+  function drawGame() {
+    // Ocean gradient background
+    const grad = ctx.createLinearGradient(0, 0, 0, H);
+    grad.addColorStop(0, '#0B3D6B');
+    grad.addColorStop(0.4, '#0E4D7B');
+    grad.addColorStop(0.7, '#1A6B8A');
+    grad.addColorStop(1, '#2D8B9A');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, W, H);
+
+    // Underwater light rays
+    drawLightRays();
+
+    // Sandy bottom
+    drawSandyFloor();
+
+    // Seaweed
+    drawSeaweed();
+
+    // Bubbles (background layer)
+    drawBubbles();
+
+    // Coral reef base structure
+    drawReefBase();
+
+    // Reef slots (pulsing indicators)
+    drawReefSlots();
+
+    // Falling polyp (wrong answer animation)
+    if (fallingPolyp && fallingPolyp.alpha > 0) {
+      drawFallingPolyp();
+    }
+
+    // Correct glow particles
+    correctGlowParticles.forEach(p => {
+      ctx.save();
+      ctx.globalAlpha = p.alpha;
+      ctx.fillStyle = p.color;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    });
+
+    // Answer polyp cards
+    drawPolypCards();
+  }
+
+  function drawLightRays() {
+    ctx.save();
+    ctx.globalAlpha = 0.06;
+    for (let i = 0; i < 5; i++) {
+      const x = 100 + i * 140;
+      const sway = Math.sin(gameTime * 0.3 + i * 0.7) * 20;
+      ctx.fillStyle = '#8ED8F8';
+      ctx.beginPath();
+      ctx.moveTo(x + sway - 15, 0);
+      ctx.lineTo(x + sway + 15, 0);
+      ctx.lineTo(x + sway + 50 + Math.sin(gameTime * 0.2 + i) * 10, H);
+      ctx.lineTo(x + sway - 50 + Math.sin(gameTime * 0.2 + i) * 10, H);
+      ctx.closePath();
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  function drawSandyFloor() {
+    // Sand gradient
+    const sandGrad = ctx.createLinearGradient(0, H - 30, 0, H);
+    sandGrad.addColorStop(0, 'rgba(210, 180, 140, 0.3)');
+    sandGrad.addColorStop(1, 'rgba(210, 180, 140, 0.6)');
+    ctx.fillStyle = sandGrad;
+    ctx.fillRect(0, H - 30, W, 30);
+
+    // Sand particles
+    sandParticles.forEach(p => {
+      ctx.save();
+      ctx.globalAlpha = p.alpha;
+      ctx.fillStyle = '#D2B48C';
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    });
+  }
+
+  function drawSeaweed() {
+    seaweedStrands.forEach(s => {
+      ctx.save();
+      ctx.strokeStyle = s.color;
+      ctx.lineWidth = s.width;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(s.x, s.y);
+      const sway = Math.sin(gameTime * s.speed + s.phase) * 12;
+      const midY = s.y - s.height * 0.5;
+      const topY = s.y - s.height;
+      ctx.quadraticCurveTo(s.x + sway * 0.5, midY, s.x + sway, topY);
+      ctx.stroke();
+      ctx.restore();
+    });
+  }
+
+  function drawBubbles() {
+    bubbles.forEach(b => {
+      ctx.save();
+      ctx.globalAlpha = b.alpha;
+      ctx.strokeStyle = 'rgba(180, 220, 255, 0.6)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.arc(b.x, b.y, b.size, 0, Math.PI * 2);
+      ctx.stroke();
+      // Highlight
+      ctx.fillStyle = 'rgba(220, 240, 255, 0.3)';
+      ctx.beginPath();
+      ctx.arc(b.x - b.size * 0.3, b.y - b.size * 0.3, b.size * 0.3, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    });
+  }
+
+  function drawReefBase() {
+    // Main coral reef base — bleached/white structure
+    ctx.save();
+
+    // Large reef mound
+    const breathe = Math.sin(gameTime * 0.5) * 2;
+    ctx.fillStyle = '#DDD8CC';
+    ctx.beginPath();
+    ctx.moveTo(REEF_BASE_X - 160, REEF_BASE_Y + 40);
+    ctx.quadraticCurveTo(REEF_BASE_X - 120, REEF_BASE_Y - 30 + breathe, REEF_BASE_X - 40, REEF_BASE_Y - 50 + breathe);
+    ctx.quadraticCurveTo(REEF_BASE_X, REEF_BASE_Y - 70 + breathe, REEF_BASE_X + 40, REEF_BASE_Y - 50 + breathe);
+    ctx.quadraticCurveTo(REEF_BASE_X + 120, REEF_BASE_Y - 30 + breathe, REEF_BASE_X + 160, REEF_BASE_Y + 40);
+    ctx.closePath();
+    ctx.fill();
+
+    // Texture lines on reef
+    ctx.strokeStyle = 'rgba(180, 175, 160, 0.4)';
+    ctx.lineWidth = 1;
+    for (let i = 0; i < 8; i++) {
+      const ox = REEF_BASE_X - 100 + i * 28;
+      const oy = REEF_BASE_Y - 10 + Math.sin(i * 1.2) * 15;
+      ctx.beginPath();
+      ctx.arc(ox, oy, 8 + i % 3 * 4, 0, Math.PI, true);
+      ctx.stroke();
+    }
+
+    // Smaller coral branches (bleached)
+    ctx.fillStyle = '#E8E3D8';
+    // Left branch
+    ctx.beginPath();
+    ctx.moveTo(REEF_BASE_X - 90, REEF_BASE_Y - 20);
+    ctx.quadraticCurveTo(REEF_BASE_X - 110, REEF_BASE_Y - 70, REEF_BASE_X - 100, REEF_BASE_Y - 85);
+    ctx.quadraticCurveTo(REEF_BASE_X - 85, REEF_BASE_Y - 70, REEF_BASE_X - 75, REEF_BASE_Y - 20);
+    ctx.closePath();
+    ctx.fill();
+
+    // Right branch
+    ctx.beginPath();
+    ctx.moveTo(REEF_BASE_X + 75, REEF_BASE_Y - 15);
+    ctx.quadraticCurveTo(REEF_BASE_X + 95, REEF_BASE_Y - 60, REEF_BASE_X + 90, REEF_BASE_Y - 75);
+    ctx.quadraticCurveTo(REEF_BASE_X + 80, REEF_BASE_Y - 55, REEF_BASE_X + 65, REEF_BASE_Y - 15);
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.restore();
+
+    // If correct answer locked, show colorful polyp restoring
+    if (answerLocked && lockResult === 'correct') {
+      const t = Math.min(lockAnimTime / 0.8, 1);
+      const glowAlpha = 0.3 + Math.sin(lockAnimTime * 6) * 0.2;
+      ctx.save();
+      ctx.globalAlpha = t;
+      // Colorful glow over reef
+      const glowGrad = ctx.createRadialGradient(REEF_BASE_X, REEF_BASE_Y - 30, 10, REEF_BASE_X, REEF_BASE_Y - 30, 120);
+      glowGrad.addColorStop(0, `rgba(78, 205, 196, ${glowAlpha})`);
+      glowGrad.addColorStop(0.5, `rgba(232, 122, 62, ${glowAlpha * 0.5})`);
+      glowGrad.addColorStop(1, 'rgba(78, 205, 196, 0)');
+      ctx.fillStyle = glowGrad;
+      ctx.fillRect(REEF_BASE_X - 180, REEF_BASE_Y - 120, 360, 200);
+
+      // Colorful polyps growing
+      const colors = [COLORS.orange, COLORS.cyan, COLORS.amber, COLORS.success];
+      for (let i = 0; i < 12; i++) {
+        const angle = (i / 12) * Math.PI * 2;
+        const dist = 30 + (i % 3) * 25;
+        const px = REEF_BASE_X + Math.cos(angle) * dist * t;
+        const py = REEF_BASE_Y - 30 + Math.sin(angle) * dist * 0.6 * t;
+        const size = 4 + (i % 4) * 2;
+        ctx.fillStyle = colors[i % colors.length];
+        ctx.beginPath();
+        ctx.arc(px, py, size * t, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.restore();
+    }
+  }
+
+  function drawReefSlots() {
+    reefSlots.forEach((slot, i) => {
+      const pulse = 0.5 + Math.sin(gameTime * 2 + slot.pulsePhase) * 0.3;
+      ctx.save();
+      ctx.globalAlpha = pulse * 0.5;
+      ctx.strokeStyle = COLORS.cyan;
+      ctx.lineWidth = 2;
+      ctx.setLineDash([4, 4]);
+      ctx.beginPath();
+      ctx.arc(slot.x, slot.y, slot.size, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.restore();
+    });
+  }
+
+  function drawFallingPolyp() {
+    ctx.save();
+    ctx.globalAlpha = fallingPolyp.alpha;
+    ctx.translate(fallingPolyp.x, fallingPolyp.y);
+    ctx.rotate(fallingPolyp.rotation);
+
+    // Gray polyp shape
+    ctx.fillStyle = '#888';
+    ctx.beginPath();
+    ctx.arc(0, 0, 18, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#777';
+    // Polyp tentacles
+    for (let i = 0; i < 5; i++) {
+      const a = (i / 5) * Math.PI * 2;
+      ctx.beginPath();
+      ctx.ellipse(Math.cos(a) * 12, Math.sin(a) * 12, 5, 3, a, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    ctx.restore();
+  }
+
+  function drawPolypCards() {
+    polyps.forEach((p, i) => {
+      if (p.alpha <= 0) return;
+
+      ctx.save();
+      ctx.globalAlpha = p.alpha;
+
+      const cx = p.x + p.w / 2;
+      const cy = p.y + p.h / 2;
+
+      // Apply scale from center
+      ctx.translate(cx, cy);
+      ctx.scale(p.scale * p.hoverScale, p.scale * p.hoverScale);
+
+      // Shake for wrong answer
+      let shakeX = 0;
+      if (answerLocked && lockResult === 'wrong' && i === selectedIndex) {
+        const shakeDecay = Math.max(0, 1 - lockAnimTime * 2.5);
+        shakeX = Math.sin(lockAnimTime * 40) * 8 * shakeDecay;
+      }
+
+      ctx.translate(-cx + shakeX, -cy);
+
+      const isSelected = i === selectedIndex && !answerLocked;
+      const isLocked = answerLocked && i === selectedIndex;
+      const isCorrectLocked = isLocked && lockResult === 'correct';
+      const isWrongLocked = isLocked && lockResult === 'wrong';
+
+      // Card background
+      let bgColor = COLORS.bgSurface;
+      let borderColor = COLORS.borderSubtle;
+
+      if (isSelected) {
+        bgColor = COLORS.cyanLight;
+        borderColor = COLORS.cyan;
+      }
+      if (isCorrectLocked) {
+        bgColor = '#E8F8E5';
+        borderColor = COLORS.success;
+      }
+      if (isWrongLocked) {
+        bgColor = '#FDECEB';
+        borderColor = COLORS.error;
+      }
+
+      // Shadow
+      ctx.shadowColor = isSelected ? 'rgba(78, 205, 196, 0.3)' : 'rgba(0,0,0,0.1)';
+      ctx.shadowBlur = isSelected ? 12 : 4;
+      ctx.shadowOffsetY = isSelected ? 2 : 1;
+
+      // Card body
+      ctx.fillStyle = bgColor;
+      ctx.beginPath();
+      ctx.roundRect(p.x, p.y, p.w, p.h, 12);
+      ctx.fill();
+
+      // Border
+      ctx.shadowColor = 'transparent';
+      ctx.strokeStyle = borderColor;
+      ctx.lineWidth = isSelected ? 2.5 : 1.5;
+      ctx.beginPath();
+      ctx.roundRect(p.x, p.y, p.w, p.h, 12);
+      ctx.stroke();
+
+      // Polyp icon on left
+      const iconX = p.x + 28;
+      const iconY = p.y + p.h / 2;
+      drawPolypIcon(iconX, iconY, p.shape, isWrongLocked ? '#888' : p.color, 12);
+
+      // Selection indicator
+      if (isSelected) {
+        ctx.fillStyle = COLORS.cyan;
+        ctx.beginPath();
+        ctx.moveTo(p.x + 6, p.y + p.h / 2 - 6);
+        ctx.lineTo(p.x + 12, p.y + p.h / 2);
+        ctx.lineTo(p.x + 6, p.y + p.h / 2 + 6);
+        ctx.closePath();
+        ctx.fill();
+      }
+
+      // Answer text
+      const textX = p.x + 50;
+      const textMaxW = p.w - 65;
+      ctx.fillStyle = isWrongLocked ? '#888' : COLORS.textPrimary;
+      ctx.font = "400 16px 'Nunito', sans-serif";
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
+
+      const lines = wrapText(p.choice.text, textMaxW, "400 16px 'Nunito', sans-serif");
+      if (lines.length === 1) {
+        ctx.fillText(lines[0], textX, p.y + p.h / 2);
+      } else {
+        const lineHeight = 18;
+        const startY = p.y + p.h / 2 - ((lines.length - 1) * lineHeight) / 2;
+        lines.forEach((line, li) => {
+          ctx.fillText(line, textX, startY + li * lineHeight);
+        });
+      }
+
+      // Letter label (A, B, C, D)
+      const letter = String.fromCharCode(65 + i);
+      ctx.fillStyle = isWrongLocked ? '#888' : COLORS.textSecondary;
+      ctx.font = "600 14px 'Nunito Sans', sans-serif";
+      ctx.textAlign = 'right';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(letter, p.x + p.w - 16, p.y + p.h / 2);
+
+      ctx.restore();
+    });
+  }
+
+  function drawPolypIcon(x, y, shape, color, size) {
+    ctx.save();
+    ctx.fillStyle = color;
+
+    switch(shape) {
+      case 'branch':
+        // Branching coral polyp
+        ctx.beginPath();
+        ctx.moveTo(x, y + size);
+        ctx.lineTo(x - 3, y - size * 0.3);
+        ctx.lineTo(x - size, y - size);
+        ctx.lineTo(x - 3, y - size * 0.5);
+        ctx.lineTo(x + 3, y - size * 0.5);
+        ctx.lineTo(x + size, y - size);
+        ctx.lineTo(x + 3, y - size * 0.3);
+        ctx.closePath();
+        ctx.fill();
+        break;
+      case 'fan':
+        // Fan coral polyp
+        ctx.beginPath();
+        ctx.arc(x, y - size * 0.2, size, Math.PI * 1.1, Math.PI * 1.9);
+        ctx.lineTo(x, y + size * 0.8);
+        ctx.closePath();
+        ctx.fill();
+        break;
+      case 'tube':
+        // Tube coral polyp
+        ctx.beginPath();
+        ctx.ellipse(x, y, size * 0.5, size, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = 'rgba(255,255,255,0.3)';
+        ctx.beginPath();
+        ctx.ellipse(x, y - size * 0.3, size * 0.3, size * 0.15, 0, 0, Math.PI * 2);
+        ctx.fill();
+        break;
+      case 'brain':
+        // Brain coral polyp
+        ctx.beginPath();
+        ctx.arc(x, y, size, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+        ctx.lineWidth = 1;
+        for (let i = 0; i < 3; i++) {
+          ctx.beginPath();
+          ctx.arc(x + (i - 1) * 4, y, size * 0.6, Math.PI * 0.3, Math.PI * 0.7);
+          ctx.stroke();
+        }
+        break;
+    }
+    ctx.restore();
+  }
+
+  function lockAnswer() {
+    if (answerLocked) return;
+
+    answerLocked = true;
+    lockAnimTime = 0;
+    const choice = QUESTION.choices[selectedIndex];
+
+    if (choice.is_correct) {
+      lockResult = 'correct';
+      playCorrectSound();
+      // Spawn glow particles around reef
+      for (let i = 0; i < 25; i++) {
+        correctGlowParticles.push({
+          x: REEF_BASE_X + (Math.random() - 0.5) * 200,
+          y: REEF_BASE_Y - 30 + (Math.random() - 0.5) * 80,
+          vx: (Math.random() - 0.5) * 80,
+          vy: -Math.random() * 60 - 20,
+          size: 3 + Math.random() * 5,
+          alpha: 0.8 + Math.random() * 0.2,
+          color: [COLORS.orange, COLORS.cyan, COLORS.amber, COLORS.success][Math.floor(Math.random() * 4)],
+        });
+      }
+    } else {
+      lockResult = 'wrong';
+      playWrongSound();
+      // Create falling polyp
+      const p = polyps[selectedIndex];
+      fallingPolyp = {
+        x: p.x + p.w / 2,
+        y: p.y + p.h / 2,
+        vy: -40,
+        rotation: 0,
+        rotSpeed: (Math.random() - 0.5) * 5,
+        alpha: 1,
+      };
+    }
+  }
+
+  function handleInput(e) {
+    if (gameState !== 'playing') return;
+    if (answerLocked) return;
+
+    switch(e.code) {
+      case 'ArrowUp':
+      case 'KeyW':
+        e.preventDefault();
+        selectedIndex = (selectedIndex - 1 + polyps.length) % polyps.length;
+        playSelectSound();
+        break;
+      case 'ArrowDown':
+      case 'KeyS':
+        e.preventDefault();
+        selectedIndex = (selectedIndex + 1) % polyps.length;
+        playSelectSound();
+        break;
+      case 'Space':
+      case 'Enter':
+        e.preventDefault();
+        lockAnswer();
+        break;
+    }
+  }
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 4: GAME LOOP - DO NOT MODIFY                                      ║
+  // ║  Standard loop with responsive scaling and DPR support.                    ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  let lastTime = performance.now();
+
+  function gameLoop(now) {
+    const dt = Math.min((now - lastTime) / 1000, 0.05); // Cap at 50ms
+    lastTime = now;
+
+    // Apply transform for logical coordinate system
+    ctx.setTransform(scale * dpr, 0, 0, scale * dpr, 0, 0);
+
+    if (gameState === 'playing') {
+      updateGame(dt);
+      drawGame();
+    } else {
+      drawGame(); // Draw game state behind overlay
+      drawEndScreen(dt);
+    }
+
+    // Reset transform for next frame
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+    requestAnimationFrame(gameLoop);
+  }
+
+  // Input handlers
+  document.addEventListener('keydown', (e) => {
+    if (gameState === 'ended' && (e.code === 'KeyR')) {
+      // Restart game
+      gameState = 'playing';
+      gameResult = null;
+      gameExplanation = '';
+      confettiParticles = [];
+      initGame();
+      return;
+    }
+    handleInput(e);
+  });
+
+  document.addEventListener('keyup', (e) => {
+    // Optional: handle key release in your handleInput
+  });
+
+  // Canvas click handler for end screen buttons
+  canvas.addEventListener('click', (e) => {
+    if (gameState !== 'ended') return;
+
+    const { x, y } = screenToLogical(e.clientX, e.clientY);
+
+    if (gameResult) {
+      // Correct answer: check both buttons
+      if (pointInRect(x, y, restartButton)) {
+        gameState = 'playing';
+        gameResult = null;
+        gameExplanation = '';
+        confettiParticles = [];
+        initGame();
+        return;
+      }
+      if (pointInRect(x, y, nextButton)) {
+        // Notify parent to go to next question
+        if (window.parent && window.parent !== window) {
+          window.parent.postMessage({ type: 'quiz-next' }, '*');
+        }
+        return;
+      }
+    } else {
+      // Wrong answer: check centered restart button
+      const centeredRestart = { x: W / 2 - 75, y: H / 2 + 60, w: 150, h: 48 };
+      if (pointInRect(x, y, centeredRestart)) {
+        gameState = 'playing';
+        gameResult = null;
+        gameExplanation = '';
+        confettiParticles = [];
+        initGame();
+        return;
+      }
+    }
+  });
+
+  // Handle resize
+  window.addEventListener('resize', resizeCanvas);
+
+  // Initialize
+  resizeCanvas();
+  initGame();
+  requestAnimationFrame(gameLoop);
+  </script>
+</body>
+</html>

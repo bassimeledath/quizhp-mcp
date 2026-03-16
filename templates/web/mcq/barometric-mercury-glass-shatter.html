@@ -1,0 +1,1174 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Game Template</title>
+  <link href="https://fonts.googleapis.com/css2?family=Belanosima:wght@400;600;700&family=Nunito+Sans:wght@400;500;600;700&family=Nunito:wght@400;500;600&display=swap" rel="stylesheet">
+  <!--
+  ╔══════════════════════════════════════════════════════════════════════════════╗
+  ║  GAME FACTORY TEMPLATE                                                        ║
+  ║  This template enforces critical invariants. Follow the section markers.      ║
+  ╚══════════════════════════════════════════════════════════════════════════════╝
+  -->
+  <style>
+    /* ═══════════════════════════════════════════════════════════════════════════
+       BASE STYLES - Can be extended, not removed
+       ═══════════════════════════════════════════════════════════════════════════ */
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+    }
+    body {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      background: #1a1a2e;
+      font-family: 'Nunito Sans', system-ui, -apple-system, sans-serif;
+    }
+    #gameCanvas {
+      background: #16213e;
+      border-radius: 8px;
+      display: block;
+    }
+  </style>
+</head>
+<body>
+  <!-- ═══════════════════════════════════════════════════════════════════════════
+       CANVAS - Sized dynamically to fill available space
+       ═══════════════════════════════════════════════════════════════════════════ -->
+  <canvas id="gameCanvas"></canvas>
+
+  <script>
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 1: QUESTION PLACEHOLDER - DO NOT MODIFY FORMAT                    ║
+  // ║  Platform replaces this at runtime. Use these exact 60-char answers.       ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  const QUESTION = {
+    type: "mcq",
+    prompt: "Sample question text",
+    choices: [
+      { text: "This is sample answer A which is long enough to test text overflow", is_correct: true, explanation: "Why A is correct" },
+      { text: "This is sample answer B which is long enough to test text overflow", is_correct: false, explanation: "Why B is wrong" },
+      { text: "This is sample answer C which is long enough to test text overflow", is_correct: false, explanation: "Why C is wrong" },
+      { text: "This is sample answer D which is long enough to test text overflow", is_correct: false, explanation: "Why D is wrong" }
+    ],
+    isLastQuestion: false
+  };
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 2: ENGINE CORE - DO NOT MODIFY                                    ║
+  // ║  Standard engine interface and end screen. This is sacred.                 ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  const canvas = document.getElementById('gameCanvas');
+  const ctx = canvas.getContext('2d');
+
+  // Logical dimensions (game code works in this coordinate space)
+  const W = 720, H = 540;
+
+  // Scaling state (computed on resize)
+  let scale = 1;
+  let dpr = 1;
+
+  let gameState = 'playing'; // 'playing' | 'ended'
+  let gameResult = null;     // true (correct) | false (wrong)
+  let gameExplanation = '';
+  let endScreenTime = 0;
+  let confettiParticles = [];
+
+  // End screen button bounds (logical coordinates)
+  const restartButton = { x: W / 2 - 170, y: H / 2 + 60, w: 150, h: 48 };
+  const nextButton = { x: W / 2 + 20, y: H / 2 + 60, w: 150, h: 48 };
+
+  /** Check if point is inside rectangle */
+  function pointInRect(px, py, rect) {
+    return px >= rect.x && px <= rect.x + rect.w &&
+           py >= rect.y && py <= rect.y + rect.h;
+  }
+
+  /** Draw a styled button */
+  function drawButton(rect, label, color, pulse) {
+    const p = pulse ? 1 + Math.sin(endScreenTime * 4) * 0.03 : 1;
+    ctx.save();
+    ctx.translate(rect.x + rect.w / 2, rect.y + rect.h / 2);
+    ctx.scale(p, p);
+    ctx.translate(-(rect.x + rect.w / 2), -(rect.y + rect.h / 2));
+
+    // Button background
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.roundRect(rect.x, rect.y, rect.w, rect.h, 12);
+    ctx.fill();
+
+    // Button text
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = 'bold 18px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, rect.x + rect.w / 2, rect.y + rect.h / 2);
+
+    ctx.restore();
+  }
+
+  /**
+   * Resize canvas to fill available space with proper DPR scaling.
+   * Maintains logical coordinate system (720×540).
+   */
+  function resizeCanvas() {
+    dpr = window.devicePixelRatio || 1;
+
+    // Get available space
+    const availW = window.innerWidth;
+    const availH = window.innerHeight;
+
+    // Calculate scale to fit logical space (720×540) in available space
+    const scaleX = availW / W;
+    const scaleY = availH / H;
+    scale = Math.min(scaleX, scaleY);
+
+    // Physical canvas buffer (DPR-scaled for crisp rendering)
+    canvas.width = W * scale * dpr;
+    canvas.height = H * scale * dpr;
+
+    // CSS display size
+    canvas.style.width = (W * scale) + 'px';
+    canvas.style.height = (H * scale) + 'px';
+  }
+
+  /**
+   * Convert screen coordinates to logical coordinates.
+   * Use this for mouse/click events to get positions in 720×540 space.
+   */
+  function screenToLogical(screenX, screenY) {
+    const rect = canvas.getBoundingClientRect();
+    return {
+      x: (screenX - rect.left) * (W / rect.width),
+      y: (screenY - rect.top) * (H / rect.height)
+    };
+  }
+
+  const engine = {
+    /** Call this to end the game. DO NOT draw your own end screen. */
+    end(isCorrect, explanation) {
+      if (gameState === 'ended') return;
+      gameState = 'ended';
+      gameResult = isCorrect;
+      gameExplanation = explanation || '';
+      endScreenTime = 0;
+
+      // Spawn confetti for correct answers
+      if (isCorrect) {
+        for (let i = 0; i < 50; i++) {
+          confettiParticles.push({
+            x: W / 2,
+            y: H / 2,
+            vx: (Math.random() - 0.5) * 600,
+            vy: -Math.random() * 400 - 100,
+            size: 4 + Math.random() * 6,
+            color: ['#FFD700', '#FF6B6B', '#4ECDC4', '#95E1D3', '#F38181'][Math.floor(Math.random() * 5)],
+            rotation: Math.random() * Math.PI * 2,
+            rotationSpeed: (Math.random() - 0.5) * 10
+          });
+        }
+      }
+
+      // Notify parent frame
+      if (window.parent && window.parent !== window) {
+        window.parent.postMessage({
+          type: 'quiz-end',
+          isCorrect: isCorrect,
+          explanation: explanation || ''
+        }, '*');
+      }
+    }
+  };
+
+  /** STANDARD END SCREEN - DO NOT MODIFY */
+  function drawEndScreen(dt) {
+    endScreenTime += dt;
+
+    // Update confetti
+    confettiParticles = confettiParticles.filter(p => {
+      p.vy += 800 * dt; // gravity
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.rotation += p.rotationSpeed * dt;
+      p.vx *= 0.99;
+      return p.y < H + 50;
+    });
+
+    // Dark overlay
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
+    ctx.fillRect(0, 0, W, H);
+
+    // Draw confetti
+    confettiParticles.forEach(p => {
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rotation);
+      ctx.fillStyle = p.color;
+      ctx.fillRect(-p.size / 2, -p.size / 4, p.size, p.size / 2);
+      ctx.restore();
+    });
+
+    // Result emoji
+    ctx.font = '72px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(gameResult ? '🎉' : '😢', W / 2, H / 2 - 50);
+
+    // Result text
+    ctx.fillStyle = gameResult ? '#4ADE80' : '#F87171';
+    ctx.font = 'bold 36px system-ui, sans-serif';
+    ctx.fillText(gameResult ? 'Correct!' : 'Wrong!', W / 2, H / 2 + 20);
+
+    // Buttons
+    if (gameResult) {
+      // Correct: show both Restart and Next/Finish
+      drawButton(restartButton, 'Restart', '#E87A3E', true);
+      const nextLabel = QUESTION.isLastQuestion ? 'Finish' : 'Next';
+      drawButton(nextButton, nextLabel, '#4ECDC4', true);
+    } else {
+      // Wrong: show only centered Restart button
+      const centeredRestart = { x: W / 2 - 75, y: H / 2 + 60, w: 150, h: 48 };
+      drawButton(centeredRestart, 'Restart', '#E87A3E', true);
+    }
+  }
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 3: YOUR GAME CODE - IMPLEMENT THESE FUNCTIONS                     ║
+  // ║  This is where your game logic goes. See requirements below.               ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+
+  // === COLORS ===
+  const COLORS = {
+    bgPrimary: '#FAFAF7',
+    bgSurface: '#FFFFFF',
+    bgSurfaceSecondary: '#F5F5F0',
+    textPrimary: '#2B2B28',
+    textSecondary: '#5A5A54',
+    textTertiary: '#8C8C84',
+    orange: '#E87A3E',
+    orangeHover: '#D66B31',
+    amber: '#F5A742',
+    cyan: '#4ECDC4',
+    cyanHover: '#45B8B0',
+    success: '#6BBF59',
+    error: '#E85D4A',
+    borderSubtle: '#E6E6E0',
+    borderStrong: '#D4D4CC',
+    mercury: '#C0C0C0',
+    mercuryBright: '#E8E8E8',
+    brass: '#B5860D',
+    brassLight: '#D4A832',
+    brassHighlight: '#F0D060',
+    glassTint: 'rgba(200, 230, 255, 0.3)',
+    glassBorder: 'rgba(100, 160, 220, 0.5)',
+    stormDark: '#2C3E50',
+    stormMid: '#3D566E',
+    cloudLight: '#A0B0C0',
+    cloudDark: '#5A6A7A',
+    leadWeight: '#4A4A4A',
+    leadHighlight: '#6A6A6A'
+  };
+
+  // === SOUND ===
+  const AudioCtx = window.AudioContext || window.webkitAudioContext;
+  let audioCtx = null;
+
+  function ensureAudio() {
+    if (!audioCtx) audioCtx = new AudioCtx();
+  }
+
+  function playSound(type) {
+    try {
+      ensureAudio();
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      const now = audioCtx.currentTime;
+
+      if (type === 'launch') {
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(120, now);
+        osc.frequency.linearRampToValueAtTime(300, now + 0.15);
+        gain.gain.setValueAtTime(0.15, now);
+        gain.gain.linearRampToValueAtTime(0, now + 0.2);
+        osc.start(now);
+        osc.stop(now + 0.2);
+      } else if (type === 'shatter') {
+        osc.type = 'square';
+        osc.frequency.setValueAtTime(800, now);
+        osc.frequency.linearRampToValueAtTime(200, now + 0.3);
+        gain.gain.setValueAtTime(0.2, now);
+        gain.gain.linearRampToValueAtTime(0, now + 0.35);
+        osc.start(now);
+        osc.stop(now + 0.35);
+        // Add noise burst for glass
+        const noise = audioCtx.createBufferSource();
+        const noiseBuffer = audioCtx.createBuffer(1, audioCtx.sampleRate * 0.2, audioCtx.sampleRate);
+        const data = noiseBuffer.getChannelData(0);
+        for (let i = 0; i < data.length; i++) data[i] = (Math.random() * 2 - 1) * 0.3;
+        noise.buffer = noiseBuffer;
+        const ng = audioCtx.createGain();
+        ng.gain.setValueAtTime(0.15, now);
+        ng.gain.linearRampToValueAtTime(0, now + 0.2);
+        noise.connect(ng);
+        ng.connect(audioCtx.destination);
+        noise.start(now);
+      } else if (type === 'correct') {
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(523, now);
+        osc.frequency.setValueAtTime(659, now + 0.1);
+        osc.frequency.setValueAtTime(784, now + 0.2);
+        gain.gain.setValueAtTime(0.15, now);
+        gain.gain.linearRampToValueAtTime(0, now + 0.4);
+        osc.start(now);
+        osc.stop(now + 0.4);
+      } else if (type === 'wrong') {
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(200, now);
+        osc.frequency.linearRampToValueAtTime(100, now + 0.4);
+        gain.gain.setValueAtTime(0.15, now);
+        gain.gain.linearRampToValueAtTime(0, now + 0.5);
+        osc.start(now);
+        osc.stop(now + 0.5);
+      } else if (type === 'slide') {
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(250, now);
+        osc.frequency.linearRampToValueAtTime(280, now + 0.05);
+        gain.gain.setValueAtTime(0.05, now);
+        gain.gain.linearRampToValueAtTime(0, now + 0.06);
+        osc.start(now);
+        osc.stop(now + 0.06);
+      } else if (type === 'crack') {
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(600, now);
+        osc.frequency.linearRampToValueAtTime(80, now + 0.5);
+        gain.gain.setValueAtTime(0.2, now);
+        gain.gain.linearRampToValueAtTime(0, now + 0.6);
+        osc.start(now);
+        osc.stop(now + 0.6);
+      }
+    } catch(e) {}
+  }
+
+  // === GAME STATE ===
+  const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  let slider = {};
+  let weight = {};
+  let bulbs = [];
+  let barometers = [];
+  let clouds = [];
+  let glassShards = [];
+  let gameParticles = [];
+  let mercuryDrops = [];
+  let stationCracked = false;
+  let crackTimer = 0;
+  let stormIntensity = 0;
+  let lightning = { active: false, timer: 0, x: 0, y: 0 };
+  let entranceTimer = 0;
+  let keysDown = {};
+
+  // Word wrap helper for answer text on bulbs
+  function wrapText(text, maxWidth, font) {
+    ctx.font = font;
+    const words = text.split(' ');
+    const lines = [];
+    let currentLine = '';
+    for (let i = 0; i < words.length; i++) {
+      const testLine = currentLine ? currentLine + ' ' + words[i] : words[i];
+      if (ctx.measureText(testLine).width > maxWidth && currentLine) {
+        lines.push(currentLine);
+        currentLine = words[i];
+      } else {
+        currentLine = testLine;
+      }
+    }
+    if (currentLine) lines.push(currentLine);
+    return lines;
+  }
+
+  function initGame() {
+    entranceTimer = 0;
+    stationCracked = false;
+    crackTimer = 0;
+    stormIntensity = 0;
+    glassShards = [];
+    gameParticles = [];
+    mercuryDrops = [];
+    keysDown = {};
+
+    // Sliding scale (brass) at bottom
+    slider = {
+      x: W / 2,
+      y: 420,
+      width: 90,
+      height: 20,
+      speed: 350,
+      scaleAnim: 0,
+      alpha: 0
+    };
+
+    // Lead weight
+    weight = {
+      x: W / 2,
+      y: 400,
+      radius: 12,
+      vy: 0,
+      launched: false,
+      active: false,
+      falling: false
+    };
+
+    // Four glass bulbs at top with answer text
+    const bulbW = 160;
+    const bulbH = 115;
+    const totalW = bulbW * 4 + 12 * 3;
+    const startX = (W - totalW) / 2;
+    bulbs = QUESTION.choices.map((choice, i) => ({
+      x: startX + i * (bulbW + 12) + bulbW / 2,
+      y: 85,
+      width: bulbW,
+      height: bulbH,
+      choice: choice,
+      shattered: false,
+      shatterTimer: 0,
+      hovered: false,
+      scaleAnim: 0,
+      alpha: 0,
+      glowPulse: 0
+    }));
+
+    // Decorative barometers
+    barometers = [];
+    for (let i = 0; i < 5; i++) {
+      barometers.push({
+        x: 80 + i * 150,
+        y: 200,
+        height: 180,
+        width: 18,
+        mercuryLevel: 0.4 + Math.random() * 0.4,
+        wobble: Math.random() * Math.PI * 2
+      });
+    }
+
+    // Storm clouds
+    clouds = [];
+    for (let i = 0; i < 8; i++) {
+      clouds.push({
+        x: Math.random() * W,
+        y: -20 + Math.random() * 30,
+        size: 40 + Math.random() * 60,
+        speed: 10 + Math.random() * 20,
+        opacity: 0.3 + Math.random() * 0.4
+      });
+    }
+
+    lightning = { active: false, timer: 0, x: 0, y: 0 };
+  }
+
+  function updateGame(dt) {
+    if (gameState !== 'playing') return;
+
+    entranceTimer += dt;
+
+    // Animate entrance
+    if (!prefersReducedMotion) {
+      bulbs.forEach((b, i) => {
+        const delay = i * 0.1;
+        const t = Math.max(0, Math.min(1, (entranceTimer - delay) / 0.4));
+        const spring = 1 + Math.sin(t * Math.PI * 2) * 0.15 * (1 - t);
+        b.scaleAnim = t * spring;
+        b.alpha = t;
+      });
+      const sliderDelay = 0.5;
+      const st = Math.max(0, Math.min(1, (entranceTimer - sliderDelay) / 0.35));
+      slider.scaleAnim = st;
+      slider.alpha = st;
+    } else {
+      bulbs.forEach(b => { b.scaleAnim = 1; b.alpha = 1; });
+      slider.scaleAnim = 1;
+      slider.alpha = 1;
+    }
+
+    // Move slider with held keys
+    if (keysDown['ArrowLeft'] || keysDown['KeyA']) {
+      slider.x -= slider.speed * dt;
+    }
+    if (keysDown['ArrowRight'] || keysDown['KeyD']) {
+      slider.x += slider.speed * dt;
+    }
+    slider.x = Math.max(slider.width / 2, Math.min(W - slider.width / 2, slider.x));
+
+    // Weight follows slider until launched
+    if (!weight.launched) {
+      weight.x = slider.x;
+      weight.y = slider.y - weight.radius - slider.height / 2 - 2;
+    }
+
+    // Weight physics when launched
+    if (weight.launched && weight.active) {
+      weight.vy -= 800 * dt; // upward
+      weight.y -= weight.vy * dt;
+
+      // Check collision with bulbs
+      for (let b of bulbs) {
+        if (b.shattered) continue;
+        const dx = weight.x - b.x;
+        const dy = weight.y - b.y;
+        if (Math.abs(dx) < b.width / 2 && Math.abs(dy) < b.height / 2) {
+          b.shattered = true;
+          b.shatterTimer = 0;
+          weight.active = false;
+          playSound('shatter');
+
+          // Spawn glass shards
+          for (let s = 0; s < 15; s++) {
+            glassShards.push({
+              x: b.x + (Math.random() - 0.5) * b.width,
+              y: b.y + (Math.random() - 0.5) * b.height * 0.5,
+              vx: (Math.random() - 0.5) * 200,
+              vy: Math.random() * 100 + 50,
+              size: 3 + Math.random() * 6,
+              rotation: Math.random() * Math.PI * 2,
+              rotSpeed: (Math.random() - 0.5) * 8,
+              alpha: 1,
+              color: Math.random() > 0.5 ? 'rgba(200, 230, 255, 0.8)' : 'rgba(192, 192, 192, 0.7)'
+            });
+          }
+
+          // Spawn mercury drops
+          for (let m = 0; m < 8; m++) {
+            mercuryDrops.push({
+              x: b.x + (Math.random() - 0.5) * 30,
+              y: b.y + 20,
+              vx: (Math.random() - 0.5) * 100,
+              vy: Math.random() * 60 + 30,
+              radius: 2 + Math.random() * 4,
+              alpha: 1
+            });
+          }
+
+          // Delay then end game
+          const choice = b.choice;
+          setTimeout(() => {
+            if (choice.is_correct) {
+              playSound('correct');
+              // Spawn celebration particles
+              for (let p = 0; p < 25; p++) {
+                gameParticles.push({
+                  x: b.x,
+                  y: b.y,
+                  vx: (Math.random() - 0.5) * 300,
+                  vy: -Math.random() * 200 - 50,
+                  size: 4 + Math.random() * 6,
+                  color: [COLORS.orange, COLORS.amber, COLORS.cyan, COLORS.success][Math.floor(Math.random() * 4)],
+                  rotation: Math.random() * Math.PI * 2,
+                  rotSpeed: (Math.random() - 0.5) * 8,
+                  alpha: 1
+                });
+              }
+            } else {
+              playSound('wrong');
+            }
+            engine.end(choice.is_correct, choice.explanation);
+          }, 500);
+
+          break;
+        }
+      }
+
+      // Weight missed all bulbs - goes off top
+      if (weight.y < -30) {
+        weight.active = false;
+        weight.falling = true;
+        weight.vy = 0;
+      }
+    }
+
+    // Weight falling back down after missing
+    if (weight.falling) {
+      weight.vy += 600 * dt;
+      weight.y += weight.vy * dt;
+
+      // Hit the slider/ground area => station cracks
+      if (weight.y > slider.y + 20) {
+        weight.falling = false;
+        stationCracked = true;
+        crackTimer = 0;
+        playSound('crack');
+
+        // Pick a random wrong answer
+        const wrongChoices = QUESTION.choices.filter(c => !c.is_correct);
+        const picked = wrongChoices[Math.floor(Math.random() * wrongChoices.length)] || QUESTION.choices[1];
+        setTimeout(() => {
+          playSound('wrong');
+          engine.end(picked.is_correct, picked.explanation);
+        }, 1200);
+      }
+    }
+
+    // Station crack animation
+    if (stationCracked) {
+      crackTimer += dt;
+      stormIntensity = Math.min(1, crackTimer / 1.0);
+      // Random lightning
+      lightning.timer -= dt;
+      if (lightning.timer <= 0 && stormIntensity > 0.5) {
+        lightning.active = true;
+        lightning.timer = 0.3 + Math.random() * 0.5;
+        lightning.x = 50 + Math.random() * (W - 100);
+        lightning.y = 0;
+        setTimeout(() => { lightning.active = false; }, 100);
+      }
+    }
+
+    // Update glass shards
+    glassShards.forEach(s => {
+      s.vy += 300 * dt;
+      s.x += s.vx * dt;
+      s.y += s.vy * dt;
+      s.rotation += s.rotSpeed * dt;
+      s.alpha -= dt * 0.8;
+    });
+    glassShards = glassShards.filter(s => s.alpha > 0 && s.y < H + 20);
+
+    // Update mercury drops
+    mercuryDrops.forEach(m => {
+      m.vy += 400 * dt;
+      m.x += m.vx * dt;
+      m.y += m.vy * dt;
+      m.alpha -= dt * 0.6;
+    });
+    mercuryDrops = mercuryDrops.filter(m => m.alpha > 0 && m.y < H + 20);
+
+    // Update celebration particles
+    gameParticles.forEach(p => {
+      p.vy += 400 * dt;
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.rotation += p.rotSpeed * dt;
+      p.alpha -= dt * 0.7;
+    });
+    gameParticles = gameParticles.filter(p => p.alpha > 0);
+
+    // Move clouds
+    clouds.forEach(c => {
+      c.x += c.speed * dt * (stationCracked ? 3 : 1);
+      if (c.x > W + c.size) c.x = -c.size;
+    });
+
+    // Barometer mercury wobble
+    barometers.forEach(b => {
+      b.wobble += dt * 2;
+      if (stationCracked) {
+        b.mercuryLevel -= dt * 0.3;
+        if (b.mercuryLevel < 0) b.mercuryLevel = 0;
+      }
+    });
+
+    // Bulb glow pulse
+    bulbs.forEach(b => {
+      if (!b.shattered) {
+        b.glowPulse += dt * 3;
+      }
+    });
+  }
+
+  function drawGame() {
+    // Sky background - darkens during storm
+    const skyDark = stormIntensity;
+    const r = Math.round(250 * (1 - skyDark * 0.7));
+    const g = Math.round(250 * (1 - skyDark * 0.6));
+    const b = Math.round(247 * (1 - skyDark * 0.5));
+    ctx.fillStyle = `rgb(${r}, ${g}, ${b})`;
+    ctx.fillRect(0, 0, W, H);
+
+    // Storm gradient at top
+    if (stormIntensity > 0) {
+      const grad = ctx.createLinearGradient(0, 0, 0, 200);
+      grad.addColorStop(0, `rgba(44, 62, 80, ${stormIntensity * 0.8})`);
+      grad.addColorStop(1, `rgba(44, 62, 80, 0)`);
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, W, 200);
+    }
+
+    // Lightning flash
+    if (lightning.active) {
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
+      ctx.fillRect(0, 0, W, H);
+      // Lightning bolt
+      ctx.strokeStyle = '#FFFFFF';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(lightning.x, 0);
+      let ly = 0;
+      while (ly < 200) {
+        ly += 15 + Math.random() * 25;
+        ctx.lineTo(lightning.x + (Math.random() - 0.5) * 40, ly);
+      }
+      ctx.stroke();
+    }
+
+    // Draw clouds
+    clouds.forEach(c => {
+      const cloudColor = stationCracked
+        ? `rgba(60, 70, 85, ${c.opacity + stormIntensity * 0.3})`
+        : `rgba(160, 176, 192, ${c.opacity})`;
+      ctx.fillStyle = cloudColor;
+      ctx.beginPath();
+      ctx.arc(c.x, c.y, c.size * 0.6, 0, Math.PI * 2);
+      ctx.arc(c.x - c.size * 0.35, c.y + 5, c.size * 0.4, 0, Math.PI * 2);
+      ctx.arc(c.x + c.size * 0.35, c.y + 5, c.size * 0.45, 0, Math.PI * 2);
+      ctx.fill();
+    });
+
+    // Draw wooden display shelf
+    const shelfY = 155;
+    const shelfGrad = ctx.createLinearGradient(0, shelfY - 8, 0, shelfY + 8);
+    shelfGrad.addColorStop(0, '#8B6914');
+    shelfGrad.addColorStop(0.5, '#A07828');
+    shelfGrad.addColorStop(1, '#7A5A10');
+    ctx.fillStyle = shelfGrad;
+    ctx.beginPath();
+    ctx.roundRect(30, shelfY - 6, W - 60, 12, 4);
+    ctx.fill();
+    // Shelf shadow
+    ctx.fillStyle = 'rgba(0,0,0,0.1)';
+    ctx.fillRect(30, shelfY + 6, W - 60, 4);
+
+    // Draw barometers
+    barometers.forEach(bar => {
+      const bx = bar.x;
+      const by = shelfY + 20;
+      const bh = bar.height;
+      const bw = bar.width;
+
+      // Brass mounting bracket
+      ctx.fillStyle = COLORS.brass;
+      ctx.beginPath();
+      ctx.roundRect(bx - bw / 2 - 4, by - 8, bw + 8, 16, 4);
+      ctx.fill();
+      ctx.fillStyle = COLORS.brassLight;
+      ctx.beginPath();
+      ctx.roundRect(bx - bw / 2 - 4, by + bh - 8, bw + 8, 16, 4);
+      ctx.fill();
+
+      // Glass tube
+      ctx.fillStyle = 'rgba(200, 220, 240, 0.2)';
+      ctx.beginPath();
+      ctx.roundRect(bx - bw / 2, by, bw, bh, bw / 2);
+      ctx.fill();
+      ctx.strokeStyle = COLORS.glassBorder;
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+
+      // Mercury fill
+      const mercH = bh * bar.mercuryLevel + Math.sin(bar.wobble) * 3;
+      const mercGrad = ctx.createLinearGradient(bx - bw / 2, by + bh - mercH, bx + bw / 2, by + bh);
+      mercGrad.addColorStop(0, COLORS.mercuryBright);
+      mercGrad.addColorStop(0.5, COLORS.mercury);
+      mercGrad.addColorStop(1, '#A0A0A0');
+      ctx.fillStyle = mercGrad;
+      ctx.beginPath();
+      ctx.roundRect(bx - bw / 2 + 2, by + bh - mercH, bw - 4, mercH, bw / 2 - 2);
+      ctx.fill();
+
+      // Cracks if station broken
+      if (stationCracked && stormIntensity > 0.3) {
+        ctx.strokeStyle = `rgba(200, 50, 50, ${stormIntensity})`;
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.moveTo(bx - 2, by + bh * 0.3);
+        ctx.lineTo(bx + 3, by + bh * 0.45);
+        ctx.lineTo(bx - 4, by + bh * 0.6);
+        ctx.stroke();
+      }
+    });
+
+    // Draw glass bulbs (answer containers)
+    bulbs.forEach((bulb, i) => {
+      if (bulb.shattered) {
+        // Draw shattered remnants
+        bulb.shatterTimer += 0.016;
+        ctx.globalAlpha = Math.max(0, 1 - bulb.shatterTimer * 2);
+        ctx.strokeStyle = 'rgba(180, 210, 240, 0.4)';
+        ctx.lineWidth = 1;
+        // Broken glass outline fragments
+        for (let f = 0; f < 5; f++) {
+          const fx = bulb.x + (Math.random() - 0.5) * bulb.width * 0.8;
+          const fy = bulb.y + (Math.random() - 0.5) * bulb.height * 0.4;
+          ctx.beginPath();
+          ctx.moveTo(fx, fy);
+          ctx.lineTo(fx + (Math.random() - 0.5) * 20, fy + (Math.random() - 0.5) * 15);
+          ctx.stroke();
+        }
+        ctx.globalAlpha = 1;
+        return;
+      }
+
+      ctx.save();
+      // Entrance animation
+      const sc = bulb.scaleAnim || 1;
+      ctx.globalAlpha = bulb.alpha || 1;
+      ctx.translate(bulb.x, bulb.y);
+      ctx.scale(sc, sc);
+      ctx.translate(-bulb.x, -bulb.y);
+
+      const bx = bulb.x - bulb.width / 2;
+      const by = bulb.y - bulb.height / 2;
+
+      // Glow effect
+      const glowA = 0.08 + Math.sin(bulb.glowPulse + i * 1.2) * 0.04;
+      ctx.shadowColor = COLORS.cyan;
+      ctx.shadowBlur = 12;
+
+      // Glass bulb shape
+      const glassGrad = ctx.createLinearGradient(bx, by, bx + bulb.width, by + bulb.height);
+      glassGrad.addColorStop(0, `rgba(220, 240, 255, ${0.15 + glowA})`);
+      glassGrad.addColorStop(0.5, `rgba(200, 225, 250, ${0.1 + glowA})`);
+      glassGrad.addColorStop(1, `rgba(180, 210, 240, ${0.2 + glowA})`);
+      ctx.fillStyle = glassGrad;
+      ctx.beginPath();
+      ctx.roundRect(bx, by, bulb.width, bulb.height, 16);
+      ctx.fill();
+
+      // Glass border
+      ctx.shadowBlur = 0;
+      ctx.strokeStyle = COLORS.glassBorder;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.roundRect(bx, by, bulb.width, bulb.height, 16);
+      ctx.stroke();
+
+      // Mercury pool at bottom of bulb
+      const poolH = 12;
+      const poolGrad = ctx.createLinearGradient(bx + 8, by + bulb.height - poolH - 4, bx + bulb.width - 8, by + bulb.height - 4);
+      poolGrad.addColorStop(0, COLORS.mercuryBright);
+      poolGrad.addColorStop(0.5, COLORS.mercury);
+      poolGrad.addColorStop(1, '#A8A8A8');
+      ctx.fillStyle = poolGrad;
+      ctx.beginPath();
+      ctx.roundRect(bx + 8, by + bulb.height - poolH - 4, bulb.width - 16, poolH, 4);
+      ctx.fill();
+
+      // Glass shine highlight
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(bx + 10, by + 8);
+      ctx.quadraticCurveTo(bx + bulb.width * 0.3, by + 4, bx + bulb.width * 0.6, by + 10);
+      ctx.stroke();
+
+      // Answer label (A, B, C, D)
+      const labels = ['A', 'B', 'C', 'D'];
+      ctx.fillStyle = COLORS.orange;
+      ctx.font = "700 16px 'Belanosima', sans-serif";
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'top';
+      ctx.fillText(labels[i], bulb.x, by + 6);
+
+      // Answer text - wrapped
+      ctx.fillStyle = COLORS.textPrimary;
+      const answerFont = "400 14px 'Nunito', sans-serif";
+      const maxTextW = bulb.width - 20;
+      const lines = wrapText(bulb.choice.text, maxTextW, answerFont);
+      ctx.font = answerFont;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'top';
+      const lineH = 16;
+      const textStartY = by + 24;
+      lines.forEach((line, li) => {
+        if (textStartY + li * lineH < by + bulb.height - poolH - 6) {
+          ctx.fillText(line, bulb.x, textStartY + li * lineH);
+        }
+      });
+
+      ctx.restore();
+    });
+
+    // Draw glass shards
+    glassShards.forEach(s => {
+      ctx.save();
+      ctx.globalAlpha = s.alpha;
+      ctx.translate(s.x, s.y);
+      ctx.rotate(s.rotation);
+      ctx.fillStyle = s.color;
+      ctx.beginPath();
+      ctx.moveTo(0, -s.size / 2);
+      ctx.lineTo(s.size / 3, s.size / 2);
+      ctx.lineTo(-s.size / 3, s.size / 2);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+    });
+
+    // Draw mercury drops
+    mercuryDrops.forEach(m => {
+      ctx.globalAlpha = m.alpha;
+      const mg = ctx.createRadialGradient(m.x - 1, m.y - 1, 0, m.x, m.y, m.radius);
+      mg.addColorStop(0, COLORS.mercuryBright);
+      mg.addColorStop(1, COLORS.mercury);
+      ctx.fillStyle = mg;
+      ctx.beginPath();
+      ctx.arc(m.x, m.y, m.radius, 0, Math.PI * 2);
+      ctx.fill();
+    });
+    ctx.globalAlpha = 1;
+
+    // Draw celebration particles
+    gameParticles.forEach(p => {
+      ctx.save();
+      ctx.globalAlpha = p.alpha;
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rotation);
+      ctx.fillStyle = p.color;
+      ctx.fillRect(-p.size / 2, -p.size / 4, p.size, p.size / 2);
+      ctx.restore();
+    });
+
+    // Draw the platform / base area
+    const baseY = 450;
+    const baseGrad = ctx.createLinearGradient(0, baseY, 0, H);
+    baseGrad.addColorStop(0, '#8B6914');
+    baseGrad.addColorStop(0.3, '#A07828');
+    baseGrad.addColorStop(1, '#6B4F0E');
+    ctx.fillStyle = baseGrad;
+    ctx.beginPath();
+    ctx.roundRect(40, baseY, W - 80, H - baseY - 10, [12, 12, 8, 8]);
+    ctx.fill();
+
+    // Brass trim on base
+    ctx.fillStyle = COLORS.brassHighlight;
+    ctx.fillRect(40, baseY, W - 80, 4);
+
+    // Ornate decorations on base
+    ctx.fillStyle = COLORS.brassLight;
+    for (let ox = 80; ox < W - 80; ox += 100) {
+      ctx.beginPath();
+      ctx.arc(ox, baseY + 25, 6, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Cracks on base if station broken
+    if (stationCracked) {
+      ctx.strokeStyle = `rgba(60, 20, 0, ${stormIntensity * 0.8})`;
+      ctx.lineWidth = 2;
+      // Major crack from center
+      ctx.beginPath();
+      ctx.moveTo(W / 2, baseY + 5);
+      ctx.lineTo(W / 2 - 30, baseY + 30);
+      ctx.lineTo(W / 2 - 80, baseY + 50);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(W / 2, baseY + 5);
+      ctx.lineTo(W / 2 + 40, baseY + 35);
+      ctx.lineTo(W / 2 + 100, baseY + 45);
+      ctx.stroke();
+      // Minor cracks
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(W / 2 - 20, baseY + 20);
+      ctx.lineTo(W / 2 - 50, baseY + 15);
+      ctx.stroke();
+    }
+
+    // Draw brass sliding scale
+    ctx.save();
+    const slSc = slider.scaleAnim || 1;
+    ctx.globalAlpha = slider.alpha || 1;
+    ctx.translate(slider.x, slider.y);
+    ctx.scale(slSc, slSc);
+    ctx.translate(-slider.x, -slider.y);
+
+    const slx = slider.x - slider.width / 2;
+    const sly = slider.y - slider.height / 2;
+    const slGrad = ctx.createLinearGradient(slx, sly, slx, sly + slider.height);
+    slGrad.addColorStop(0, COLORS.brassHighlight);
+    slGrad.addColorStop(0.3, COLORS.brassLight);
+    slGrad.addColorStop(0.7, COLORS.brass);
+    slGrad.addColorStop(1, '#8A6B0A');
+    ctx.fillStyle = slGrad;
+    ctx.beginPath();
+    ctx.roundRect(slx, sly, slider.width, slider.height, 6);
+    ctx.fill();
+    // Brass border
+    ctx.strokeStyle = '#7A5A08';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.roundRect(slx, sly, slider.width, slider.height, 6);
+    ctx.stroke();
+    // Tick marks on slider
+    ctx.fillStyle = '#6B4F0A';
+    for (let t = 0; t < 5; t++) {
+      const tx = slx + 12 + t * ((slider.width - 24) / 4);
+      ctx.fillRect(tx, sly + 4, 1.5, slider.height - 8);
+    }
+    ctx.restore();
+
+    // Draw lead weight
+    if (!stationCracked || weight.falling) {
+      const wx = weight.x;
+      const wy = weight.y;
+      const wr = weight.radius;
+
+      // Weight shadow
+      ctx.fillStyle = 'rgba(0,0,0,0.15)';
+      ctx.beginPath();
+      ctx.ellipse(wx + 2, wy + 2, wr, wr * 0.6, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Weight body
+      const wGrad = ctx.createRadialGradient(wx - 3, wy - 3, 0, wx, wy, wr);
+      wGrad.addColorStop(0, COLORS.leadHighlight);
+      wGrad.addColorStop(0.6, COLORS.leadWeight);
+      wGrad.addColorStop(1, '#333333');
+      ctx.fillStyle = wGrad;
+      ctx.beginPath();
+      ctx.arc(wx, wy, wr, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = '#333333';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.arc(wx, wy, wr, 0, Math.PI * 2);
+      ctx.stroke();
+
+      // Highlight
+      ctx.fillStyle = 'rgba(255,255,255,0.3)';
+      ctx.beginPath();
+      ctx.arc(wx - 3, wy - 3, wr * 0.35, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Vertical guide rails
+    ctx.strokeStyle = COLORS.borderSubtle;
+    ctx.lineWidth = 1;
+    ctx.setLineDash([4, 4]);
+    ctx.beginPath();
+    ctx.moveTo(slider.x - slider.width / 2 - 5, 150);
+    ctx.lineTo(slider.x - slider.width / 2 - 5, slider.y - 30);
+    ctx.moveTo(slider.x + slider.width / 2 + 5, 150);
+    ctx.lineTo(slider.x + slider.width / 2 + 5, slider.y - 30);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
+  function handleInput(e) {
+    if (gameState !== 'playing') return;
+
+    if (e.type === 'keydown') {
+      keysDown[e.code] = true;
+
+      // Launch weight
+      if ((e.code === 'Space' || e.code === 'Enter') && !weight.launched) {
+        weight.launched = true;
+        weight.active = true;
+        weight.vy = 900;
+        playSound('launch');
+        e.preventDefault();
+      }
+    } else if (e.type === 'keyup') {
+      keysDown[e.code] = false;
+    }
+  }
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 4: GAME LOOP - DO NOT MODIFY                                      ║
+  // ║  Standard loop with responsive scaling and DPR support.                    ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  let lastTime = performance.now();
+
+  function gameLoop(now) {
+    const dt = Math.min((now - lastTime) / 1000, 0.05); // Cap at 50ms
+    lastTime = now;
+
+    // Apply transform for logical coordinate system
+    ctx.setTransform(scale * dpr, 0, 0, scale * dpr, 0, 0);
+
+    if (gameState === 'playing') {
+      updateGame(dt);
+      drawGame();
+    } else {
+      drawGame(); // Draw game state behind overlay
+      drawEndScreen(dt);
+    }
+
+    // Reset transform for next frame
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+    requestAnimationFrame(gameLoop);
+  }
+
+  // Input handlers
+  document.addEventListener('keydown', (e) => {
+    if (gameState === 'ended' && (e.code === 'KeyR')) {
+      // Restart game
+      gameState = 'playing';
+      gameResult = null;
+      gameExplanation = '';
+      confettiParticles = [];
+      initGame();
+      return;
+    }
+    handleInput(e);
+  });
+
+  document.addEventListener('keyup', (e) => {
+    // Optional: handle key release in your handleInput
+    if (e.type === 'keyup') {
+      handleInput(e);
+    }
+  });
+
+  // Canvas click handler for end screen buttons
+  canvas.addEventListener('click', (e) => {
+    if (gameState !== 'ended') return;
+
+    const { x, y } = screenToLogical(e.clientX, e.clientY);
+
+    if (gameResult) {
+      // Correct answer: check both buttons
+      if (pointInRect(x, y, restartButton)) {
+        gameState = 'playing';
+        gameResult = null;
+        gameExplanation = '';
+        confettiParticles = [];
+        initGame();
+        return;
+      }
+      if (pointInRect(x, y, nextButton)) {
+        // Notify parent to go to next question
+        if (window.parent && window.parent !== window) {
+          window.parent.postMessage({ type: 'quiz-next' }, '*');
+        }
+        return;
+      }
+    } else {
+      // Wrong answer: check centered restart button
+      const centeredRestart = { x: W / 2 - 75, y: H / 2 + 60, w: 150, h: 48 };
+      if (pointInRect(x, y, centeredRestart)) {
+        gameState = 'playing';
+        gameResult = null;
+        gameExplanation = '';
+        confettiParticles = [];
+        initGame();
+        return;
+      }
+    }
+  });
+
+  // Handle resize
+  window.addEventListener('resize', resizeCanvas);
+
+  // Initialize
+  resizeCanvas();
+  initGame();
+  requestAnimationFrame(gameLoop);
+  </script>
+</body>
+</html>

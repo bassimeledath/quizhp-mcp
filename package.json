@@ -1,0 +1,59 @@
+{
+  "name": "quizhp",
+  "version": "1.0.0",
+  "description": "Interactive quiz MCP server with mini-game templates",
+  "type": "module",
+  "main": "./dist/server/index.js",
+  "types": "./dist/server/index.d.ts",
+  "bin": {
+    "quizhp": "./dist/server/stdio.js"
+  },
+  "exports": {
+    ".": {
+      "import": "./dist/server/index.js",
+      "types": "./dist/server/index.d.ts"
+    },
+    "./stdio": {
+      "import": "./dist/server/stdio.js"
+    },
+    "./worker": {
+      "import": "./dist/server/worker.js"
+    }
+  },
+  "files": [
+    "dist/",
+    "templates/"
+  ],
+  "scripts": {
+    "build": "tsc && vite build --config view/vite.config.ts",
+    "build:server": "tsc",
+    "build:view": "vite build --config view/vite.config.ts",
+    "dev": "tsx watch src/index.ts",
+    "start": "node dist/server/index.js",
+    "start:stdio": "node dist/server/stdio.js",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/ext-apps": "^1.2.2",
+    "@modelcontextprotocol/sdk": "^1.27.1",
+    "express": "^4.21.0",
+    "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.0.0",
+    "@types/express": "^4.17.21",
+    "@types/node": "^22.10.5",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^4.3.4",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "tailwindcss": "^4.0.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vite": "^6.0.0",
+    "vite-plugin-singlefile": "^2.0.3",
+    "zustand": "^5.0.3"
+  },
+  "license": "MIT"
+}

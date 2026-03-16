@@ -1,0 +1,903 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Lightning Strike Targets</title>
+  <link href="https://fonts.googleapis.com/css2?family=Belanosima:wght@400;600;700&family=Nunito+Sans:wght@400;500;600;700&family=Nunito:wght@400;500;600&display=swap" rel="stylesheet">
+  <!--
+  ╔══════════════════════════════════════════════════════════════════════════════╗
+  ║  GAME FACTORY TEMPLATE                                                        ║
+  ║  This template enforces critical invariants. Follow the section markers.      ║
+  ╚══════════════════════════════════════════════════════════════════════════════╝
+  -->
+  <style>
+    /* ═══════════════════════════════════════════════════════════════════════════
+       BASE STYLES - Can be extended, not removed
+       ═══════════════════════════════════════════════════════════════════════════ */
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+    }
+    body {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      background: #1a1a2e;
+      font-family: 'Nunito Sans', system-ui, -apple-system, sans-serif;
+    }
+    #gameCanvas {
+      background: #16213e;
+      border-radius: 8px;
+      display: block;
+      cursor: crosshair;
+    }
+  </style>
+</head>
+<body>
+  <!-- ═══════════════════════════════════════════════════════════════════════════
+       CANVAS - Sized dynamically to fill available space
+       ═══════════════════════════════════════════════════════════════════════════ -->
+  <canvas id="gameCanvas"></canvas>
+
+  <script>
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 1: QUESTION PLACEHOLDER - DO NOT MODIFY FORMAT                    ║
+  // ║  Platform replaces this at runtime. Use these exact 60-char answers.       ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  const QUESTION = {
+    type: "mcq",
+    prompt: "Sample question text",
+    choices: [
+      { text: "This is sample answer A which is long enough to test text overflow", is_correct: true, explanation: "Why A is correct" },
+      { text: "This is sample answer B which is long enough to test text overflow", is_correct: false, explanation: "Why B is wrong" },
+      { text: "This is sample answer C which is long enough to test text overflow", is_correct: false, explanation: "Why C is wrong" },
+      { text: "This is sample answer D which is long enough to test text overflow", is_correct: false, explanation: "Why D is wrong" }
+    ],
+    isLastQuestion: false
+  };
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 2: ENGINE CORE - DO NOT MODIFY                                    ║
+  // ║  Standard engine interface and end screen. This is sacred.                 ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  const canvas = document.getElementById('gameCanvas');
+  const ctx = canvas.getContext('2d');
+
+  // Logical dimensions (game code works in this coordinate space)
+  const W = 720, H = 540;
+
+  // Scaling state (computed on resize)
+  let scale = 1;
+  let dpr = 1;
+
+  let gameState = 'playing'; // 'playing' | 'ended'
+  let gameResult = null;     // true (correct) | false (wrong)
+  let gameExplanation = '';
+  let endScreenTime = 0;
+  let confettiParticles = [];
+
+  // End screen button bounds (logical coordinates)
+  const restartButton = { x: W / 2 - 170, y: H / 2 + 60, w: 150, h: 48 };
+  const nextButton = { x: W / 2 + 20, y: H / 2 + 60, w: 150, h: 48 };
+
+  /** Check if point is inside rectangle */
+  function pointInRect(px, py, rect) {
+    return px >= rect.x && px <= rect.x + rect.w &&
+           py >= rect.y && py <= rect.y + rect.h;
+  }
+
+  /** Draw a styled button */
+  function drawButton(rect, label, color, pulse) {
+    const p = pulse ? 1 + Math.sin(endScreenTime * 4) * 0.03 : 1;
+    ctx.save();
+    ctx.translate(rect.x + rect.w / 2, rect.y + rect.h / 2);
+    ctx.scale(p, p);
+    ctx.translate(-(rect.x + rect.w / 2), -(rect.y + rect.h / 2));
+
+    // Button background
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.roundRect(rect.x, rect.y, rect.w, rect.h, 12);
+    ctx.fill();
+
+    // Button text
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = "bold 18px 'Nunito Sans', sans-serif";
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, rect.x + rect.w / 2, rect.y + rect.h / 2);
+
+    ctx.restore();
+  }
+
+  /**
+   * Resize canvas to fill available space with proper DPR scaling.
+   * Maintains logical coordinate system (720x540).
+   */
+  function resizeCanvas() {
+    dpr = window.devicePixelRatio || 1;
+
+    // Get available space
+    const availW = window.innerWidth;
+    const availH = window.innerHeight;
+
+    // Calculate scale to fit logical space (720x540) in available space
+    const scaleX = availW / W;
+    const scaleY = availH / H;
+    scale = Math.min(scaleX, scaleY);
+
+    // Physical canvas buffer (DPR-scaled for crisp rendering)
+    canvas.width = W * scale * dpr;
+    canvas.height = H * scale * dpr;
+
+    // CSS display size
+    canvas.style.width = (W * scale) + 'px';
+    canvas.style.height = (H * scale) + 'px';
+  }
+
+  /**
+   * Convert screen coordinates to logical coordinates.
+   * Use this for mouse/click events to get positions in 720x540 space.
+   */
+  function screenToLogical(screenX, screenY) {
+    const rect = canvas.getBoundingClientRect();
+    return {
+      x: (screenX - rect.left) * (W / rect.width),
+      y: (screenY - rect.top) * (H / rect.height)
+    };
+  }
+
+  const engine = {
+    /** Call this to end the game. DO NOT draw your own end screen. */
+    end(isCorrect, explanation) {
+      if (gameState === 'ended') return;
+      gameState = 'ended';
+      gameResult = isCorrect;
+      gameExplanation = explanation || '';
+      endScreenTime = 0;
+
+      // Spawn confetti for correct answers
+      if (isCorrect) {
+        for (let i = 0; i < 50; i++) {
+          confettiParticles.push({
+            x: W / 2,
+            y: H / 2,
+            vx: (Math.random() - 0.5) * 600,
+            vy: -Math.random() * 400 - 100,
+            size: 4 + Math.random() * 6,
+            color: ['#FFD700', '#FF6B6B', '#4ECDC4', '#95E1D3', '#F38181'][Math.floor(Math.random() * 5)],
+            rotation: Math.random() * Math.PI * 2,
+            rotationSpeed: (Math.random() - 0.5) * 10
+          });
+        }
+      }
+
+      // Notify parent frame
+      if (window.parent && window.parent !== window) {
+        window.parent.postMessage({
+          type: 'quiz-end',
+          isCorrect: isCorrect,
+          explanation: explanation || ''
+        }, '*');
+      }
+    }
+  };
+
+  /** STANDARD END SCREEN - DO NOT MODIFY */
+  function drawEndScreen(dt) {
+    endScreenTime += dt;
+
+    // Update confetti
+    confettiParticles = confettiParticles.filter(p => {
+      p.vy += 800 * dt; // gravity
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.rotation += p.rotationSpeed * dt;
+      p.vx *= 0.99;
+      return p.y < H + 50;
+    });
+
+    // Dark overlay
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
+    ctx.fillRect(0, 0, W, H);
+
+    // Draw confetti
+    confettiParticles.forEach(p => {
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rotation);
+      ctx.fillStyle = p.color;
+      ctx.fillRect(-p.size / 2, -p.size / 4, p.size, p.size / 2);
+      ctx.restore();
+    });
+
+    // Result emoji
+    ctx.font = '72px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(gameResult ? '🎉' : '😢', W / 2, H / 2 - 50);
+
+    // Result text
+    ctx.fillStyle = gameResult ? '#4ADE80' : '#F87171';
+    ctx.font = "bold 36px 'Nunito Sans', sans-serif";
+    ctx.fillText(gameResult ? 'Correct!' : 'Wrong!', W / 2, H / 2 + 20);
+
+    // Buttons
+    if (gameResult) {
+      // Correct: show both Restart and Next/Finish
+      drawButton(restartButton, 'Restart', '#E87A3E', true);
+      const nextLabel = QUESTION.isLastQuestion ? 'Finish' : 'Next';
+      drawButton(nextButton, nextLabel, '#4ECDC4', true);
+    } else {
+      // Wrong: show only centered Restart button
+      const centeredRestart = { x: W / 2 - 75, y: H / 2 + 60, w: 150, h: 48 };
+      drawButton(centeredRestart, 'Restart', '#E87A3E', true);
+    }
+  }
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 3: YOUR GAME CODE - IMPLEMENT THESE FUNCTIONS                     ║
+  // ║  This is where your game logic goes. See requirements below.               ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+
+  // === COLORS ===
+  const COLORS = {
+    bgPrimary: '#FAFAF7',
+    bgSurface: '#FFFFFF',
+    textPrimary: '#2B2B28',
+    textSecondary: '#5A5A54',
+    orange: '#E87A3E',
+    orangeHover: '#D66B31',
+    amber: '#F5A742',
+    cyan: '#4ECDC4',
+    success: '#6BBF59',
+    error: '#E85D4A',
+    borderSubtle: '#E6E6E0',
+    borderStrong: '#D4D4CC'
+  };
+
+  // === AUDIO ===
+  const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+  function playSound(type) {
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+
+    if (type === 'click') {
+      osc.frequency.value = 220;
+      osc.type = 'sine';
+      gain.gain.setValueAtTime(0.15, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.1);
+      osc.start();
+      osc.stop(audioCtx.currentTime + 0.1);
+    } else if (type === 'thunder') {
+      // Thunder rumble using noise-like oscillation
+      const bufferSize = audioCtx.sampleRate * 0.6;
+      const buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
+      const data = buffer.getChannelData(0);
+      for (let i = 0; i < bufferSize; i++) {
+        data[i] = (Math.random() * 2 - 1) * Math.exp(-i / (audioCtx.sampleRate * 0.15));
+      }
+      const noise = audioCtx.createBufferSource();
+      noise.buffer = buffer;
+      const noiseGain = audioCtx.createGain();
+      noiseGain.gain.setValueAtTime(0.3, audioCtx.currentTime);
+      noiseGain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.6);
+      const filter = audioCtx.createBiquadFilter();
+      filter.type = 'lowpass';
+      filter.frequency.value = 300;
+      noise.connect(filter);
+      filter.connect(noiseGain);
+      noiseGain.connect(audioCtx.destination);
+      noise.start();
+      noise.stop(audioCtx.currentTime + 0.6);
+    } else if (type === 'correct') {
+      osc.frequency.value = 523;
+      osc.type = 'sine';
+      gain.gain.setValueAtTime(0.2, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.4);
+      osc.start();
+      osc.stop(audioCtx.currentTime + 0.4);
+      // Second note
+      const osc2 = audioCtx.createOscillator();
+      const gain2 = audioCtx.createGain();
+      osc2.connect(gain2);
+      gain2.connect(audioCtx.destination);
+      osc2.frequency.value = 659;
+      osc2.type = 'sine';
+      gain2.gain.setValueAtTime(0.2, audioCtx.currentTime + 0.1);
+      gain2.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.5);
+      osc2.start(audioCtx.currentTime + 0.1);
+      osc2.stop(audioCtx.currentTime + 0.5);
+    } else if (type === 'wrong') {
+      osc.frequency.value = 180;
+      osc.type = 'sawtooth';
+      gain.gain.setValueAtTime(0.15, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.35);
+      osc.start();
+      osc.stop(audioCtx.currentTime + 0.35);
+    }
+  }
+
+  // === GAME STATE ===
+  let targets = [];
+  let lightning = null;        // Active lightning bolt animation
+  let stormParticles = [];     // Rain particles
+  let cloudPuffs = [];         // Cloud shapes
+  let gameTime = 0;
+  let hoveredTarget = -1;
+  let selectedTarget = -1;
+  let selectionAnimTime = 0;
+  let flashAlpha = 0;          // Screen flash on lightning strike
+  let entranceProgress = 0;    // Entrance animation progress
+
+  // Wrap answer text into multiple lines
+  function wrapText(text, maxWidth, font) {
+    ctx.font = font;
+    const words = text.split(' ');
+    const lines = [];
+    let currentLine = '';
+
+    for (const word of words) {
+      const testLine = currentLine ? currentLine + ' ' + word : word;
+      if (ctx.measureText(testLine).width > maxWidth) {
+        if (currentLine) lines.push(currentLine);
+        currentLine = word;
+      } else {
+        currentLine = testLine;
+      }
+    }
+    if (currentLine) lines.push(currentLine);
+    return lines;
+  }
+
+  function initGame() {
+    gameTime = 0;
+    hoveredTarget = -1;
+    selectedTarget = -1;
+    selectionAnimTime = 0;
+    lightning = null;
+    flashAlpha = 0;
+    entranceProgress = 0;
+
+    // Four targets arranged in the sky area
+    const targetW = 460;
+    const targetH = 56;
+    const gap = 12;
+    const totalH = targetH * 4 + gap * 3;
+    const startX = (W - targetW) / 2;
+    const startY = 100;
+
+    targets = QUESTION.choices.map((choice, i) => ({
+      x: startX,
+      y: startY + i * (targetH + gap),
+      w: targetW,
+      h: targetH,
+      choice: choice,
+      index: i,
+      glowPhase: Math.random() * Math.PI * 2,
+      glowSpeed: 1.5 + Math.random() * 1.5,
+      scale: 0,
+      alpha: 0,
+      shakeX: 0,
+      pulseScale: 1
+    }));
+
+    // Generate storm particles (rain)
+    stormParticles = [];
+    for (let i = 0; i < 60; i++) {
+      stormParticles.push({
+        x: Math.random() * W,
+        y: Math.random() * H,
+        speed: 200 + Math.random() * 300,
+        length: 8 + Math.random() * 15,
+        alpha: 0.15 + Math.random() * 0.25
+      });
+    }
+
+    // Generate cloud puffs at top
+    cloudPuffs = [];
+    for (let i = 0; i < 12; i++) {
+      cloudPuffs.push({
+        x: (W / 12) * i + Math.random() * 60 - 30,
+        y: 15 + Math.random() * 35,
+        r: 40 + Math.random() * 50,
+        alpha: 0.4 + Math.random() * 0.3,
+        driftSpeed: 5 + Math.random() * 10
+      });
+    }
+  }
+
+  function updateGame(dt) {
+    if (gameState !== 'playing') return;
+
+    gameTime += dt;
+
+    // Entrance animation (stagger targets)
+    if (entranceProgress < 1) {
+      entranceProgress = Math.min(1, entranceProgress + dt * 2.5);
+      targets.forEach((t, i) => {
+        const stagger = i * 0.12;
+        const progress = Math.max(0, Math.min(1, (entranceProgress - stagger) / 0.4));
+        // Spring easing
+        const spring = 1 + Math.sin(progress * Math.PI * 2) * 0.2 * (1 - progress);
+        t.scale = progress * spring;
+        t.alpha = progress;
+      });
+    }
+
+    // Update target glow
+    targets.forEach(t => {
+      t.glowPhase += t.glowSpeed * dt;
+    });
+
+    // Update storm rain
+    stormParticles.forEach(p => {
+      p.y += p.speed * dt;
+      p.x += 30 * dt; // slight wind
+      if (p.y > H) {
+        p.y = -p.length;
+        p.x = Math.random() * W;
+      }
+      if (p.x > W) p.x = -10;
+    });
+
+    // Cloud drift
+    cloudPuffs.forEach(c => {
+      c.x += c.driftSpeed * dt;
+      if (c.x > W + c.r) c.x = -c.r;
+    });
+
+    // Update lightning bolt animation
+    if (lightning) {
+      lightning.time += dt;
+      if (lightning.time > lightning.duration) {
+        lightning = null;
+      }
+    }
+
+    // Screen flash decay
+    if (flashAlpha > 0) {
+      flashAlpha -= dt * 4;
+      if (flashAlpha < 0) flashAlpha = 0;
+    }
+
+    // Selection animation (after clicking a target)
+    if (selectedTarget >= 0) {
+      selectionAnimTime += dt;
+      const t = targets[selectedTarget];
+
+      if (selectionAnimTime < 0.5) {
+        // Lightning striking phase
+      } else if (selectionAnimTime < 0.9) {
+        // Feedback phase - pulse
+        const ft = (selectionAnimTime - 0.5) / 0.4;
+        t.pulseScale = 1 + 0.08 * Math.sin(ft * Math.PI);
+      } else {
+        // End game
+        const choice = t.choice;
+        if (choice.is_correct) {
+          playSound('correct');
+        } else {
+          playSound('wrong');
+        }
+        engine.end(choice.is_correct, choice.explanation);
+      }
+    }
+  }
+
+  function generateBoltSegments(x1, y1, x2, y2, detail) {
+    const segments = [{ x: x1, y: y1 }];
+    const dx = x2 - x1;
+    const dy = y2 - y1;
+    const steps = detail || 8;
+    for (let i = 1; i < steps; i++) {
+      const t = i / steps;
+      const jitterX = (Math.random() - 0.5) * 50;
+      const jitterY = (Math.random() - 0.5) * 15;
+      segments.push({
+        x: x1 + dx * t + jitterX,
+        y: y1 + dy * t + jitterY
+      });
+    }
+    segments.push({ x: x2, y: y2 });
+    return segments;
+  }
+
+  function drawLightningBolt(segments, alpha, width) {
+    if (segments.length < 2) return;
+    ctx.save();
+    ctx.globalAlpha = alpha;
+
+    // Glow
+    ctx.strokeStyle = '#E8F9F8';
+    ctx.lineWidth = width + 8;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.shadowColor = '#4ECDC4';
+    ctx.shadowBlur = 25;
+    ctx.beginPath();
+    ctx.moveTo(segments[0].x, segments[0].y);
+    for (let i = 1; i < segments.length; i++) {
+      ctx.lineTo(segments[i].x, segments[i].y);
+    }
+    ctx.stroke();
+
+    // Core bolt
+    ctx.shadowBlur = 0;
+    ctx.strokeStyle = '#FFFFFF';
+    ctx.lineWidth = width;
+    ctx.beginPath();
+    ctx.moveTo(segments[0].x, segments[0].y);
+    for (let i = 1; i < segments.length; i++) {
+      ctx.lineTo(segments[i].x, segments[i].y);
+    }
+    ctx.stroke();
+
+    // Inner bright core
+    ctx.strokeStyle = '#F5A742';
+    ctx.lineWidth = width * 0.4;
+    ctx.beginPath();
+    ctx.moveTo(segments[0].x, segments[0].y);
+    for (let i = 1; i < segments.length; i++) {
+      ctx.lineTo(segments[i].x, segments[i].y);
+    }
+    ctx.stroke();
+
+    ctx.restore();
+  }
+
+  function drawGame() {
+    // === STORMY SKY GRADIENT ===
+    const skyGrad = ctx.createLinearGradient(0, 0, 0, H);
+    skyGrad.addColorStop(0, '#0d0d1a');
+    skyGrad.addColorStop(0.3, '#1a1a3a');
+    skyGrad.addColorStop(0.6, '#1c2340');
+    skyGrad.addColorStop(1, '#151520');
+    ctx.fillStyle = skyGrad;
+    ctx.fillRect(0, 0, W, H);
+
+    // === LANDSCAPE AT BOTTOM ===
+    const landGrad = ctx.createLinearGradient(0, H - 80, 0, H);
+    landGrad.addColorStop(0, '#1a2a1a');
+    landGrad.addColorStop(1, '#0d1a0d');
+    ctx.fillStyle = landGrad;
+    ctx.beginPath();
+    ctx.moveTo(0, H - 50);
+    // Rolling hills
+    ctx.bezierCurveTo(120, H - 75, 200, H - 55, 300, H - 60);
+    ctx.bezierCurveTo(400, H - 65, 500, H - 45, 600, H - 55);
+    ctx.bezierCurveTo(660, H - 60, 700, H - 50, W, H - 55);
+    ctx.lineTo(W, H);
+    ctx.lineTo(0, H);
+    ctx.closePath();
+    ctx.fill();
+
+    // === CLOUDS ===
+    cloudPuffs.forEach(c => {
+      ctx.save();
+      ctx.globalAlpha = c.alpha;
+      const cGrad = ctx.createRadialGradient(c.x, c.y, 0, c.x, c.y, c.r);
+      cGrad.addColorStop(0, '#3a3a5a');
+      cGrad.addColorStop(0.7, '#2a2a4a');
+      cGrad.addColorStop(1, 'transparent');
+      ctx.fillStyle = cGrad;
+      ctx.beginPath();
+      ctx.arc(c.x, c.y, c.r, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    });
+
+    // === RAIN ===
+    ctx.save();
+    stormParticles.forEach(p => {
+      ctx.globalAlpha = p.alpha;
+      ctx.strokeStyle = '#6688aa';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(p.x, p.y);
+      ctx.lineTo(p.x + 3, p.y + p.length);
+      ctx.stroke();
+    });
+    ctx.restore();
+
+    // === TARGETS (answer choices) ===
+    targets.forEach((t, i) => {
+      if (t.alpha <= 0) return;
+
+      ctx.save();
+
+      // Glow intensity
+      const glow = 0.4 + 0.6 * ((Math.sin(t.glowPhase) + 1) / 2);
+      const isHovered = (hoveredTarget === i && selectedTarget < 0);
+      const isSelected = (selectedTarget === i);
+
+      // Animate entrance with scale
+      const centerX = t.x + t.w / 2;
+      const centerY = t.y + t.h / 2;
+      ctx.translate(centerX, centerY);
+      ctx.scale(t.scale * t.pulseScale, t.scale * t.pulseScale);
+
+      // Shake for wrong answer
+      let offsetX = t.shakeX;
+      ctx.translate(-centerX + offsetX, -centerY);
+
+      ctx.globalAlpha = t.alpha;
+
+      // Target background with glow
+      const bgColor = isSelected
+        ? (t.choice.is_correct ? 'rgba(107, 191, 89, 0.25)' : 'rgba(232, 93, 74, 0.25)')
+        : isHovered
+          ? 'rgba(78, 205, 196, 0.2)'
+          : 'rgba(255, 255, 255, 0.08)';
+
+      // Outer glow
+      if (glow > 0.5 || isHovered) {
+        const glowColor = isSelected
+          ? (t.choice.is_correct ? '#6BBF59' : '#E85D4A')
+          : isHovered ? '#4ECDC4' : '#F5A742';
+        ctx.shadowColor = glowColor;
+        ctx.shadowBlur = isHovered ? 20 : 10 * glow;
+      }
+
+      // Draw rounded rect background
+      ctx.fillStyle = bgColor;
+      ctx.beginPath();
+      ctx.roundRect(t.x, t.y, t.w, t.h, 12);
+      ctx.fill();
+
+      // Border
+      const borderColor = isSelected
+        ? (t.choice.is_correct ? '#6BBF59' : '#E85D4A')
+        : isHovered ? '#4ECDC4'
+        : `rgba(245, 167, 66, ${0.3 + glow * 0.4})`;
+      ctx.strokeStyle = borderColor;
+      ctx.lineWidth = isHovered || isSelected ? 2.5 : 1.5;
+      ctx.shadowBlur = 0;
+      ctx.beginPath();
+      ctx.roundRect(t.x, t.y, t.w, t.h, 12);
+      ctx.stroke();
+
+      // Letter label (A, B, C, D)
+      const letters = ['A', 'B', 'C', 'D'];
+      const labelX = t.x + 24;
+      const labelY = t.y + t.h / 2;
+
+      ctx.fillStyle = isSelected
+        ? (t.choice.is_correct ? '#6BBF59' : '#E85D4A')
+        : isHovered ? '#4ECDC4' : COLORS.amber;
+      ctx.font = "700 18px 'Belanosima', sans-serif";
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(letters[i], labelX, labelY);
+
+      // Answer text (wrapped if needed)
+      const textX = t.x + 48;
+      const maxTextW = t.w - 64;
+      ctx.font = "400 16px 'Nunito', sans-serif";
+      ctx.fillStyle = '#F5F5F0';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
+
+      const lines = wrapText(t.choice.text, maxTextW, "400 16px 'Nunito', sans-serif");
+      if (lines.length === 1) {
+        ctx.fillText(lines[0], textX, labelY);
+      } else {
+        const lineHeight = 18;
+        const topY = labelY - ((lines.length - 1) * lineHeight) / 2;
+        lines.forEach((line, li) => {
+          ctx.fillText(line, textX, topY + li * lineHeight);
+        });
+      }
+
+      // Small lightning icon on each target
+      const iconX = t.x + t.w - 24;
+      const iconAlpha = 0.3 + glow * 0.5;
+      ctx.globalAlpha = t.alpha * iconAlpha;
+      ctx.fillStyle = COLORS.amber;
+      ctx.font = "16px sans-serif";
+      ctx.textAlign = 'center';
+      ctx.fillText('\u26A1', iconX, labelY);
+
+      ctx.restore();
+    });
+
+    // === ACTIVE LIGHTNING BOLT ===
+    if (lightning && lightning.time < lightning.duration) {
+      const progress = lightning.time / lightning.duration;
+      const alpha = progress < 0.3 ? progress / 0.3 : Math.max(0, 1 - (progress - 0.3) / 0.7);
+      drawLightningBolt(lightning.segments, alpha, 3);
+
+      // Branch bolts
+      if (lightning.branches) {
+        lightning.branches.forEach(branch => {
+          drawLightningBolt(branch, alpha * 0.6, 1.5);
+        });
+      }
+    }
+
+    // === SCREEN FLASH ===
+    if (flashAlpha > 0) {
+      ctx.save();
+      ctx.globalAlpha = flashAlpha * 0.3;
+      ctx.fillStyle = '#FFFFFF';
+      ctx.fillRect(0, 0, W, H);
+      ctx.restore();
+    }
+
+    // === AMBIENT LIGHTNING FLICKER (background) ===
+    if (selectedTarget < 0) {
+      const flickerChance = Math.sin(gameTime * 3) * Math.sin(gameTime * 7.3);
+      if (flickerChance > 0.95) {
+        ctx.save();
+        ctx.globalAlpha = 0.04;
+        ctx.fillStyle = '#FFFFFF';
+        ctx.fillRect(0, 0, W, H);
+        ctx.restore();
+      }
+    }
+  }
+
+  function handleInput(e) {
+    if (gameState !== 'playing') return;
+    // No keyboard input needed - click only
+  }
+
+  // === MOUSE INTERACTION ===
+  canvas.addEventListener('mousemove', (e) => {
+    if (gameState !== 'playing' || selectedTarget >= 0) return;
+    const { x, y } = screenToLogical(e.clientX, e.clientY);
+    hoveredTarget = -1;
+    targets.forEach((t, i) => {
+      if (t.alpha > 0 && t.scale > 0.5 &&
+          x >= t.x && x <= t.x + t.w &&
+          y >= t.y && y <= t.y + t.h) {
+        hoveredTarget = i;
+      }
+    });
+    canvas.style.cursor = hoveredTarget >= 0 ? 'pointer' : 'crosshair';
+  });
+
+  canvas.addEventListener('click', (e) => {
+    if (gameState !== 'playing' || selectedTarget >= 0) return;
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+
+    const { x, y } = screenToLogical(e.clientX, e.clientY);
+
+    // Check if clicked on a target
+    let clickedIndex = -1;
+    targets.forEach((t, i) => {
+      if (t.alpha > 0 && t.scale > 0.5 &&
+          x >= t.x && x <= t.x + t.w &&
+          y >= t.y && y <= t.y + t.h) {
+        clickedIndex = i;
+      }
+    });
+
+    if (clickedIndex >= 0) {
+      selectedTarget = clickedIndex;
+      selectionAnimTime = 0;
+      playSound('thunder');
+
+      // Generate lightning bolt from top of screen to the target
+      const t = targets[clickedIndex];
+      const targetCenterX = t.x + t.w / 2;
+      const targetCenterY = t.y;
+      const startX = targetCenterX + (Math.random() - 0.5) * 100;
+
+      lightning = {
+        segments: generateBoltSegments(startX, 0, targetCenterX, targetCenterY, 10),
+        branches: [
+          generateBoltSegments(
+            startX + (Math.random() - 0.5) * 40, 30,
+            startX + (Math.random() - 0.5) * 80, targetCenterY * 0.5 + Math.random() * 40, 5
+          ),
+          generateBoltSegments(
+            targetCenterX + (Math.random() - 0.5) * 30, targetCenterY * 0.4,
+            targetCenterX + (Math.random() - 0.5) * 120, targetCenterY * 0.7, 4
+          )
+        ],
+        time: 0,
+        duration: 0.6
+      };
+      flashAlpha = 1;
+    }
+  });
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 4: GAME LOOP - DO NOT MODIFY                                      ║
+  // ║  Standard loop with responsive scaling and DPR support.                    ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  let lastTime = performance.now();
+
+  function gameLoop(now) {
+    const dt = Math.min((now - lastTime) / 1000, 0.05); // Cap at 50ms
+    lastTime = now;
+
+    // Apply transform for logical coordinate system
+    ctx.setTransform(scale * dpr, 0, 0, scale * dpr, 0, 0);
+
+    if (gameState === 'playing') {
+      updateGame(dt);
+      drawGame();
+    } else {
+      drawGame(); // Draw game state behind overlay
+      drawEndScreen(dt);
+    }
+
+    // Reset transform for next frame
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+    requestAnimationFrame(gameLoop);
+  }
+
+  // Input handlers
+  document.addEventListener('keydown', (e) => {
+    if (gameState === 'ended' && (e.code === 'KeyR')) {
+      // Restart game
+      gameState = 'playing';
+      gameResult = null;
+      gameExplanation = '';
+      confettiParticles = [];
+      initGame();
+      return;
+    }
+    handleInput(e);
+  });
+
+  document.addEventListener('keyup', (e) => {
+    // Optional: handle key release in your handleInput
+  });
+
+  // Canvas click handler for end screen buttons
+  canvas.addEventListener('click', (e) => {
+    if (gameState !== 'ended') return;
+
+    const { x, y } = screenToLogical(e.clientX, e.clientY);
+
+    if (gameResult) {
+      // Correct answer: check both buttons
+      if (pointInRect(x, y, restartButton)) {
+        gameState = 'playing';
+        gameResult = null;
+        gameExplanation = '';
+        confettiParticles = [];
+        initGame();
+        return;
+      }
+      if (pointInRect(x, y, nextButton)) {
+        // Notify parent to go to next question
+        if (window.parent && window.parent !== window) {
+          window.parent.postMessage({ type: 'quiz-next' }, '*');
+        }
+        return;
+      }
+    } else {
+      // Wrong answer: check centered restart button
+      const centeredRestart = { x: W / 2 - 75, y: H / 2 + 60, w: 150, h: 48 };
+      if (pointInRect(x, y, centeredRestart)) {
+        gameState = 'playing';
+        gameResult = null;
+        gameExplanation = '';
+        confettiParticles = [];
+        initGame();
+        return;
+      }
+    }
+  });
+
+  // Handle resize
+  window.addEventListener('resize', resizeCanvas);
+
+  // Initialize
+  resizeCanvas();
+  initGame();
+  requestAnimationFrame(gameLoop);
+  </script>
+</body>
+</html>

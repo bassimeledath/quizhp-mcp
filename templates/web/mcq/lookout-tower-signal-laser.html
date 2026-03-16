@@ -1,0 +1,1106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Lookout Tower Signal Laser</title>
+  <link href="https://fonts.googleapis.com/css2?family=Belanosima:wght@400;600;700&family=Nunito+Sans:wght@400;500;600;700&family=Nunito:wght@400;500;600&display=swap" rel="stylesheet">
+  <!--
+  ╔══════════════════════════════════════════════════════════════════════════════╗
+  ║  GAME FACTORY TEMPLATE                                                        ║
+  ║  This template enforces critical invariants. Follow the section markers.      ║
+  ╚══════════════════════════════════════════════════════════════════════════════╝
+  -->
+  <style>
+    /* ═══════════════════════════════════════════════════════════════════════════
+       BASE STYLES - Can be extended, not removed
+       ═══════════════════════════════════════════════════════════════════════════ */
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+    }
+    body {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      background: #1a1a2e;
+      font-family: 'Nunito Sans', system-ui, -apple-system, sans-serif;
+    }
+    #gameCanvas {
+      background: #16213e;
+      border-radius: 8px;
+      display: block;
+    }
+  </style>
+</head>
+<body>
+  <!-- ═══════════════════════════════════════════════════════════════════════════
+       CANVAS - Sized dynamically to fill available space
+       ═══════════════════════════════════════════════════════════════════════════ -->
+  <canvas id="gameCanvas"></canvas>
+
+  <script>
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 1: QUESTION PLACEHOLDER - DO NOT MODIFY FORMAT                    ║
+  // ║  Platform replaces this at runtime. Use these exact 60-char answers.       ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  const QUESTION = {
+    type: "mcq",
+    prompt: "Sample question text",
+    choices: [
+      { text: "This is sample answer A which is long enough to test text overflow", is_correct: true, explanation: "Why A is correct" },
+      { text: "This is sample answer B which is long enough to test text overflow", is_correct: false, explanation: "Why B is wrong" },
+      { text: "This is sample answer C which is long enough to test text overflow", is_correct: false, explanation: "Why C is wrong" },
+      { text: "This is sample answer D which is long enough to test text overflow", is_correct: false, explanation: "Why D is wrong" }
+    ],
+    isLastQuestion: false
+  };
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 2: ENGINE CORE - DO NOT MODIFY                                    ║
+  // ║  Standard engine interface and end screen. This is sacred.                 ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  const canvas = document.getElementById('gameCanvas');
+  const ctx = canvas.getContext('2d');
+
+  // Logical dimensions (game code works in this coordinate space)
+  const W = 720, H = 540;
+
+  // Scaling state (computed on resize)
+  let scale = 1;
+  let dpr = 1;
+
+  let gameState = 'playing'; // 'playing' | 'ended'
+  let gameResult = null;     // true (correct) | false (wrong)
+  let gameExplanation = '';
+  let endScreenTime = 0;
+  let confettiParticles = [];
+
+  // End screen button bounds (logical coordinates)
+  const restartButton = { x: W / 2 - 170, y: H / 2 + 60, w: 150, h: 48 };
+  const nextButton = { x: W / 2 + 20, y: H / 2 + 60, w: 150, h: 48 };
+
+  /** Check if point is inside rectangle */
+  function pointInRect(px, py, rect) {
+    return px >= rect.x && px <= rect.x + rect.w &&
+           py >= rect.y && py <= rect.y + rect.h;
+  }
+
+  /** Draw a styled button */
+  function drawButton(rect, label, color, pulse) {
+    const p = pulse ? 1 + Math.sin(endScreenTime * 4) * 0.03 : 1;
+    ctx.save();
+    ctx.translate(rect.x + rect.w / 2, rect.y + rect.h / 2);
+    ctx.scale(p, p);
+    ctx.translate(-(rect.x + rect.w / 2), -(rect.y + rect.h / 2));
+
+    // Button background
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.roundRect(rect.x, rect.y, rect.w, rect.h, 12);
+    ctx.fill();
+
+    // Button text
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = 'bold 18px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, rect.x + rect.w / 2, rect.y + rect.h / 2);
+
+    ctx.restore();
+  }
+
+  /**
+   * Resize canvas to fill available space with proper DPR scaling.
+   * Maintains logical coordinate system (720×540).
+   */
+  function resizeCanvas() {
+    dpr = window.devicePixelRatio || 1;
+
+    // Get available space
+    const availW = window.innerWidth;
+    const availH = window.innerHeight;
+
+    // Calculate scale to fit logical space (720×540) in available space
+    const scaleX = availW / W;
+    const scaleY = availH / H;
+    scale = Math.min(scaleX, scaleY);
+
+    // Physical canvas buffer (DPR-scaled for crisp rendering)
+    canvas.width = W * scale * dpr;
+    canvas.height = H * scale * dpr;
+
+    // CSS display size
+    canvas.style.width = (W * scale) + 'px';
+    canvas.style.height = (H * scale) + 'px';
+  }
+
+  /**
+   * Convert screen coordinates to logical coordinates.
+   * Use this for mouse/click events to get positions in 720×540 space.
+   */
+  function screenToLogical(screenX, screenY) {
+    const rect = canvas.getBoundingClientRect();
+    return {
+      x: (screenX - rect.left) * (W / rect.width),
+      y: (screenY - rect.top) * (H / rect.height)
+    };
+  }
+
+  const engine = {
+    /** Call this to end the game. DO NOT draw your own end screen. */
+    end(isCorrect, explanation) {
+      if (gameState === 'ended') return;
+      gameState = 'ended';
+      gameResult = isCorrect;
+      gameExplanation = explanation || '';
+      endScreenTime = 0;
+
+      // Spawn confetti for correct answers
+      if (isCorrect) {
+        for (let i = 0; i < 50; i++) {
+          confettiParticles.push({
+            x: W / 2,
+            y: H / 2,
+            vx: (Math.random() - 0.5) * 600,
+            vy: -Math.random() * 400 - 100,
+            size: 4 + Math.random() * 6,
+            color: ['#FFD700', '#FF6B6B', '#4ECDC4', '#95E1D3', '#F38181'][Math.floor(Math.random() * 5)],
+            rotation: Math.random() * Math.PI * 2,
+            rotationSpeed: (Math.random() - 0.5) * 10
+          });
+        }
+      }
+
+      // Notify parent frame
+      if (window.parent && window.parent !== window) {
+        window.parent.postMessage({
+          type: 'quiz-end',
+          isCorrect: isCorrect,
+          explanation: explanation || ''
+        }, '*');
+      }
+    }
+  };
+
+  /** STANDARD END SCREEN - DO NOT MODIFY */
+  function drawEndScreen(dt) {
+    endScreenTime += dt;
+
+    // Update confetti
+    confettiParticles = confettiParticles.filter(p => {
+      p.vy += 800 * dt; // gravity
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.rotation += p.rotationSpeed * dt;
+      p.vx *= 0.99;
+      return p.y < H + 50;
+    });
+
+    // Dark overlay
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
+    ctx.fillRect(0, 0, W, H);
+
+    // Draw confetti
+    confettiParticles.forEach(p => {
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rotation);
+      ctx.fillStyle = p.color;
+      ctx.fillRect(-p.size / 2, -p.size / 4, p.size, p.size / 2);
+      ctx.restore();
+    });
+
+    // Result emoji
+    ctx.font = '72px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(gameResult ? '🎉' : '😢', W / 2, H / 2 - 50);
+
+    // Result text
+    ctx.fillStyle = gameResult ? '#4ADE80' : '#F87171';
+    ctx.font = 'bold 36px system-ui, sans-serif';
+    ctx.fillText(gameResult ? 'Correct!' : 'Wrong!', W / 2, H / 2 + 20);
+
+    // Buttons
+    if (gameResult) {
+      // Correct: show both Restart and Next/Finish
+      drawButton(restartButton, 'Restart', '#E87A3E', true);
+      const nextLabel = QUESTION.isLastQuestion ? 'Finish' : 'Next';
+      drawButton(nextButton, nextLabel, '#4ECDC4', true);
+    } else {
+      // Wrong: show only centered Restart button
+      const centeredRestart = { x: W / 2 - 75, y: H / 2 + 60, w: 150, h: 48 };
+      drawButton(centeredRestart, 'Restart', '#E87A3E', true);
+    }
+  }
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 3: YOUR GAME CODE - IMPLEMENT THESE FUNCTIONS                     ║
+  // ║  This is where your game logic goes. See requirements below.               ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+
+  // === COLORS ===
+  const COLORS = {
+    bgPrimary: '#FAFAF7',
+    bgSurface: '#FFFFFF',
+    textPrimary: '#2B2B28',
+    textSecondary: '#5A5A54',
+    orange: '#E87A3E',
+    orangeHover: '#D66B31',
+    amber: '#F5A742',
+    cyan: '#4ECDC4',
+    success: '#6BBF59',
+    error: '#E85D4A',
+    borderSubtle: '#E6E6E0',
+    borderStrong: '#D4D4CC'
+  };
+
+  // === SOUND ENGINE ===
+  const AudioCtx = window.AudioContext || window.webkitAudioContext;
+  let audioCtx = null;
+  function getAudioCtx() {
+    if (!audioCtx) audioCtx = new AudioCtx();
+    return audioCtx;
+  }
+  function playSound(type) {
+    try {
+      const ctx = getAudioCtx();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      if (type === 'aim') {
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(220, ctx.currentTime);
+        osc.frequency.linearRampToValueAtTime(260, ctx.currentTime + 0.05);
+        gain.gain.setValueAtTime(0.06, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.08);
+        osc.start(ctx.currentTime);
+        osc.stop(ctx.currentTime + 0.08);
+      } else if (type === 'fire') {
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(800, ctx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(2000, ctx.currentTime + 0.15);
+        gain.gain.setValueAtTime(0.15, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);
+        osc.start(ctx.currentTime);
+        osc.stop(ctx.currentTime + 0.3);
+      } else if (type === 'correct') {
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(523, ctx.currentTime);
+        osc.frequency.setValueAtTime(659, ctx.currentTime + 0.1);
+        osc.frequency.setValueAtTime(784, ctx.currentTime + 0.2);
+        gain.gain.setValueAtTime(0.15, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.4);
+        osc.start(ctx.currentTime);
+        osc.stop(ctx.currentTime + 0.4);
+      } else if (type === 'wrong') {
+        osc.type = 'square';
+        osc.frequency.setValueAtTime(200, ctx.currentTime);
+        osc.frequency.linearRampToValueAtTime(120, ctx.currentTime + 0.3);
+        gain.gain.setValueAtTime(0.12, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.35);
+        osc.start(ctx.currentTime);
+        osc.stop(ctx.currentTime + 0.35);
+      }
+    } catch(e) {}
+  }
+
+  // === GAME STATE ===
+  const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  let mirror = { angle: 0, x: W / 2, y: H - 70 };
+  const AIM_SPEED = 1.8; // radians/sec
+  const MIN_ANGLE = -Math.PI * 0.42;
+  const MAX_ANGLE = Math.PI * 0.42;
+
+  let towers = [];
+  let beam = null; // { x, y, targetTower, progress, active }
+  let beamParticles = [];
+  let gameParticles = [];
+  let fogLayers = [];
+  let selectedTower = -1;
+  let highlightedTower = -1;
+  let answerRevealed = false;
+  let revealTimer = 0;
+  let keys = {};
+  let entranceProgress = 0;
+  let treePositions = [];
+
+  // Tower layout: 2x2 grid with wider banners for text readability
+  const BANNER_W = 170;
+  const BANNER_H = 95;
+  const TOWER_POSITIONS = [
+    { x: 20, y: 15 },
+    { x: 200, y: 35 },
+    { x: 380, y: 20 },
+    { x: 545, y: 40 }
+  ];
+
+  function initGame() {
+    mirror.angle = 0;
+    beam = null;
+    beamParticles = [];
+    gameParticles = [];
+    selectedTower = -1;
+    highlightedTower = -1;
+    answerRevealed = false;
+    revealTimer = 0;
+    keys = {};
+    entranceProgress = 0;
+
+    towers = QUESTION.choices.map((choice, i) => ({
+      x: TOWER_POSITIONS[i].x,
+      y: TOWER_POSITIONS[i].y,
+      choice: choice,
+      index: i,
+      bannerVisible: true,
+      flagRaised: false,
+      flagProgress: 0,
+      hitGlow: 0,
+      shakeX: 0,
+      shakeTimer: 0,
+      scale: 0,
+      alpha: 0,
+      bannerW: BANNER_W,
+      bannerH: BANNER_H,
+      towerW: 30,
+      towerH: 100
+    }));
+
+    // Generate random trees
+    treePositions = [];
+    for (let i = 0; i < 18; i++) {
+      treePositions.push({
+        x: Math.random() * W,
+        y: 100 + Math.random() * 120,
+        h: 60 + Math.random() * 80,
+        w: 18 + Math.random() * 14,
+        shade: Math.random() * 0.3
+      });
+    }
+
+    // Fog layers
+    fogLayers = [];
+    for (let i = 0; i < 5; i++) {
+      fogLayers.push({
+        x: Math.random() * W,
+        y: 80 + Math.random() * 200,
+        w: 120 + Math.random() * 200,
+        h: 20 + Math.random() * 30,
+        speed: 5 + Math.random() * 10,
+        alpha: 0.15 + Math.random() * 0.2
+      });
+    }
+  }
+
+  function wrapText(text, maxWidth, font) {
+    ctx.font = font;
+    const words = text.split(' ');
+    const lines = [];
+    let currentLine = '';
+    for (let w of words) {
+      const testLine = currentLine ? currentLine + ' ' + w : w;
+      if (ctx.measureText(testLine).width > maxWidth && currentLine) {
+        lines.push(currentLine);
+        currentLine = w;
+      } else {
+        currentLine = testLine;
+      }
+    }
+    if (currentLine) lines.push(currentLine);
+    return lines;
+  }
+
+  function updateGame(dt) {
+    if (gameState !== 'playing') return;
+
+    // Entrance animation
+    if (entranceProgress < 1) {
+      entranceProgress = Math.min(1, entranceProgress + dt * 1.5);
+      towers.forEach((t, i) => {
+        const delay = i * 0.15;
+        const tProg = Math.max(0, Math.min(1, (entranceProgress - delay) / 0.4));
+        const spring = 1 + Math.sin(tProg * Math.PI * 2) * 0.15 * (1 - tProg);
+        t.scale = prefersReducedMotion ? (tProg > 0 ? 1 : 0) : tProg * spring;
+        t.alpha = tProg;
+      });
+    }
+
+    // Aim mirror with keys
+    if (keys['ArrowLeft'] || keys['KeyA']) {
+      mirror.angle -= AIM_SPEED * dt;
+      if (mirror.angle < MIN_ANGLE) mirror.angle = MIN_ANGLE;
+    }
+    if (keys['ArrowRight'] || keys['KeyD']) {
+      mirror.angle += AIM_SPEED * dt;
+      if (mirror.angle > MAX_ANGLE) mirror.angle = MAX_ANGLE;
+    }
+
+    // Find which tower the beam would hit
+    const beamDirX = Math.sin(mirror.angle);
+    const beamDirY = -Math.cos(mirror.angle);
+    highlightedTower = -1;
+    let closestDist = Infinity;
+
+    towers.forEach((t, i) => {
+      if (!t.bannerVisible) return;
+      const tCenterX = t.x + t.bannerW / 2;
+      const tCenterY = t.y + t.bannerH / 2;
+      const dx = tCenterX - mirror.x;
+      const dy = tCenterY - mirror.y;
+      const proj = dx * beamDirX + dy * beamDirY;
+      if (proj > 0) {
+        const perpX = dx - proj * beamDirX;
+        const perpY = dy - proj * beamDirY;
+        const perpDist = Math.sqrt(perpX * perpX + perpY * perpY);
+        if (perpDist < t.bannerW / 2 + 15 && proj < closestDist) {
+          closestDist = proj;
+          highlightedTower = i;
+        }
+      }
+    });
+
+    // Beam animation
+    if (beam && beam.active) {
+      beam.progress += dt * 4;
+      // Spawn beam trail particles
+      if (!prefersReducedMotion) {
+        const prog = Math.min(beam.progress, 1);
+        const bx = mirror.x + (beam.targetX - mirror.x) * prog;
+        const by = (mirror.y - 20) + (beam.targetY - (mirror.y - 20)) * prog;
+        for (let i = 0; i < 2; i++) {
+          beamParticles.push({
+            x: bx + (Math.random() - 0.5) * 8,
+            y: by + (Math.random() - 0.5) * 8,
+            vx: (Math.random() - 0.5) * 30,
+            vy: (Math.random() - 0.5) * 30,
+            life: 0.4 + Math.random() * 0.3,
+            maxLife: 0.4 + Math.random() * 0.3,
+            size: 2 + Math.random() * 3,
+            color: Math.random() > 0.5 ? COLORS.amber : '#FFF8E8'
+          });
+        }
+      }
+      if (beam.progress >= 1 && !answerRevealed) {
+        answerRevealed = true;
+        revealTimer = 0;
+        const tower = towers[beam.towerIndex];
+        tower.hitGlow = 1;
+        if (tower.choice.is_correct) {
+          playSound('correct');
+          // Spawn celebration particles
+          if (!prefersReducedMotion) {
+            for (let i = 0; i < 25; i++) {
+              gameParticles.push({
+                x: tower.x + tower.bannerW / 2,
+                y: tower.y + tower.bannerH / 2,
+                vx: (Math.random() - 0.5) * 300,
+                vy: -Math.random() * 200 - 50,
+                life: 1 + Math.random() * 0.5,
+                maxLife: 1 + Math.random() * 0.5,
+                size: 3 + Math.random() * 5,
+                color: [COLORS.orange, COLORS.amber, COLORS.cyan, COLORS.success][Math.floor(Math.random() * 4)],
+                gravity: 200,
+                rotation: Math.random() * Math.PI * 2,
+                rotSpeed: (Math.random() - 0.5) * 8
+              });
+            }
+          }
+        } else {
+          playSound('wrong');
+          tower.bannerVisible = false;
+          tower.flagRaised = true;
+          tower.shakeTimer = 0.4;
+        }
+      }
+    }
+
+    // Answer reveal delay before ending
+    if (answerRevealed) {
+      revealTimer += dt;
+      if (revealTimer > 0.8) {
+        const tower = towers[beam.towerIndex];
+        engine.end(tower.choice.is_correct, tower.choice.explanation);
+      }
+    }
+
+    // Update tower shake
+    towers.forEach(t => {
+      if (t.shakeTimer > 0) {
+        t.shakeTimer -= dt;
+        const decay = t.shakeTimer / 0.4;
+        t.shakeX = Math.sin(t.shakeTimer * 40) * 6 * decay;
+      } else {
+        t.shakeX = 0;
+      }
+      if (t.hitGlow > 0) t.hitGlow = Math.max(0, t.hitGlow - dt * 1.5);
+      if (t.flagRaised && t.flagProgress < 1) {
+        t.flagProgress = Math.min(1, t.flagProgress + dt * 3);
+      }
+    });
+
+    // Update particles
+    beamParticles.forEach(p => {
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.life -= dt;
+    });
+    beamParticles = beamParticles.filter(p => p.life > 0);
+
+    gameParticles.forEach(p => {
+      p.vy += (p.gravity || 200) * dt;
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.rotation += (p.rotSpeed || 0) * dt;
+      p.life -= dt;
+    });
+    gameParticles = gameParticles.filter(p => p.life > 0);
+
+    // Update fog
+    fogLayers.forEach(f => {
+      f.x += f.speed * dt;
+      if (f.x > W + 100) f.x = -f.w;
+    });
+  }
+
+  function drawGame() {
+    // Sky gradient
+    const skyGrad = ctx.createLinearGradient(0, 0, 0, H);
+    skyGrad.addColorStop(0, '#8BAACC');
+    skyGrad.addColorStop(0.3, '#B8C9D8');
+    skyGrad.addColorStop(0.6, '#D4DDE5');
+    skyGrad.addColorStop(1, '#C8D0B8');
+    ctx.fillStyle = skyGrad;
+    ctx.fillRect(0, 0, W, H);
+
+    // Mountain range (background)
+    drawMountains();
+
+    // Trees
+    drawTrees();
+
+    // Fog behind towers
+    drawFog(0.5);
+
+    // Draw towers
+    towers.forEach((t, i) => {
+      if (t.alpha <= 0) return;
+      ctx.save();
+      ctx.globalAlpha = t.alpha;
+      ctx.translate(t.x + t.bannerW / 2 + t.shakeX, t.y + t.towerH);
+      ctx.scale(t.scale, t.scale);
+      ctx.translate(-(t.x + t.bannerW / 2), -(t.y + t.towerH));
+
+      drawTower(t, i);
+
+      ctx.restore();
+    });
+
+    // Fog in front of towers
+    drawFog(0.3);
+
+    // Draw beam
+    if (beam && beam.active) {
+      drawBeam();
+    }
+
+    // Draw beam particles
+    beamParticles.forEach(p => {
+      ctx.globalAlpha = p.life / p.maxLife;
+      ctx.fillStyle = p.color;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+      ctx.fill();
+    });
+    ctx.globalAlpha = 1;
+
+    // Draw game particles (celebration)
+    gameParticles.forEach(p => {
+      ctx.save();
+      ctx.globalAlpha = Math.min(1, p.life / (p.maxLife * 0.3));
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rotation);
+      ctx.fillStyle = p.color;
+      ctx.fillRect(-p.size / 2, -p.size / 4, p.size, p.size / 2);
+      ctx.restore();
+    });
+
+    // Draw ground area
+    drawGround();
+
+    // Draw mirror/signal device
+    drawMirror();
+
+    // Draw aim indicator line (faint)
+    if (!beam && entranceProgress >= 1) {
+      drawAimLine();
+    }
+
+    // Highlight indicator
+    if (highlightedTower >= 0 && !beam && towers[highlightedTower].bannerVisible) {
+      const ht = towers[highlightedTower];
+      ctx.save();
+      ctx.strokeStyle = COLORS.cyan;
+      ctx.lineWidth = 2;
+      ctx.setLineDash([6, 4]);
+      ctx.globalAlpha = 0.6;
+      ctx.strokeRect(ht.x - 4, ht.y - 4, ht.bannerW + 8, ht.bannerH + 8);
+      ctx.setLineDash([]);
+      ctx.restore();
+    }
+  }
+
+  function drawMountains() {
+    // Far mountains
+    ctx.fillStyle = '#7A8E7A';
+    ctx.beginPath();
+    ctx.moveTo(0, 250);
+    ctx.lineTo(60, 160);
+    ctx.lineTo(140, 200);
+    ctx.lineTo(220, 130);
+    ctx.lineTo(320, 180);
+    ctx.lineTo(400, 110);
+    ctx.lineTo(500, 170);
+    ctx.lineTo(580, 100);
+    ctx.lineTo(660, 150);
+    ctx.lineTo(720, 190);
+    ctx.lineTo(720, 300);
+    ctx.lineTo(0, 300);
+    ctx.closePath();
+    ctx.fill();
+
+    // Near mountains
+    ctx.fillStyle = '#5D7252';
+    ctx.beginPath();
+    ctx.moveTo(0, 280);
+    ctx.lineTo(80, 200);
+    ctx.lineTo(180, 240);
+    ctx.lineTo(280, 180);
+    ctx.lineTo(380, 230);
+    ctx.lineTo(460, 170);
+    ctx.lineTo(560, 220);
+    ctx.lineTo(650, 190);
+    ctx.lineTo(720, 240);
+    ctx.lineTo(720, 350);
+    ctx.lineTo(0, 350);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  function drawTrees() {
+    treePositions.forEach(tp => {
+      // Trunk
+      ctx.fillStyle = `rgb(${90 - tp.shade * 40}, ${65 - tp.shade * 30}, ${40 - tp.shade * 20})`;
+      ctx.fillRect(tp.x - tp.w / 6, tp.y, tp.w / 3, tp.h * 0.4);
+
+      // Canopy (redwood: tall narrow triangle)
+      const cGreen = Math.floor(80 + tp.shade * 50);
+      ctx.fillStyle = `rgb(${30 + Math.floor(tp.shade * 20)}, ${cGreen}, ${25 + Math.floor(tp.shade * 15)})`;
+      ctx.beginPath();
+      ctx.moveTo(tp.x, tp.y - tp.h * 0.6);
+      ctx.lineTo(tp.x - tp.w / 2, tp.y + tp.h * 0.1);
+      ctx.lineTo(tp.x + tp.w / 2, tp.y + tp.h * 0.1);
+      ctx.closePath();
+      ctx.fill();
+    });
+  }
+
+  function drawFog(alpha) {
+    fogLayers.forEach(f => {
+      if (f.alpha * (alpha / 0.5) > 0.01) {
+        const fogGrad = ctx.createRadialGradient(f.x + f.w / 2, f.y, 0, f.x + f.w / 2, f.y, f.w / 2);
+        fogGrad.addColorStop(0, `rgba(220, 225, 230, ${f.alpha * (alpha / 0.5)})`);
+        fogGrad.addColorStop(1, 'rgba(220, 225, 230, 0)');
+        ctx.fillStyle = fogGrad;
+        ctx.fillRect(f.x, f.y - f.h, f.w, f.h * 2);
+      }
+    });
+  }
+
+  function drawTower(t, index) {
+    const cx = t.x + t.bannerW / 2;
+    const baseY = t.y + t.bannerH + 10;
+
+    // Tower wooden structure
+    const tw = t.towerW;
+    const th = t.towerH;
+
+    // Support legs
+    ctx.strokeStyle = '#6B4D2E';
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.moveTo(cx - tw / 2, baseY + th);
+    ctx.lineTo(cx - tw / 4, baseY);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(cx + tw / 2, baseY + th);
+    ctx.lineTo(cx + tw / 4, baseY);
+    ctx.stroke();
+
+    // Cross beams
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = '#8B6B4A';
+    ctx.beginPath();
+    ctx.moveTo(cx - tw / 3, baseY + th * 0.3);
+    ctx.lineTo(cx + tw / 3, baseY + th * 0.6);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(cx + tw / 3, baseY + th * 0.3);
+    ctx.lineTo(cx - tw / 3, baseY + th * 0.6);
+    ctx.stroke();
+
+    // Platform at top
+    ctx.fillStyle = '#7A5C3A';
+    ctx.fillRect(cx - tw / 2 - 5, baseY - 3, tw + 10, 6);
+
+    // Banner post
+    ctx.fillStyle = '#5A3E22';
+    ctx.fillRect(cx - 2, t.y - 10, 4, t.bannerH + 20);
+
+    // Banner or flag
+    if (t.bannerVisible) {
+      // Hit glow
+      if (t.hitGlow > 0) {
+        ctx.save();
+        ctx.shadowColor = t.choice.is_correct ? COLORS.success : COLORS.error;
+        ctx.shadowBlur = 20 * t.hitGlow;
+        ctx.restore();
+      }
+
+      // Banner background
+      const isHighlighted = highlightedTower === index && !beam;
+      ctx.fillStyle = isHighlighted ? '#FFF8E8' : COLORS.bgSurface;
+      ctx.strokeStyle = isHighlighted ? COLORS.cyan : COLORS.borderSubtle;
+      ctx.lineWidth = isHighlighted ? 2.5 : 1.5;
+
+      ctx.beginPath();
+      ctx.roundRect(t.x, t.y, t.bannerW, t.bannerH, 4);
+      ctx.fill();
+      ctx.stroke();
+
+      // Banner glow on hit
+      if (t.hitGlow > 0) {
+        ctx.save();
+        ctx.globalAlpha = t.hitGlow * 0.3;
+        ctx.fillStyle = t.choice.is_correct ? COLORS.success : COLORS.error;
+        ctx.beginPath();
+        ctx.roundRect(t.x, t.y, t.bannerW, t.bannerH, 4);
+        ctx.fill();
+        ctx.restore();
+      }
+
+      // Letter label (A, B, C, D)
+      const labels = ['A', 'B', 'C', 'D'];
+      ctx.fillStyle = COLORS.orange;
+      ctx.font = "700 16px 'Belanosima', sans-serif";
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'top';
+      ctx.fillText(labels[index], cx, t.y + 4);
+
+      // Answer text (wrapped)
+      ctx.fillStyle = COLORS.textPrimary;
+      const answerFont = "500 16px 'Nunito', sans-serif";
+      const lines = wrapText(t.choice.text, t.bannerW - 14, answerFont);
+      ctx.font = answerFont;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'top';
+      const lineHeight = 18;
+      const textStartY = t.y + 23;
+      lines.forEach((line, li) => {
+        if (textStartY + li * lineHeight < t.y + t.bannerH - 4) {
+          ctx.fillText(line, cx, textStartY + li * lineHeight);
+        }
+      });
+    }
+
+    // Red distress flag
+    if (t.flagRaised) {
+      const flagY = t.y - 10 + (1 - t.flagProgress) * 30;
+      ctx.fillStyle = COLORS.error;
+      ctx.beginPath();
+      ctx.moveTo(cx + 4, flagY);
+      ctx.lineTo(cx + 28, flagY + 8);
+      ctx.lineTo(cx + 4, flagY + 18);
+      ctx.closePath();
+      ctx.fill();
+      // X on flag
+      ctx.strokeStyle = '#FFFFFF';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(cx + 10, flagY + 4);
+      ctx.lineTo(cx + 22, flagY + 14);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(cx + 22, flagY + 4);
+      ctx.lineTo(cx + 10, flagY + 14);
+      ctx.stroke();
+    }
+  }
+
+  function drawGround() {
+    // Ground gradient
+    const groundGrad = ctx.createLinearGradient(0, H - 100, 0, H);
+    groundGrad.addColorStop(0, '#4A6B3A');
+    groundGrad.addColorStop(0.5, '#3D5A30');
+    groundGrad.addColorStop(1, '#2E4524');
+    ctx.fillStyle = groundGrad;
+    ctx.beginPath();
+    ctx.moveTo(0, H - 90);
+    ctx.quadraticCurveTo(W / 4, H - 100, W / 2, H - 85);
+    ctx.quadraticCurveTo(3 * W / 4, H - 70, W, H - 80);
+    ctx.lineTo(W, H);
+    ctx.lineTo(0, H);
+    ctx.closePath();
+    ctx.fill();
+
+    // Some grass strokes
+    ctx.strokeStyle = '#5A7B4A';
+    ctx.lineWidth = 1.5;
+    for (let i = 0; i < 30; i++) {
+      const gx = 10 + (i / 30) * (W - 20);
+      const gy = H - 80 + Math.sin(i * 0.7) * 10;
+      ctx.beginPath();
+      ctx.moveTo(gx, gy);
+      ctx.lineTo(gx + (Math.random() - 0.5) * 6, gy - 8 - Math.random() * 8);
+      ctx.stroke();
+    }
+  }
+
+  function drawMirror() {
+    ctx.save();
+    ctx.translate(mirror.x, mirror.y);
+
+    // Wooden stand
+    ctx.fillStyle = '#6B4D2E';
+    ctx.fillRect(-3, -10, 6, 30);
+
+    // Tripod legs
+    ctx.strokeStyle = '#5A3E22';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(0, 10);
+    ctx.lineTo(-18, 30);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(0, 10);
+    ctx.lineTo(18, 30);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(0, 10);
+    ctx.lineTo(0, 32);
+    ctx.stroke();
+
+    // Mirror disc (rotates with angle)
+    ctx.save();
+    ctx.rotate(mirror.angle);
+
+    // Mirror glow
+    ctx.shadowColor = COLORS.amber;
+    ctx.shadowBlur = 12;
+
+    // Mirror surface
+    const mirrorGrad = ctx.createLinearGradient(-14, -24, 14, -14);
+    mirrorGrad.addColorStop(0, '#E8E8E0');
+    mirrorGrad.addColorStop(0.3, '#FFFFFF');
+    mirrorGrad.addColorStop(0.7, '#F5F5F0');
+    mirrorGrad.addColorStop(1, '#D4D4CC');
+    ctx.fillStyle = mirrorGrad;
+    ctx.beginPath();
+    ctx.ellipse(0, -18, 14, 8, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Mirror frame
+    ctx.strokeStyle = '#8B7355';
+    ctx.lineWidth = 2;
+    ctx.shadowBlur = 0;
+    ctx.stroke();
+
+    // Glint
+    ctx.fillStyle = 'rgba(255,255,255,0.8)';
+    ctx.beginPath();
+    ctx.arc(-4, -20, 3, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.restore();
+    ctx.restore();
+  }
+
+  function drawAimLine() {
+    const beamDirX = Math.sin(mirror.angle);
+    const beamDirY = -Math.cos(mirror.angle);
+    ctx.save();
+    ctx.strokeStyle = 'rgba(245, 167, 66, 0.3)';
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([4, 6]);
+    ctx.beginPath();
+    ctx.moveTo(mirror.x, mirror.y - 20);
+    ctx.lineTo(mirror.x + beamDirX * 500, mirror.y - 20 + beamDirY * 500);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.restore();
+  }
+
+  function drawBeam() {
+    if (!beam) return;
+    const prog = Math.min(beam.progress, 1);
+    const sx = mirror.x;
+    const sy = mirror.y - 20;
+    const ex = sx + (beam.targetX - sx) * prog;
+    const ey = sy + (beam.targetY - sy) * prog;
+
+    // Beam glow
+    ctx.save();
+    ctx.strokeStyle = COLORS.amber;
+    ctx.lineWidth = 6;
+    ctx.globalAlpha = 0.4;
+    ctx.shadowColor = COLORS.amber;
+    ctx.shadowBlur = 20;
+    ctx.beginPath();
+    ctx.moveTo(sx, sy);
+    ctx.lineTo(ex, ey);
+    ctx.stroke();
+
+    // Core beam
+    ctx.strokeStyle = '#FFFBE6';
+    ctx.lineWidth = 2.5;
+    ctx.globalAlpha = 0.9;
+    ctx.shadowBlur = 8;
+    ctx.beginPath();
+    ctx.moveTo(sx, sy);
+    ctx.lineTo(ex, ey);
+    ctx.stroke();
+
+    ctx.restore();
+  }
+
+  function fireLaser() {
+    if (beam || answerRevealed) return;
+    if (highlightedTower < 0) return;
+
+    playSound('fire');
+    const t = towers[highlightedTower];
+    beam = {
+      targetX: t.x + t.bannerW / 2,
+      targetY: t.y + t.bannerH / 2,
+      towerIndex: highlightedTower,
+      progress: 0,
+      active: true
+    };
+  }
+
+  function handleInput(e) {
+    if (gameState !== 'playing') return;
+
+    if (e.type === 'keydown') {
+      if (!keys[e.code] && (e.code === 'ArrowLeft' || e.code === 'ArrowRight' || e.code === 'KeyA' || e.code === 'KeyD')) {
+        playSound('aim');
+      }
+      keys[e.code] = true;
+      if (e.code === 'Space' || e.code === 'Enter') {
+        e.preventDefault();
+        fireLaser();
+      }
+    }
+  }
+
+  // Also handle keyup for smooth aiming
+  document.addEventListener('keyup', (e) => {
+    keys[e.code] = false;
+  });
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 4: GAME LOOP - DO NOT MODIFY                                      ║
+  // ║  Standard loop with responsive scaling and DPR support.                    ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  let lastTime = performance.now();
+
+  function gameLoop(now) {
+    const dt = Math.min((now - lastTime) / 1000, 0.05); // Cap at 50ms
+    lastTime = now;
+
+    // Apply transform for logical coordinate system
+    ctx.setTransform(scale * dpr, 0, 0, scale * dpr, 0, 0);
+
+    if (gameState === 'playing') {
+      updateGame(dt);
+      drawGame();
+    } else {
+      drawGame(); // Draw game state behind overlay
+      drawEndScreen(dt);
+    }
+
+    // Reset transform for next frame
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+    requestAnimationFrame(gameLoop);
+  }
+
+  // Input handlers
+  document.addEventListener('keydown', (e) => {
+    if (gameState === 'ended' && (e.code === 'KeyR')) {
+      // Restart game
+      gameState = 'playing';
+      gameResult = null;
+      gameExplanation = '';
+      confettiParticles = [];
+      initGame();
+      return;
+    }
+    handleInput(e);
+  });
+
+  document.addEventListener('keyup', (e) => {
+    // Optional: handle key release in your handleInput
+  });
+
+  // Canvas click handler for end screen buttons
+  canvas.addEventListener('click', (e) => {
+    if (gameState !== 'ended') return;
+
+    const { x, y } = screenToLogical(e.clientX, e.clientY);
+
+    if (gameResult) {
+      // Correct answer: check both buttons
+      if (pointInRect(x, y, restartButton)) {
+        gameState = 'playing';
+        gameResult = null;
+        gameExplanation = '';
+        confettiParticles = [];
+        initGame();
+        return;
+      }
+      if (pointInRect(x, y, nextButton)) {
+        // Notify parent to go to next question
+        if (window.parent && window.parent !== window) {
+          window.parent.postMessage({ type: 'quiz-next' }, '*');
+        }
+        return;
+      }
+    } else {
+      // Wrong answer: check centered restart button
+      const centeredRestart = { x: W / 2 - 75, y: H / 2 + 60, w: 150, h: 48 };
+      if (pointInRect(x, y, centeredRestart)) {
+        gameState = 'playing';
+        gameResult = null;
+        gameExplanation = '';
+        confettiParticles = [];
+        initGame();
+        return;
+      }
+    }
+  });
+
+  // Handle resize
+  window.addEventListener('resize', resizeCanvas);
+
+  // Initialize
+  resizeCanvas();
+  initGame();
+  requestAnimationFrame(gameLoop);
+  </script>
+</body>
+</html>

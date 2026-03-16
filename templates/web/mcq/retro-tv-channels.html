@@ -1,0 +1,933 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Game Template</title>
+  <link href="https://fonts.googleapis.com/css2?family=Belanosima:wght@400;600;700&family=Nunito+Sans:wght@400;500;600;700&family=Nunito:wght@400;500;600&display=swap" rel="stylesheet">
+  <!--
+  ╔══════════════════════════════════════════════════════════════════════════════╗
+  ║  GAME FACTORY TEMPLATE                                                        ║
+  ║  This template enforces critical invariants. Follow the section markers.      ║
+  ╚══════════════════════════════════════════════════════════════════════════════╝
+  -->
+  <style>
+    /* ═══════════════════════════════════════════════════════════════════════════
+       BASE STYLES - Can be extended, not removed
+       ═══════════════════════════════════════════════════════════════════════════ */
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+    }
+    body {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      background: #1a1a2e;
+      font-family: system-ui, -apple-system, sans-serif;
+    }
+    #gameCanvas {
+      background: #16213e;
+      border-radius: 8px;
+      display: block;
+    }
+  </style>
+</head>
+<body>
+  <!-- ═══════════════════════════════════════════════════════════════════════════
+       CANVAS - Sized dynamically to fill available space
+       ═══════════════════════════════════════════════════════════════════════════ -->
+  <canvas id="gameCanvas"></canvas>
+
+  <script>
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 1: QUESTION PLACEHOLDER - DO NOT MODIFY FORMAT                    ║
+  // ║  Platform replaces this at runtime. Use these exact 60-char answers.       ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  const QUESTION = {
+    type: "mcq",
+    prompt: "Sample question text",
+    choices: [
+      { text: "This is sample answer A which is long enough to test text overflow", is_correct: true, explanation: "Why A is correct" },
+      { text: "This is sample answer B which is long enough to test text overflow", is_correct: false, explanation: "Why B is wrong" },
+      { text: "This is sample answer C which is long enough to test text overflow", is_correct: false, explanation: "Why C is wrong" },
+      { text: "This is sample answer D which is long enough to test text overflow", is_correct: false, explanation: "Why D is wrong" }
+    ],
+    isLastQuestion: false
+  };
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 2: ENGINE CORE - DO NOT MODIFY                                    ║
+  // ║  Standard engine interface and end screen. This is sacred.                 ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  const canvas = document.getElementById('gameCanvas');
+  const ctx = canvas.getContext('2d');
+
+  // Logical dimensions (game code works in this coordinate space)
+  const W = 720, H = 540;
+
+  // Scaling state (computed on resize)
+  let scale = 1;
+  let dpr = 1;
+
+  let gameState = 'playing'; // 'playing' | 'ended'
+  let gameResult = null;     // true (correct) | false (wrong)
+  let gameExplanation = '';
+  let endScreenTime = 0;
+  let confettiParticles = [];
+
+  // End screen button bounds (logical coordinates)
+  const restartButton = { x: W / 2 - 170, y: H / 2 + 60, w: 150, h: 48 };
+  const nextButton = { x: W / 2 + 20, y: H / 2 + 60, w: 150, h: 48 };
+
+  /** Check if point is inside rectangle */
+  function pointInRect(px, py, rect) {
+    return px >= rect.x && px <= rect.x + rect.w &&
+           py >= rect.y && py <= rect.y + rect.h;
+  }
+
+  /** Draw a styled button */
+  function drawButton(rect, label, color, pulse) {
+    const p = pulse ? 1 + Math.sin(endScreenTime * 4) * 0.03 : 1;
+    ctx.save();
+    ctx.translate(rect.x + rect.w / 2, rect.y + rect.h / 2);
+    ctx.scale(p, p);
+    ctx.translate(-(rect.x + rect.w / 2), -(rect.y + rect.h / 2));
+
+    // Button background
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.roundRect(rect.x, rect.y, rect.w, rect.h, 12);
+    ctx.fill();
+
+    // Button text
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = 'bold 18px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, rect.x + rect.w / 2, rect.y + rect.h / 2);
+
+    ctx.restore();
+  }
+
+  /**
+   * Resize canvas to fill available space with proper DPR scaling.
+   * Maintains logical coordinate system (720×540).
+   */
+  function resizeCanvas() {
+    dpr = window.devicePixelRatio || 1;
+
+    // Get available space
+    const availW = window.innerWidth;
+    const availH = window.innerHeight;
+
+    // Calculate scale to fit logical space (720×540) in available space
+    const scaleX = availW / W;
+    const scaleY = availH / H;
+    scale = Math.min(scaleX, scaleY);
+
+    // Physical canvas buffer (DPR-scaled for crisp rendering)
+    canvas.width = W * scale * dpr;
+    canvas.height = H * scale * dpr;
+
+    // CSS display size
+    canvas.style.width = (W * scale) + 'px';
+    canvas.style.height = (H * scale) + 'px';
+  }
+
+  /**
+   * Convert screen coordinates to logical coordinates.
+   * Use this for mouse/click events to get positions in 720×540 space.
+   */
+  function screenToLogical(screenX, screenY) {
+    const rect = canvas.getBoundingClientRect();
+    return {
+      x: (screenX - rect.left) * (W / rect.width),
+      y: (screenY - rect.top) * (H / rect.height)
+    };
+  }
+
+  const engine = {
+    /** Call this to end the game. DO NOT draw your own end screen. */
+    end(isCorrect, explanation) {
+      if (gameState === 'ended') return;
+      gameState = 'ended';
+      gameResult = isCorrect;
+      gameExplanation = explanation || '';
+      endScreenTime = 0;
+
+      // Spawn confetti for correct answers
+      if (isCorrect) {
+        for (let i = 0; i < 50; i++) {
+          confettiParticles.push({
+            x: W / 2,
+            y: H / 2,
+            vx: (Math.random() - 0.5) * 600,
+            vy: -Math.random() * 400 - 100,
+            size: 4 + Math.random() * 6,
+            color: ['#FFD700', '#FF6B6B', '#4ECDC4', '#95E1D3', '#F38181'][Math.floor(Math.random() * 5)],
+            rotation: Math.random() * Math.PI * 2,
+            rotationSpeed: (Math.random() - 0.5) * 10
+          });
+        }
+      }
+
+      // Notify parent frame
+      if (window.parent && window.parent !== window) {
+        window.parent.postMessage({
+          type: 'quiz-end',
+          isCorrect: isCorrect,
+          explanation: explanation || ''
+        }, '*');
+      }
+    }
+  };
+
+  /** STANDARD END SCREEN - DO NOT MODIFY */
+  function drawEndScreen(dt) {
+    endScreenTime += dt;
+
+    // Update confetti
+    confettiParticles = confettiParticles.filter(p => {
+      p.vy += 800 * dt; // gravity
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.rotation += p.rotationSpeed * dt;
+      p.vx *= 0.99;
+      return p.y < H + 50;
+    });
+
+    // Dark overlay
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
+    ctx.fillRect(0, 0, W, H);
+
+    // Draw confetti
+    confettiParticles.forEach(p => {
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rotation);
+      ctx.fillStyle = p.color;
+      ctx.fillRect(-p.size / 2, -p.size / 4, p.size, p.size / 2);
+      ctx.restore();
+    });
+
+    // Result emoji
+    ctx.font = '72px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(gameResult ? '🎉' : '😢', W / 2, H / 2 - 50);
+
+    // Result text
+    ctx.fillStyle = gameResult ? '#4ADE80' : '#F87171';
+    ctx.font = 'bold 36px system-ui, sans-serif';
+    ctx.fillText(gameResult ? 'Correct!' : 'Wrong!', W / 2, H / 2 + 20);
+
+    // Buttons
+    if (gameResult) {
+      // Correct: show both Restart and Next/Finish
+      drawButton(restartButton, 'Restart', '#E87A3E', true);
+      const nextLabel = QUESTION.isLastQuestion ? 'Finish' : 'Next';
+      drawButton(nextButton, nextLabel, '#4ECDC4', true);
+    } else {
+      // Wrong: show only centered Restart button
+      const centeredRestart = { x: W / 2 - 75, y: H / 2 + 60, w: 150, h: 48 };
+      drawButton(centeredRestart, 'Restart', '#E87A3E', true);
+    }
+  }
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 3: YOUR GAME CODE - IMPLEMENT THESE FUNCTIONS                     ║
+  // ║  This is where your game logic goes. See requirements below.               ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+
+  // === COLORS ===
+  const COLORS = {
+    bgPrimary: '#FAFAF7',
+    bgSurface: '#FFFFFF',
+    textPrimary: '#2B2B28',
+    textSecondary: '#5A5A54',
+    orange: '#E87A3E',
+    orangeHover: '#D66B31',
+    amber: '#F5A742',
+    cyan: '#4ECDC4',
+    success: '#6BBF59',
+    error: '#E85D4A',
+    borderSubtle: '#E6E6E0',
+    borderStrong: '#D4D4CC'
+  };
+
+  // === GAME STATE ===
+  let selectedChannel = 0;
+  let channels = [];
+  let tvStatic = [];
+  let gameTime = 0;
+  let channelSwitchTime = 0;
+  let isTransitioning = false;
+  let transitionProgress = 0;
+  let entranceAnimProgress = 0;
+  let answerSelected = false;
+  let selectedAnswerIdx = -1;
+  let feedbackTime = 0;
+  let gameParticles = [];
+
+  // Audio context for sound effects
+  let audioCtx = null;
+  function getAudioCtx() {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    return audioCtx;
+  }
+
+  function playClickSound() {
+    try {
+      const ctx = getAudioCtx();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.type = 'square';
+      osc.frequency.setValueAtTime(220, ctx.currentTime);
+      osc.frequency.setValueAtTime(330, ctx.currentTime + 0.03);
+      gain.gain.setValueAtTime(0.08, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.1);
+      osc.start(ctx.currentTime);
+      osc.stop(ctx.currentTime + 0.1);
+    } catch(e) {}
+  }
+
+  function playCorrectSound() {
+    try {
+      const ctx = getAudioCtx();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(523, ctx.currentTime);
+      osc.frequency.setValueAtTime(659, ctx.currentTime + 0.1);
+      osc.frequency.setValueAtTime(784, ctx.currentTime + 0.2);
+      gain.gain.setValueAtTime(0.12, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.4);
+      osc.start(ctx.currentTime);
+      osc.stop(ctx.currentTime + 0.4);
+    } catch(e) {}
+  }
+
+  function playWrongSound() {
+    try {
+      const ctx = getAudioCtx();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(200, ctx.currentTime);
+      osc.frequency.setValueAtTime(150, ctx.currentTime + 0.15);
+      gain.gain.setValueAtTime(0.1, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);
+      osc.start(ctx.currentTime);
+      osc.stop(ctx.currentTime + 0.3);
+    } catch(e) {}
+  }
+
+  function playSwitchSound() {
+    try {
+      const ctx = getAudioCtx();
+      // White noise burst for channel switch static
+      const bufferSize = ctx.sampleRate * 0.05;
+      const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+      const data = buffer.getChannelData(0);
+      for (let i = 0; i < bufferSize; i++) {
+        data[i] = (Math.random() * 2 - 1) * 0.15;
+      }
+      const source = ctx.createBufferSource();
+      source.buffer = buffer;
+      const gain = ctx.createGain();
+      source.connect(gain);
+      gain.connect(ctx.destination);
+      gain.gain.setValueAtTime(0.08, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.05);
+      source.start(ctx.currentTime);
+    } catch(e) {}
+  }
+
+  // TV dimensions
+  const TV = {
+    x: 75,
+    y: 15,
+    w: 570,
+    h: 420,
+    screenX: 112,
+    screenY: 48,
+    screenW: 430,
+    screenH: 300,
+    bezelRadius: 22
+  };
+
+  // Generate static noise pixels
+  function generateStatic() {
+    const pixels = [];
+    for (let i = 0; i < 200; i++) {
+      pixels.push({
+        x: Math.random() * TV.screenW,
+        y: Math.random() * TV.screenH,
+        size: 2 + Math.random() * 4,
+        brightness: Math.random()
+      });
+    }
+    return pixels;
+  }
+
+  // Word wrap text to fit width
+  function wrapText(text, maxWidth, font) {
+    ctx.font = font;
+    const words = text.split(' ');
+    const lines = [];
+    let currentLine = words[0];
+
+    for (let i = 1; i < words.length; i++) {
+      const testLine = currentLine + ' ' + words[i];
+      if (ctx.measureText(testLine).width <= maxWidth) {
+        currentLine = testLine;
+      } else {
+        lines.push(currentLine);
+        currentLine = words[i];
+      }
+    }
+    lines.push(currentLine);
+    return lines;
+  }
+
+  function initGame() {
+    selectedChannel = 0;
+    gameTime = 0;
+    channelSwitchTime = 0;
+    isTransitioning = false;
+    transitionProgress = 0;
+    entranceAnimProgress = 0;
+    answerSelected = false;
+    selectedAnswerIdx = -1;
+    feedbackTime = 0;
+    gameParticles = [];
+    tvStatic = generateStatic();
+
+    channels = QUESTION.choices.map((choice, i) => ({
+      index: i,
+      text: choice.text,
+      is_correct: choice.is_correct,
+      explanation: choice.explanation,
+      channelNum: i + 1,
+      flickerOffset: Math.random() * Math.PI * 2,
+      hue: [COLORS.orange, COLORS.cyan, COLORS.amber, COLORS.success][i],
+      scale: 0,
+      alpha: 0
+    }));
+  }
+
+  function updateGame(dt) {
+    if (gameState !== 'playing') return;
+
+    gameTime += dt;
+
+    // Entrance animation
+    if (entranceAnimProgress < 1) {
+      entranceAnimProgress = Math.min(1, entranceAnimProgress + dt * 2.0);
+      channels.forEach((ch, i) => {
+        const delay = i * 0.1;
+        const t = Math.max(0, Math.min(1, (entranceAnimProgress - delay) / 0.4));
+        const spring = 1 + Math.sin(t * Math.PI * 2) * 0.2 * (1 - t);
+        ch.scale = t * spring;
+        ch.alpha = t;
+      });
+    }
+
+    // Channel switch transition
+    if (isTransitioning) {
+      transitionProgress += dt * 8;
+      if (transitionProgress >= 1) {
+        isTransitioning = false;
+        transitionProgress = 0;
+        tvStatic = generateStatic();
+      }
+    }
+
+    // Answer feedback
+    if (answerSelected) {
+      feedbackTime += dt;
+      // Update particles
+      gameParticles = gameParticles.filter(p => {
+        p.vy += 500 * dt;
+        p.x += p.vx * dt;
+        p.y += p.vy * dt;
+        p.rotation += p.rotationSpeed * dt;
+        p.alpha -= dt * 1.5;
+        return p.alpha > 0;
+      });
+
+      if (feedbackTime > 0.8) {
+        const choice = QUESTION.choices[selectedAnswerIdx];
+        engine.end(choice.is_correct, choice.explanation);
+      }
+    }
+  }
+
+  function drawGame() {
+    // Background - dark room
+    ctx.fillStyle = '#1C1C1A';
+    ctx.fillRect(0, 0, W, H);
+
+    // Subtle radial glow from TV
+    const glowGrad = ctx.createRadialGradient(W / 2, H / 2 - 20, 50, W / 2, H / 2 - 20, 400);
+    glowGrad.addColorStop(0, 'rgba(78, 205, 196, 0.06)');
+    glowGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+    ctx.fillStyle = glowGrad;
+    ctx.fillRect(0, 0, W, H);
+
+    // Draw TV set
+    drawTV();
+
+    // Draw channel indicators at bottom
+    drawChannelIndicators();
+
+    // Draw game particles
+    gameParticles.forEach(p => {
+      ctx.save();
+      ctx.globalAlpha = p.alpha;
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rotation);
+      ctx.fillStyle = p.color;
+      ctx.fillRect(-p.size / 2, -p.size / 4, p.size, p.size / 2);
+      ctx.restore();
+    });
+  }
+
+  function drawTV() {
+    const bounce = entranceAnimProgress < 1 ? Math.min(1, entranceAnimProgress * 1.5) : 1;
+
+    ctx.save();
+    ctx.translate(W / 2, H / 2 - 20);
+    ctx.scale(bounce, bounce);
+    ctx.translate(-W / 2, -(H / 2 - 20));
+
+    // TV outer casing - wooden retro style
+    const tvGrad = ctx.createLinearGradient(TV.x, TV.y, TV.x, TV.y + TV.h);
+    tvGrad.addColorStop(0, '#5A4A3A');
+    tvGrad.addColorStop(0.5, '#4A3A2A');
+    tvGrad.addColorStop(1, '#3A2A1A');
+    ctx.fillStyle = tvGrad;
+    ctx.beginPath();
+    ctx.roundRect(TV.x, TV.y, TV.w, TV.h, TV.bezelRadius);
+    ctx.fill();
+
+    // TV border highlight
+    ctx.strokeStyle = '#6A5A4A';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.roundRect(TV.x + 1, TV.y + 1, TV.w - 2, TV.h - 2, TV.bezelRadius);
+    ctx.stroke();
+
+    // Inner screen bezel (dark)
+    ctx.fillStyle = '#1a1a1a';
+    ctx.beginPath();
+    ctx.roundRect(TV.screenX - 8, TV.screenY - 8, TV.screenW + 16, TV.screenH + 16, 12);
+    ctx.fill();
+
+    // Screen background with slight curve effect
+    const screenGrad = ctx.createRadialGradient(
+      TV.screenX + TV.screenW / 2, TV.screenY + TV.screenH / 2, 20,
+      TV.screenX + TV.screenW / 2, TV.screenY + TV.screenH / 2, TV.screenW * 0.7
+    );
+    screenGrad.addColorStop(0, '#2A2A27');
+    screenGrad.addColorStop(1, '#1C1C1A');
+    ctx.fillStyle = screenGrad;
+    ctx.beginPath();
+    ctx.roundRect(TV.screenX, TV.screenY, TV.screenW, TV.screenH, 4);
+    ctx.fill();
+
+    // Clip to screen area
+    ctx.save();
+    ctx.beginPath();
+    ctx.roundRect(TV.screenX, TV.screenY, TV.screenW, TV.screenH, 4);
+    ctx.clip();
+
+    // Draw current channel content
+    if (isTransitioning) {
+      drawStaticNoise();
+    } else {
+      drawChannelContent(selectedChannel);
+    }
+
+    // Scanlines overlay
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.08)';
+    for (let y = TV.screenY; y < TV.screenY + TV.screenH; y += 3) {
+      ctx.fillRect(TV.screenX, y, TV.screenW, 1);
+    }
+
+    // Screen curvature / vignette
+    const vignetteGrad = ctx.createRadialGradient(
+      TV.screenX + TV.screenW / 2, TV.screenY + TV.screenH / 2, TV.screenW * 0.35,
+      TV.screenX + TV.screenW / 2, TV.screenY + TV.screenH / 2, TV.screenW * 0.65
+    );
+    vignetteGrad.addColorStop(0, 'rgba(0,0,0,0)');
+    vignetteGrad.addColorStop(1, 'rgba(0,0,0,0.25)');
+    ctx.fillStyle = vignetteGrad;
+    ctx.fillRect(TV.screenX, TV.screenY, TV.screenW, TV.screenH);
+
+    // Screen reflection glare
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.03)';
+    ctx.beginPath();
+    ctx.ellipse(TV.screenX + 120, TV.screenY + 80, 100, 60, -0.3, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.restore(); // Remove clip
+
+    // TV knobs on the right side
+    const knobX = TV.x + TV.w - 40;
+    const knobColors = [COLORS.orange, COLORS.amber];
+    for (let i = 0; i < 2; i++) {
+      const knobY = TV.y + 120 + i * 70;
+      // Knob shadow
+      ctx.fillStyle = 'rgba(0,0,0,0.3)';
+      ctx.beginPath();
+      ctx.arc(knobX + 2, knobY + 2, 16, 0, Math.PI * 2);
+      ctx.fill();
+      // Knob body
+      const knobGrad = ctx.createRadialGradient(knobX - 4, knobY - 4, 2, knobX, knobY, 16);
+      knobGrad.addColorStop(0, '#888');
+      knobGrad.addColorStop(1, '#444');
+      ctx.fillStyle = knobGrad;
+      ctx.beginPath();
+      ctx.arc(knobX, knobY, 16, 0, Math.PI * 2);
+      ctx.fill();
+      // Knob indicator dot
+      ctx.fillStyle = knobColors[i];
+      ctx.beginPath();
+      ctx.arc(knobX, knobY - 8, 3, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // TV legs
+    ctx.fillStyle = '#4A3A2A';
+    ctx.fillRect(TV.x + 60, TV.y + TV.h, 12, 16);
+    ctx.fillRect(TV.x + TV.w - 72, TV.y + TV.h, 12, 16);
+
+    // Channel number display on TV (small LED)
+    const ledX = TV.x + TV.w - 42;
+    const ledY = TV.y + 65;
+    ctx.fillStyle = '#111';
+    ctx.beginPath();
+    ctx.roundRect(ledX - 14, ledY - 12, 28, 24, 4);
+    ctx.fill();
+    ctx.fillStyle = '#E85D4A';
+    ctx.font = "700 18px 'Belanosima', sans-serif";
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.shadowColor = '#E85D4A';
+    ctx.shadowBlur = 6;
+    ctx.fillText('CH' + (selectedChannel + 1), ledX, ledY);
+    ctx.shadowBlur = 0;
+
+    ctx.restore(); // Remove TV bounce transform
+  }
+
+  function drawStaticNoise() {
+    // White noise effect during channel switch
+    for (let i = 0; i < 300; i++) {
+      const x = TV.screenX + Math.random() * TV.screenW;
+      const y = TV.screenY + Math.random() * TV.screenH;
+      const brightness = Math.floor(Math.random() * 255);
+      ctx.fillStyle = `rgb(${brightness},${brightness},${brightness})`;
+      ctx.fillRect(x, y, 2 + Math.random() * 4, 2 + Math.random() * 2);
+    }
+    // Horizontal disruption lines
+    for (let i = 0; i < 5; i++) {
+      const y = TV.screenY + Math.random() * TV.screenH;
+      ctx.fillStyle = `rgba(255,255,255,${0.1 + Math.random() * 0.2})`;
+      ctx.fillRect(TV.screenX, y, TV.screenW, 1 + Math.random() * 3);
+    }
+  }
+
+  function drawChannelContent(chIdx) {
+    const ch = channels[chIdx];
+    if (!ch) return;
+
+    const flickerIntensity = 0.02 * Math.sin(gameTime * 8 + ch.flickerOffset);
+
+    // Channel color tint background
+    ctx.fillStyle = ch.hue;
+    ctx.globalAlpha = 0.12 + flickerIntensity;
+    ctx.fillRect(TV.screenX, TV.screenY, TV.screenW, TV.screenH);
+    ctx.globalAlpha = 1;
+
+    // Selected / feedback highlight
+    if (answerSelected && selectedAnswerIdx === chIdx) {
+      const isCorrect = ch.is_correct;
+      const pulseAlpha = 0.15 + 0.1 * Math.sin(feedbackTime * 12);
+      ctx.fillStyle = isCorrect ? COLORS.success : COLORS.error;
+      ctx.globalAlpha = pulseAlpha;
+      ctx.fillRect(TV.screenX, TV.screenY, TV.screenW, TV.screenH);
+      ctx.globalAlpha = 1;
+    }
+
+    // Channel number big watermark
+    ctx.globalAlpha = 0.06;
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = "700 180px 'Belanosima', sans-serif";
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('' + ch.channelNum, TV.screenX + TV.screenW / 2, TV.screenY + TV.screenH / 2);
+    ctx.globalAlpha = 1;
+
+    // Channel label top-left
+    ctx.fillStyle = 'rgba(0,0,0,0.5)';
+    ctx.beginPath();
+    ctx.roundRect(TV.screenX + 12, TV.screenY + 12, 80, 28, 6);
+    ctx.fill();
+    ctx.fillStyle = ch.hue;
+    ctx.font = "600 16px 'Nunito Sans', sans-serif";
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('CH ' + ch.channelNum, TV.screenX + 52, TV.screenY + 26);
+
+    // Answer text - centered on screen with word wrap
+    const padding = 30;
+    const maxTextWidth = TV.screenW - padding * 2;
+    const answerFont = "500 18px 'Nunito', sans-serif";
+    const lines = wrapText(ch.text, maxTextWidth, answerFont);
+
+    const lineHeight = 26;
+    const totalTextHeight = lines.length * lineHeight;
+    const textStartY = TV.screenY + TV.screenH / 2 - totalTextHeight / 2 + lineHeight / 2;
+
+    // Text background panel
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.45)';
+    ctx.beginPath();
+    ctx.roundRect(
+      TV.screenX + padding - 16,
+      textStartY - lineHeight / 2 - 12,
+      maxTextWidth + 32,
+      totalTextHeight + 24,
+      10
+    );
+    ctx.fill();
+
+    // Draw answer text
+    ctx.fillStyle = '#F5F5F0';
+    ctx.font = answerFont;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    lines.forEach((line, i) => {
+      const y = textStartY + i * lineHeight;
+      ctx.fillText(line, TV.screenX + TV.screenW / 2, y);
+    });
+
+    // Subtle flicker lines
+    if (Math.random() > 0.95) {
+      const flickY = TV.screenY + Math.random() * TV.screenH;
+      ctx.fillStyle = 'rgba(255,255,255,0.05)';
+      ctx.fillRect(TV.screenX, flickY, TV.screenW, 2);
+    }
+  }
+
+  function drawChannelIndicators() {
+    const indicatorY = TV.y + TV.h + 32;
+    const indicatorWidth = 100;
+    const gap = 16;
+    const totalWidth = indicatorWidth * 4 + gap * 3;
+    const startX = (W - totalWidth) / 2;
+
+    channels.forEach((ch, i) => {
+      const x = startX + i * (indicatorWidth + gap);
+      const isSelected = i === selectedChannel;
+      const anim = Math.min(1, ch.alpha);
+
+      ctx.save();
+      ctx.globalAlpha = anim;
+
+      // Indicator background
+      if (isSelected) {
+        ctx.fillStyle = ch.hue;
+        ctx.shadowColor = ch.hue;
+        ctx.shadowBlur = 10;
+      } else {
+        ctx.fillStyle = '#363633';
+      }
+      ctx.beginPath();
+      ctx.roundRect(x, indicatorY, indicatorWidth, 28, 14);
+      ctx.fill();
+      ctx.shadowBlur = 0;
+
+      // Channel number
+      ctx.fillStyle = isSelected ? '#FFFFFF' : '#8C8C84';
+      ctx.font = "600 14px 'Nunito Sans', sans-serif";
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('CH ' + (i + 1), x + indicatorWidth / 2, indicatorY + 14);
+
+      ctx.restore();
+    });
+  }
+
+  function spawnFeedbackParticles(correct) {
+    const cx = TV.screenX + TV.screenW / 2;
+    const cy = TV.screenY + TV.screenH / 2;
+    const colors = correct
+      ? [COLORS.success, COLORS.cyan, COLORS.amber, '#FFD700']
+      : [COLORS.error, '#D04A3A'];
+    const count = correct ? 25 : 10;
+
+    for (let i = 0; i < count; i++) {
+      gameParticles.push({
+        x: cx,
+        y: cy,
+        vx: (Math.random() - 0.5) * 300,
+        vy: -Math.random() * 200 - 50,
+        size: 3 + Math.random() * 5,
+        color: colors[Math.floor(Math.random() * colors.length)],
+        rotation: Math.random() * Math.PI * 2,
+        rotationSpeed: (Math.random() - 0.5) * 8,
+        alpha: 1
+      });
+    }
+  }
+
+  function handleInput(e) {
+    if (gameState !== 'playing') return;
+    if (answerSelected) return;
+
+    if (e.code === 'ArrowLeft') {
+      e.preventDefault();
+      selectedChannel = (selectedChannel - 1 + 4) % 4;
+      isTransitioning = true;
+      transitionProgress = 0;
+      channelSwitchTime = gameTime;
+      playSwitchSound();
+    } else if (e.code === 'ArrowRight') {
+      e.preventDefault();
+      selectedChannel = (selectedChannel + 1) % 4;
+      isTransitioning = true;
+      transitionProgress = 0;
+      channelSwitchTime = gameTime;
+      playSwitchSound();
+    } else if (e.code === 'ArrowUp') {
+      e.preventDefault();
+      selectedChannel = (selectedChannel - 1 + 4) % 4;
+      isTransitioning = true;
+      transitionProgress = 0;
+      channelSwitchTime = gameTime;
+      playSwitchSound();
+    } else if (e.code === 'ArrowDown') {
+      e.preventDefault();
+      selectedChannel = (selectedChannel + 1) % 4;
+      isTransitioning = true;
+      transitionProgress = 0;
+      channelSwitchTime = gameTime;
+      playSwitchSound();
+    } else if (e.code === 'Enter' || e.code === 'Space') {
+      e.preventDefault();
+      answerSelected = true;
+      selectedAnswerIdx = selectedChannel;
+      feedbackTime = 0;
+      const choice = QUESTION.choices[selectedChannel];
+      spawnFeedbackParticles(choice.is_correct);
+      if (choice.is_correct) {
+        playCorrectSound();
+      } else {
+        playWrongSound();
+      }
+    }
+  }
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 4: GAME LOOP - DO NOT MODIFY                                      ║
+  // ║  Standard loop with responsive scaling and DPR support.                    ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  let lastTime = performance.now();
+
+  function gameLoop(now) {
+    const dt = Math.min((now - lastTime) / 1000, 0.05); // Cap at 50ms
+    lastTime = now;
+
+    // Apply transform for logical coordinate system
+    ctx.setTransform(scale * dpr, 0, 0, scale * dpr, 0, 0);
+
+    if (gameState === 'playing') {
+      updateGame(dt);
+      drawGame();
+    } else {
+      drawGame(); // Draw game state behind overlay
+      drawEndScreen(dt);
+    }
+
+    // Reset transform for next frame
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+    requestAnimationFrame(gameLoop);
+  }
+
+  // Input handlers
+  document.addEventListener('keydown', (e) => {
+    if (gameState === 'ended' && (e.code === 'KeyR')) {
+      // Restart game
+      gameState = 'playing';
+      gameResult = null;
+      gameExplanation = '';
+      confettiParticles = [];
+      initGame();
+      return;
+    }
+    handleInput(e);
+  });
+
+  document.addEventListener('keyup', (e) => {
+    // Optional: handle key release in your handleInput
+  });
+
+  // Canvas click handler for end screen buttons
+  canvas.addEventListener('click', (e) => {
+    if (gameState !== 'ended') return;
+
+    const { x, y } = screenToLogical(e.clientX, e.clientY);
+
+    if (gameResult) {
+      // Correct answer: check both buttons
+      if (pointInRect(x, y, restartButton)) {
+        gameState = 'playing';
+        gameResult = null;
+        gameExplanation = '';
+        confettiParticles = [];
+        initGame();
+        return;
+      }
+      if (pointInRect(x, y, nextButton)) {
+        // Notify parent to go to next question
+        if (window.parent && window.parent !== window) {
+          window.parent.postMessage({ type: 'quiz-next' }, '*');
+        }
+        return;
+      }
+    } else {
+      // Wrong answer: check centered restart button
+      const centeredRestart = { x: W / 2 - 75, y: H / 2 + 60, w: 150, h: 48 };
+      if (pointInRect(x, y, centeredRestart)) {
+        gameState = 'playing';
+        gameResult = null;
+        gameExplanation = '';
+        confettiParticles = [];
+        initGame();
+        return;
+      }
+    }
+  });
+
+  // Handle resize
+  window.addEventListener('resize', resizeCanvas);
+
+  // Initialize
+  resizeCanvas();
+  initGame();
+  requestAnimationFrame(gameLoop);
+  </script>
+</body>
+</html>

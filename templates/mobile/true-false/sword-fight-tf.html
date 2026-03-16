@@ -1,0 +1,1379 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <title>Sword Fight - True/False</title>
+  <link href="https://fonts.googleapis.com/css2?family=Belanosima:wght@400;600;700&family=Nunito+Sans:wght@400;500;600;700&family=Nunito:wght@400;500;600&display=swap" rel="stylesheet">
+  <!--
+  ╔══════════════════════════════════════════════════════════════════════════════╗
+  ║  SWORD FIGHT - MONKEY ISLAND INSPIRED TRUE/FALSE GAME                        ║
+  ║  Fills 100% of container, non-uniform scaling, touch input.                  ║
+  ║  Logical dimensions: 360×640 (use aspectRatio for proportional shapes)       ║
+  ╚══════════════════════════════════════════════════════════════════════════════╝
+  -->
+  <style>
+    /* ═══════════════════════════════════════════════════════════════════════════
+       BASE STYLES - Can be extended, not removed
+       ═══════════════════════════════════════════════════════════════════════════ */
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      touch-action: none;
+      -webkit-touch-callout: none;
+      -webkit-user-select: none;
+      user-select: none;
+    }
+    body {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      background: #1a1a2e;
+      font-family: 'Nunito Sans', system-ui, -apple-system, sans-serif;
+    }
+    #gameCanvas {
+      background: #16213e;
+      width: 100vw;
+      height: 100vh;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="gameCanvas"></canvas>
+
+  <script>
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 1: QUESTION PLACEHOLDER - DO NOT MODIFY FORMAT                    ║
+  // ║  Platform replaces this at runtime. Use these exact 60-char answers.       ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  const QUESTION = {
+    type: "true_false",
+    prompt: "Sample question text",
+    choices: [
+      { text: "True", is_correct: true, explanation: "Why correct" },
+      { text: "False", is_correct: false, explanation: "Why wrong" }
+    ],
+    isLastQuestion: false
+  };
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 2: ENGINE CORE (MOBILE) - DO NOT MODIFY                           ║
+  // ║  Non-uniform scaling (fills container), touch input, tap-to-restart.       ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  const canvas = document.getElementById('gameCanvas');
+  const ctx = canvas.getContext('2d');
+
+  // Logical dimensions (game code works in this coordinate space)
+  const W = 360, H = 640;
+
+  // Scaling state (computed on resize)
+  let scaleX = 1;
+  let scaleY = 1;
+  let aspectRatio = 1;  // scaleX/scaleY - use for proportional shapes
+
+  // Game state
+  let gameState = 'playing'; // 'playing' | 'ended'
+  let gameResult = null;     // true (correct) | false (wrong)
+  let gameExplanation = '';
+  let endScreenTime = 0;
+  let confettiParticles = [];
+
+  // End screen button bounds (logical coordinates)
+  const restartButton = { x: 20, y: H / 2 + 50, w: 155, h: 56 };
+  const nextButton = { x: 185, y: H / 2 + 50, w: 155, h: 56 };
+  // Centered restart button for wrong answers
+  const centeredRestartButton = { x: W / 2 - 100, y: H / 2 + 50, w: 200, h: 56 };
+
+  /** Draw a styled button with aspect-ratio aware text */
+  function drawMobileButton(rect, label, color, pulse) {
+    const textAdj = getTextScaleAdjustment();
+    const p = pulse ? 1 + Math.sin(endScreenTime * 4) * 0.03 : 1;
+
+    ctx.save();
+    ctx.translate(rect.x + rect.w / 2, rect.y + rect.h / 2);
+    ctx.scale(p, p);
+    ctx.translate(-(rect.x + rect.w / 2), -(rect.y + rect.h / 2));
+
+    // Button background
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.roundRect(rect.x, rect.y, rect.w, rect.h, 12);
+    ctx.fill();
+
+    // Button text (aspect-ratio aware)
+    ctx.save();
+    ctx.translate(rect.x + rect.w / 2, rect.y + rect.h / 2);
+    ctx.scale(textAdj / aspectRatio, textAdj);
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = 'bold 18px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, 0, 0);
+    ctx.restore();
+
+    ctx.restore();
+  }
+
+  /**
+   * Resize canvas to fill viewport completely (no letterboxing).
+   * Uses non-uniform scaling - game code works in 360×640 logical space.
+   * Use aspectRatio to draw proportionally correct shapes.
+   */
+  function resizeCanvas() {
+    const dpr = window.devicePixelRatio || 1;
+
+    // Physical canvas size (actual pixels)
+    canvas.width = window.innerWidth * dpr;
+    canvas.height = window.innerHeight * dpr;
+
+    // CSS size (fills viewport)
+    canvas.style.width = window.innerWidth + 'px';
+    canvas.style.height = window.innerHeight + 'px';
+
+    // Non-uniform scaling to fill entire canvas
+    scaleX = canvas.width / W;
+    scaleY = canvas.height / H;
+
+    // Aspect ratio for proportional shape drawing
+    // >1 means container is wider than logical space
+    // <1 means container is taller than logical space
+    aspectRatio = scaleX / scaleY;
+
+    // Recalculate text sizing on resize (implement this in SECTION 3)
+    if (typeof recalculateTextSizing === 'function') {
+      recalculateTextSizing();
+    }
+  }
+
+  // === ASPECT-RATIO-AWARE TEXT WITH CLAMPED SCALING ===
+  // Text gets stretched by non-uniform scaling, so we compensate.
+  // Also clamp the effective scale to keep text legible at all sizes.
+  const TEXT_SCALE_MIN = 0.75;
+  const TEXT_SCALE_MAX = 1.4;
+
+  function getTextScaleAdjustment() {
+    const baseScale = window.innerHeight / H;
+    const clampedScale = Math.min(TEXT_SCALE_MAX, Math.max(TEXT_SCALE_MIN, baseScale));
+    return clampedScale / baseScale;
+  }
+
+  /**
+   * Draw text with aspect-ratio compensation and clamped scaling.
+   * Use this instead of raw ctx.fillText() to prevent text stretching.
+   * Default font is 16px (minimum for answer text). Use 18-20px for better readability.
+   */
+  function drawText(text, x, y, options = {}) {
+    const { font = "500 16px system-ui, sans-serif", color = '#F5F5F0', align = 'center', baseline = 'middle' } = options;
+    ctx.save();
+    ctx.translate(x, y);
+    const adj = getTextScaleAdjustment();
+    ctx.scale(adj / aspectRatio, adj);
+    ctx.font = font;
+    ctx.fillStyle = color;
+    ctx.textAlign = align;
+    ctx.textBaseline = baseline;
+    ctx.fillText(text, 0, 0);
+    ctx.restore();
+  }
+
+  /**
+   * Convert screen coordinates to logical coordinates.
+   * Use this in handleTouch to get positions in 360×640 space.
+   */
+  function screenToLogical(screenX, screenY) {
+    const dpr = window.devicePixelRatio || 1;
+    const rect = canvas.getBoundingClientRect();
+    const canvasX = (screenX - rect.left) * dpr;
+    const canvasY = (screenY - rect.top) * dpr;
+    return {
+      x: canvasX / scaleX,
+      y: canvasY / scaleY
+    };
+  }
+
+  /**
+   * Check if a point is inside a rectangle (logical coordinates).
+   */
+  function pointInRect(px, py, rect) {
+    return px >= rect.x && px <= rect.x + rect.w &&
+           py >= rect.y && py <= rect.y + rect.h;
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // TEXT UTILITIES - Dynamic wrapping and font sizing
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  /**
+   * Wrap text to fit within a maximum width (in logical coordinates).
+   * Accounts for canvas transforms applied by drawText().
+   *
+   * @param {string} text - The text to wrap
+   * @param {number} maxWidth - Maximum width in logical coordinates
+   * @param {string} font - CSS font string (e.g., "16px 'Nunito', sans-serif")
+   * @param {number} maxLines - Maximum number of lines (default 3)
+   * @returns {string[]} Array of text lines
+   */
+  function wrapText(text, maxWidth, font, maxLines = 3) {
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.font = font;
+    const adj = getTextScaleAdjustment();
+    const maxRawWidth = maxWidth * aspectRatio / adj;
+    const words = text.split(' ');
+    const lines = [];
+    let currentLine = '';
+    words.forEach(word => {
+      const testLine = currentLine ? currentLine + ' ' + word : word;
+      if (ctx.measureText(testLine).width > maxRawWidth && currentLine) {
+        lines.push(currentLine);
+        currentLine = word;
+      } else {
+        currentLine = testLine;
+      }
+    });
+    if (currentLine) lines.push(currentLine);
+    ctx.restore();
+    return lines.slice(0, maxLines);
+  }
+
+  /**
+   * Find the optimal font size to fit content in available space.
+   * Tries font sizes from max to min until content fits.
+   *
+   * @param {Object} options
+   * @param {string[]} options.texts - Array of text strings to fit
+   * @param {number} options.maxWidth - Maximum width for text wrapping
+   * @param {number} options.availableHeight - Total height available for all texts
+   * @param {number} options.minFont - Minimum font size (default 12)
+   * @param {number} options.maxFont - Maximum font size (default 18)
+   * @param {number} options.itemPadding - Vertical padding per text item (default 4)
+   * @param {string} options.fontFamily - Font family (default "'Nunito Sans', sans-serif")
+   * @returns {{ fontSize: number, wrappedTexts: string[][] }} Optimal font size and pre-wrapped texts
+   */
+  function findOptimalFontSize(options) {
+    const {
+      texts,
+      maxWidth,
+      availableHeight,
+      minFont = 12,
+      maxFont = 18,
+      itemPadding = 4,
+      fontFamily = "'Nunito Sans', sans-serif"
+    } = options;
+
+    let bestFontSize = minFont;
+    let bestWrappedTexts = [];
+
+    for (let fontSize = maxFont; fontSize >= minFont; fontSize -= 0.5) {
+      const font = `${fontSize}px ${fontFamily}`;
+      const lineHeight = fontSize + 2;
+
+      let totalHeight = 0;
+      const wrappedTexts = [];
+
+      for (const text of texts) {
+        const lines = wrapText(text, maxWidth, font);
+        wrappedTexts.push(lines);
+        totalHeight += itemPadding + lines.length * lineHeight;
+      }
+
+      if (totalHeight <= availableHeight) {
+        bestFontSize = fontSize;
+        bestWrappedTexts = wrappedTexts;
+        break;
+      }
+
+      bestWrappedTexts = wrappedTexts;
+    }
+
+    return { fontSize: bestFontSize, wrappedTexts: bestWrappedTexts };
+  }
+
+  const engine = {
+    /** Call this to end the game. DO NOT draw your own end screen. */
+    end(isCorrect, explanation) {
+      if (gameState === 'ended') return;
+      gameState = 'ended';
+      gameResult = isCorrect;
+      gameExplanation = explanation || '';
+      endScreenTime = 0;
+
+      // Spawn confetti for correct answers
+      if (isCorrect) {
+        for (let i = 0; i < 50; i++) {
+          confettiParticles.push({
+            x: W / 2,
+            y: H / 2,
+            vx: (Math.random() - 0.5) * 400,
+            vy: -Math.random() * 300 - 80,
+            size: 4 + Math.random() * 6,
+            color: ['#FFD700', '#FF6B6B', '#4ECDC4', '#95E1D3', '#F38181'][Math.floor(Math.random() * 5)],
+            rotation: Math.random() * Math.PI * 2,
+            rotationSpeed: (Math.random() - 0.5) * 10
+          });
+        }
+      }
+
+      // Notify parent frame
+      if (window.parent && window.parent !== window) {
+        window.parent.postMessage({
+          type: 'quiz-end',
+          isCorrect: isCorrect,
+          explanation: explanation || ''
+        }, '*');
+      }
+    }
+  };
+
+  /** STANDARD END SCREEN (MOBILE) - DO NOT MODIFY */
+  function drawEndScreen(dt) {
+    endScreenTime += dt;
+
+    // Update confetti
+    confettiParticles = confettiParticles.filter(p => {
+      p.vy += 600 * dt; // gravity
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.rotation += p.rotationSpeed * dt;
+      p.vx *= 0.99;
+      return p.y < H + 50;
+    });
+
+    // Dark overlay
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
+    ctx.fillRect(0, 0, W, H);
+
+    // Draw confetti
+    confettiParticles.forEach(p => {
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rotation);
+      ctx.fillStyle = p.color;
+      ctx.fillRect(-p.size / 2, -p.size / 4, p.size, p.size / 2);
+      ctx.restore();
+    });
+
+    // Result emoji (aspect-ratio aware)
+    const textAdj = getTextScaleAdjustment();
+    ctx.save();
+    ctx.translate(W / 2, H / 2 - 80);
+    ctx.scale(textAdj / aspectRatio, textAdj);
+    ctx.font = '64px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(gameResult ? '🎉' : '😢', 0, 0);
+    ctx.restore();
+
+    // Result text (aspect-ratio aware)
+    ctx.save();
+    ctx.translate(W / 2, H / 2 - 10);
+    ctx.scale(textAdj / aspectRatio, textAdj);
+    ctx.fillStyle = gameResult ? '#4ADE80' : '#F87171';
+    ctx.font = 'bold 32px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(gameResult ? 'Correct!' : 'Wrong!', 0, 0);
+    ctx.restore();
+
+    // Buttons
+    if (gameResult) {
+      // Correct: show both Restart and Next/Finish
+      drawMobileButton(restartButton, 'Restart', '#E87A3E', true);
+      const nextLabel = QUESTION.isLastQuestion ? 'Finish' : 'Next';
+      drawMobileButton(nextButton, nextLabel, '#4ECDC4', true);
+    } else {
+      // Wrong: show only centered Restart button
+      drawMobileButton(centeredRestartButton, 'Restart', '#E87A3E', true);
+    }
+  }
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 3: YOUR GAME CODE - IMPLEMENT THESE FUNCTIONS                     ║
+  // ║  Monkey Island-inspired sword fight - True/False game                      ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+
+  // Colors from styleguide
+  const COLORS = {
+    bgDark: '#1C1C1A',
+    bgMid: '#2A2A27',
+    surface: '#363633',
+    orange: '#E87A3E',
+    orangeHover: '#D66B31',
+    amber: '#F5A742',
+    cyan: '#4ECDC4',
+    success: '#6BBF59',
+    error: '#E85D4A',
+    textPrimary: '#F5F5F0',
+    textSecondary: '#C2C2B8',
+    moonGlow: '#FFE4B5',
+    nightSky: '#0F1729',
+    groundDark: '#2D1F15',
+    groundLight: '#4A3728'
+  };
+
+  // Reduced motion preference
+  const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // SOUND EFFECTS (Web Audio API)
+  // ═══════════════════════════════════════════════════════════════════════════
+  let audioCtx = null;
+
+  function initAudio() {
+    if (!audioCtx) {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    if (audioCtx.state === 'suspended') {
+      audioCtx.resume();
+    }
+  }
+
+  function playSound(type) {
+    if (!audioCtx) return;
+    try {
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+
+      const now = audioCtx.currentTime;
+
+      if (type === 'swordClash') {
+        // Metallic clash sound
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(800, now);
+        osc.frequency.exponentialRampToValueAtTime(200, now + 0.15);
+        gain.gain.setValueAtTime(0.15, now);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.15);
+        osc.start(now);
+        osc.stop(now + 0.15);
+      } else if (type === 'victory') {
+        // Victory fanfare - ascending notes
+        osc.type = 'square';
+        osc.frequency.setValueAtTime(523, now);        // C5
+        osc.frequency.setValueAtTime(659, now + 0.1);  // E5
+        osc.frequency.setValueAtTime(784, now + 0.2);  // G5
+        osc.frequency.setValueAtTime(1047, now + 0.3); // C6
+        gain.gain.setValueAtTime(0.2, now);
+        gain.gain.setValueAtTime(0.2, now + 0.35);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.5);
+        osc.start(now);
+        osc.stop(now + 0.5);
+      } else if (type === 'defeat') {
+        // Defeat sound - descending
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(300, now);
+        osc.frequency.exponentialRampToValueAtTime(100, now + 0.4);
+        gain.gain.setValueAtTime(0.15, now);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.4);
+        osc.start(now);
+        osc.stop(now + 0.4);
+      } else if (type === 'buttonTap') {
+        // Quick tap feedback
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(600, now);
+        gain.gain.setValueAtTime(0.1, now);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.05);
+        osc.start(now);
+        osc.stop(now + 0.05);
+      }
+    } catch (e) {
+      // Audio failed, continue silently
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // PARTICLE SYSTEMS
+  // ═══════════════════════════════════════════════════════════════════════════
+  let sparkParticles = [];
+  let dustParticles = [];
+
+  function spawnSparks(x, y, count = 8) {
+    if (prefersReducedMotion) return;
+    const colors = [COLORS.amber, COLORS.orange, '#FFFFFF', '#FFD700'];
+    for (let i = 0; i < count; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const speed = 80 + Math.random() * 120;
+      sparkParticles.push({
+        x, y,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed,
+        color: colors[Math.floor(Math.random() * colors.length)],
+        size: 2 + Math.random() * 3,
+        life: 1,
+        decay: 2 + Math.random() * 2
+      });
+    }
+  }
+
+  function spawnDust(x, y, direction = 1) {
+    if (prefersReducedMotion) return;
+    for (let i = 0; i < 3; i++) {
+      dustParticles.push({
+        x: x + (Math.random() - 0.5) * 20,
+        y: y + Math.random() * 5,
+        vx: direction * (20 + Math.random() * 30),
+        vy: -10 - Math.random() * 20,
+        size: 3 + Math.random() * 4,
+        life: 1,
+        decay: 1.5 + Math.random()
+      });
+    }
+  }
+
+  function updateParticles(dt) {
+    // Update sparks
+    sparkParticles = sparkParticles.filter(p => {
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.vy += 200 * dt; // gravity
+      p.life -= p.decay * dt;
+      return p.life > 0;
+    });
+
+    // Update dust
+    dustParticles = dustParticles.filter(p => {
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.vy += 50 * dt; // light gravity
+      p.vx *= 0.95;
+      p.life -= p.decay * dt;
+      return p.life > 0;
+    });
+  }
+
+  function drawParticles() {
+    // Draw sparks (bright, glowing)
+    sparkParticles.forEach(p => {
+      ctx.globalAlpha = p.life;
+      ctx.fillStyle = p.color;
+      ctx.beginPath();
+      ctx.ellipse(p.x, p.y, p.size, p.size * aspectRatio, 0, 0, Math.PI * 2);
+      ctx.fill();
+      // Glow effect
+      ctx.globalAlpha = p.life * 0.5;
+      ctx.beginPath();
+      ctx.ellipse(p.x, p.y, p.size * 2, p.size * 2 * aspectRatio, 0, 0, Math.PI * 2);
+      ctx.fill();
+    });
+
+    // Draw dust (brown, fading)
+    dustParticles.forEach(p => {
+      ctx.globalAlpha = p.life * 0.6;
+      ctx.fillStyle = '#8B7355';
+      ctx.beginPath();
+      ctx.ellipse(p.x, p.y, p.size, p.size * aspectRatio, 0, 0, Math.PI * 2);
+      ctx.fill();
+    });
+
+    ctx.globalAlpha = 1;
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // DROPPED SWORD SYSTEM
+  // ═══════════════════════════════════════════════════════════════════════════
+  function startSwordDrop(owner) {
+    const fighter = owner === 'player' ? player : enemy;
+    const bob = Math.sin(fighter.bodyBob) * 2;
+    droppedSword = {
+      x: fighter.x + fighter.facing * 18,
+      y: fighter.y + bob - 15,
+      vx: fighter.facing * -80 + (Math.random() - 0.5) * 40, // Fly away from fighter
+      vy: -120, // Initial upward velocity
+      rotation: fighter.swordAngle,
+      rotationSpeed: (Math.random() - 0.5) * 15,
+      owner: owner
+    };
+  }
+
+  function updateDroppedSword(dt) {
+    if (!droppedSword) return;
+    droppedSword.x += droppedSword.vx * dt;
+    droppedSword.y += droppedSword.vy * dt;
+    droppedSword.vy += 500 * dt; // Gravity
+    droppedSword.rotation += droppedSword.rotationSpeed * dt;
+    droppedSword.vx *= 0.99; // Air resistance
+  }
+
+  function drawDroppedSword() {
+    if (!droppedSword) return;
+
+    ctx.save();
+    ctx.translate(droppedSword.x, droppedSword.y);
+    ctx.rotate(droppedSword.rotation);
+
+    // Sword blade
+    const bladeGradient = ctx.createLinearGradient(0, -2, 0, 2);
+    bladeGradient.addColorStop(0, '#E8E8E8');
+    bladeGradient.addColorStop(0.5, '#FFFFFF');
+    bladeGradient.addColorStop(1, '#C0C0C0');
+    ctx.fillStyle = bladeGradient;
+    ctx.fillRect(0, -2, 45, 4);
+
+    // Sword tip
+    ctx.beginPath();
+    ctx.moveTo(45, -2);
+    ctx.lineTo(52, 0);
+    ctx.lineTo(45, 2);
+    ctx.closePath();
+    ctx.fill();
+
+    // Sword guard
+    ctx.fillStyle = COLORS.amber;
+    ctx.fillRect(-3, -5, 6, 10);
+
+    // Sword handle
+    ctx.fillStyle = '#6B4423';
+    ctx.fillRect(-12, -2, 10, 4);
+
+    ctx.restore();
+  }
+
+  // Game state
+  let player = null;
+  let enemy = null;
+  let answerButtons = [];
+  let phase = 'intro'; // 'intro' | 'challenge' | 'response' | 'result'
+  let phaseTimer = 0;
+  let dialogText = '';
+  let showPlayerDialog = false;
+  let selectedAnswer = null;
+
+  // Animation state
+  let swordClashTime = 0;
+  let moonPhase = 0;
+  let entranceProgress = 0;
+  let lastClashTime = 0;
+  let buttonPulse = [0, 0]; // Pulse state for each button
+  let swordGlowPhase = 0;
+
+  // Dropped sword state (for loser)
+  let droppedSword = null; // { x, y, vx, vy, rotation, rotationSpeed, owner: 'player'|'enemy' }
+
+  function initGame() {
+    // Player on the left, enemy on the right
+    // Start off-screen for entrance animation
+    player = {
+      x: -50, // Start off-screen left
+      targetX: W * 0.30,
+      y: H * 0.52,
+      facing: 1, // 1 = right
+      swordAngle: -0.3,
+      bodyBob: 0,
+      color: COLORS.cyan // Cyan - our hero
+    };
+
+    enemy = {
+      x: W + 50, // Start off-screen right
+      targetX: W * 0.70,
+      y: H * 0.52,
+      facing: -1, // -1 = left
+      swordAngle: -0.3,
+      bodyBob: Math.PI, // Offset bob
+      color: COLORS.error // Red - the villain
+    };
+
+    // Reset animation states
+    entranceProgress = 0;
+    lastClashTime = 0;
+    sparkParticles = [];
+    dustParticles = [];
+    buttonPulse = [0, 0];
+    droppedSword = null;
+    swordGlowPhase = 0;
+
+    // True/False buttons at the bottom
+    const btnWidth = 140;
+    const btnHeight = 60;
+    const btnGap = 20;
+    const btnY = H - 120;
+
+    answerButtons = [
+      {
+        x: W / 2 - btnWidth - btnGap / 2,
+        y: btnY,
+        w: btnWidth,
+        h: btnHeight,
+        label: 'TRUE',
+        choice: QUESTION.choices[0],
+        color: COLORS.success
+      },
+      {
+        x: W / 2 + btnGap / 2,
+        y: btnY,
+        w: btnWidth,
+        h: btnHeight,
+        label: 'FALSE',
+        choice: QUESTION.choices[1],
+        color: COLORS.error
+      }
+    ];
+
+    phase = 'intro';
+    phaseTimer = 0;
+    dialogText = '';
+    showPlayerDialog = false;
+    selectedAnswer = null;
+    swordClashTime = 0;
+  }
+
+  function updateGame(dt) {
+    if (gameState !== 'playing') return;
+
+    phaseTimer += dt;
+    moonPhase += dt * 0.5;
+    swordGlowPhase += dt * 3;
+
+    // Update particles
+    updateParticles(dt);
+
+    // Update dropped sword
+    updateDroppedSword(dt);
+
+    // Animate fighters bobbing
+    player.bodyBob += dt * 3;
+    enemy.bodyBob += dt * 3;
+
+    // Entrance animation - slide fighters in from sides
+    if (entranceProgress < 1 && !prefersReducedMotion) {
+      entranceProgress = Math.min(1, entranceProgress + dt * 1.5);
+      // Spring easing for entrance
+      const t = entranceProgress;
+      const spring = 1 + Math.sin(t * Math.PI * 2) * 0.15 * (1 - t);
+      const eased = t * spring;
+
+      player.x = -50 + (player.targetX + 50) * eased;
+      enemy.x = (W + 50) - (W + 50 - enemy.targetX) * eased;
+
+      // Spawn dust as they enter
+      if (entranceProgress > 0.3 && entranceProgress < 0.8) {
+        if (Math.random() < 0.3) {
+          spawnDust(player.x, player.y + 25, 1);
+          spawnDust(enemy.x, enemy.y + 25, -1);
+        }
+      }
+    } else if (prefersReducedMotion && entranceProgress < 1) {
+      // Instant position for reduced motion
+      entranceProgress = 1;
+      player.x = player.targetX;
+      enemy.x = enemy.targetX;
+    }
+
+    // Phase transitions
+    if (phase === 'intro') {
+      // Brief intro - fighters face each other
+      if (phaseTimer > 0.8) {
+        phase = 'challenge';
+        phaseTimer = 0;
+        dialogText = 'True or False?';
+      }
+    } else if (phase === 'challenge') {
+      // Enemy shows the challenge, advances
+      const prevX = enemy.x;
+      enemy.x = Math.max(W * 0.60, enemy.x - dt * 30);
+
+      // Spawn dust when enemy moves
+      if (prevX !== enemy.x && Math.random() < 0.2) {
+        spawnDust(enemy.x, enemy.y + 25, -1);
+      }
+
+      if (phaseTimer > 1.2) {
+        phase = 'response';
+        phaseTimer = 0;
+        showPlayerDialog = true;
+      }
+    } else if (phase === 'response') {
+      // Waiting for player to tap True or False
+      // Swords clash animation
+      swordClashTime += dt * 8;
+      player.swordAngle = -0.3 + Math.sin(swordClashTime) * 0.15;
+      enemy.swordAngle = -0.3 - Math.sin(swordClashTime) * 0.15;
+
+      // Button pulse animation
+      buttonPulse[0] = Math.sin(phaseTimer * 4) * 0.03;
+      buttonPulse[1] = Math.sin(phaseTimer * 4 + Math.PI) * 0.03;
+
+      // Spawn sparks periodically during clash
+      lastClashTime += dt;
+      if (lastClashTime > 0.4 && !prefersReducedMotion) {
+        lastClashTime = 0;
+        // Sparks at sword intersection point
+        const clashX = (player.x + enemy.x) / 2;
+        const clashY = player.y - 15;
+        spawnSparks(clashX, clashY, 6);
+        playSound('swordClash');
+      }
+    } else if (phase === 'result') {
+      // Show result animation then end
+      if (phaseTimer > 0.6) {
+        const isCorrect = selectedAnswer.choice.is_correct;
+        engine.end(isCorrect, selectedAnswer.choice.explanation);
+      }
+    }
+  }
+
+  function drawGame() {
+    // Night sky background
+    const gradient = ctx.createLinearGradient(0, 0, 0, H);
+    gradient.addColorStop(0, COLORS.nightSky);
+    gradient.addColorStop(0.6, '#1a2744');
+    gradient.addColorStop(1, '#2d3a52');
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, W, H);
+
+    // Moon
+    drawMoon();
+
+    // Stars
+    drawStars();
+
+    // Trees/silhouettes in background
+    drawBackground();
+
+    // Ground
+    drawGround();
+
+    // Draw fighters
+    drawFighter(enemy, 'enemy');
+    drawFighter(player, 'player');
+
+    // Draw swords (in front) with glow
+    drawSword(player);
+    drawSword(enemy);
+
+    // Draw particles on top of fighters
+    drawParticles();
+
+    // Draw dropped sword (if any)
+    drawDroppedSword();
+
+    // Enemy dialog (the challenge)
+    if (phase === 'challenge' || phase === 'response') {
+      drawDialog(enemy.x, enemy.y - 80, dialogText, COLORS.error);
+    }
+
+    // Answer buttons (only in response phase)
+    if (phase === 'response') {
+      drawAnswerButtons();
+    }
+
+    // Result animation
+    if (phase === 'result' && selectedAnswer) {
+      drawResultAnimation();
+    }
+  }
+
+  function drawMoon() {
+    const moonX = W * 0.8;
+    const moonY = H * 0.12;
+    const moonR = 25;
+
+    // Pulsing moon glow
+    const glowPulse = 0.25 + Math.sin(moonPhase) * 0.08;
+    const glowGradient = ctx.createRadialGradient(moonX, moonY, moonR * 0.5, moonX, moonY, moonR * 3.5);
+    glowGradient.addColorStop(0, `rgba(255, 228, 181, ${glowPulse + 0.1})`);
+    glowGradient.addColorStop(0.5, `rgba(255, 228, 181, ${glowPulse * 0.5})`);
+    glowGradient.addColorStop(1, 'rgba(255, 228, 181, 0)');
+    ctx.fillStyle = glowGradient;
+    ctx.beginPath();
+    ctx.ellipse(moonX, moonY, moonR * 3.5, moonR * 3.5 * aspectRatio, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Moon body
+    ctx.fillStyle = COLORS.moonGlow;
+    ctx.beginPath();
+    ctx.ellipse(moonX, moonY, moonR, moonR * aspectRatio, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Moon craters (simple)
+    ctx.fillStyle = 'rgba(200, 180, 150, 0.4)';
+    ctx.beginPath();
+    ctx.ellipse(moonX - 8, moonY - 5, 4, 4 * aspectRatio, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.ellipse(moonX + 6, moonY + 8, 3, 3 * aspectRatio, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  function drawStars() {
+    ctx.fillStyle = '#FFFFFF';
+    const starPositions = [
+      [50, 60], [120, 40], [200, 80], [280, 30], [320, 70],
+      [80, 120], [160, 100], [240, 130], [300, 90], [40, 150],
+      [100, 180], [180, 160], [260, 170], [310, 140]
+    ];
+    starPositions.forEach(([sx, sy]) => {
+      const twinkle = 0.5 + Math.sin(moonPhase * 2 + sx) * 0.5;
+      ctx.globalAlpha = twinkle;
+      ctx.beginPath();
+      ctx.ellipse(sx, sy, 1, 1 * aspectRatio, 0, 0, Math.PI * 2);
+      ctx.fill();
+    });
+    ctx.globalAlpha = 1;
+  }
+
+  function drawBackground() {
+    // Silhouette trees
+    ctx.fillStyle = '#0a1520';
+
+    // Left tree
+    ctx.beginPath();
+    ctx.moveTo(-20, H * 0.55);
+    ctx.lineTo(30, H * 0.25);
+    ctx.lineTo(50, H * 0.35);
+    ctx.lineTo(60, H * 0.2);
+    ctx.lineTo(80, H * 0.4);
+    ctx.lineTo(100, H * 0.55);
+    ctx.closePath();
+    ctx.fill();
+
+    // Right tree
+    ctx.beginPath();
+    ctx.moveTo(W - 80, H * 0.55);
+    ctx.lineTo(W - 50, H * 0.3);
+    ctx.lineTo(W - 30, H * 0.38);
+    ctx.lineTo(W - 20, H * 0.22);
+    ctx.lineTo(W, H * 0.35);
+    ctx.lineTo(W + 20, H * 0.55);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  function drawGround() {
+    // Main ground
+    const groundY = H * 0.58;
+    ctx.fillStyle = COLORS.groundDark;
+    ctx.fillRect(0, groundY, W, H - groundY);
+
+    // Ground highlight
+    ctx.fillStyle = COLORS.groundLight;
+    ctx.fillRect(0, groundY, W, 8);
+
+    // Path/arena
+    ctx.fillStyle = '#3d2d20';
+    ctx.beginPath();
+    ctx.moveTo(0, groundY + 20);
+    ctx.lineTo(W, groundY + 20);
+    ctx.lineTo(W, groundY + 50);
+    ctx.lineTo(0, groundY + 50);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  function drawFighter(fighter, type) {
+    const bob = Math.sin(fighter.bodyBob) * 2;
+    const x = fighter.x;
+    const y = fighter.y + bob;
+    const facing = fighter.facing;
+    const color = fighter.color;
+
+    // Draw shadow on ground
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
+    ctx.beginPath();
+    ctx.ellipse(x, y + 28, 18, 6 * aspectRatio, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.save();
+    ctx.translate(x, y);
+    if (facing === -1) ctx.scale(-1, 1);
+
+    // Body (simple pixel art style)
+    // Torso
+    ctx.fillStyle = color;
+    ctx.fillRect(-8, -20, 16, 25);
+
+    // Head
+    ctx.fillStyle = '#FFD5B8'; // Skin tone
+    ctx.beginPath();
+    ctx.ellipse(0, -30, 10, 10 * aspectRatio, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Hair
+    ctx.fillStyle = type === 'player' ? '#8B4513' : '#2a2a2a';
+    ctx.fillRect(-10, -42, 20, 8);
+    ctx.fillRect(-12, -38, 5, 6);
+
+    // Eyes
+    ctx.fillStyle = '#2B2B28';
+    ctx.fillRect(3, -32, 3, 3);
+
+    // Legs
+    ctx.fillStyle = '#4A3728';
+    ctx.fillRect(-6, 5, 5, 18);
+    ctx.fillRect(1, 5, 5, 18);
+
+    // Boots
+    ctx.fillStyle = '#2a2a2a';
+    ctx.fillRect(-7, 20, 6, 5);
+    ctx.fillRect(1, 20, 6, 5);
+
+    // Arm (sword arm)
+    ctx.fillStyle = color;
+    ctx.fillRect(8, -18, 12, 6);
+
+    ctx.restore();
+  }
+
+  function drawSword(fighter) {
+    // Skip if this fighter's sword is dropped
+    if (droppedSword &&
+        ((droppedSword.owner === 'player' && fighter === player) ||
+         (droppedSword.owner === 'enemy' && fighter === enemy))) {
+      return;
+    }
+
+    const bob = Math.sin(fighter.bodyBob) * 2;
+    const x = fighter.x;
+    const y = fighter.y + bob;
+    const facing = fighter.facing;
+    const angle = fighter.swordAngle;
+
+    ctx.save();
+    ctx.translate(x + facing * 18, y - 15);
+    if (facing === -1) ctx.scale(-1, 1); // Flip sword for enemy
+    ctx.rotate(angle);
+
+    // Sword glow (during response phase)
+    if (phase === 'response' || phase === 'result') {
+      const glowIntensity = 0.3 + Math.sin(swordGlowPhase) * 0.2;
+      ctx.shadowColor = fighter === player ? COLORS.cyan : COLORS.orange;
+      ctx.shadowBlur = 12 * glowIntensity;
+    }
+
+    // Sword blade with gradient
+    const bladeGradient = ctx.createLinearGradient(0, -2, 0, 2);
+    bladeGradient.addColorStop(0, '#E8E8E8');
+    bladeGradient.addColorStop(0.5, '#FFFFFF');
+    bladeGradient.addColorStop(1, '#C0C0C0');
+    ctx.fillStyle = bladeGradient;
+    ctx.fillRect(0, -2, 45, 4);
+
+    // Sword tip
+    ctx.beginPath();
+    ctx.moveTo(45, -2);
+    ctx.lineTo(52, 0);
+    ctx.lineTo(45, 2);
+    ctx.closePath();
+    ctx.fill();
+
+    // Reset shadow for other elements
+    ctx.shadowColor = 'transparent';
+    ctx.shadowBlur = 0;
+
+    // Sword guard with amber color
+    ctx.fillStyle = COLORS.amber;
+    ctx.fillRect(-3, -5, 6, 10);
+
+    // Sword handle
+    ctx.fillStyle = '#6B4423';
+    ctx.fillRect(-12, -2, 10, 4);
+
+    ctx.restore();
+  }
+
+  function drawDialog(x, y, text, bgColor) {
+    const padding = 12;
+    const maxWidth = 120;
+
+    // Dialog bubble
+    ctx.fillStyle = bgColor;
+    ctx.beginPath();
+    ctx.roundRect(x - maxWidth / 2 - padding, y - 18, maxWidth + padding * 2, 36, 8);
+    ctx.fill();
+
+    // Pointer
+    ctx.beginPath();
+    ctx.moveTo(x - 8, y + 18);
+    ctx.lineTo(x, y + 28);
+    ctx.lineTo(x + 8, y + 18);
+    ctx.closePath();
+    ctx.fill();
+
+    // Text
+    drawText(text, x, y, {
+      font: "bold 16px 'Nunito Sans', sans-serif",
+      color: '#FFFFFF',
+      align: 'center',
+      baseline: 'middle'
+    });
+  }
+
+  function drawAnswerButtons() {
+    answerButtons.forEach((btn, i) => {
+      const pulse = 1 + buttonPulse[i];
+
+      ctx.save();
+      ctx.translate(btn.x + btn.w / 2, btn.y + btn.h / 2);
+      ctx.scale(pulse, pulse);
+      ctx.translate(-(btn.x + btn.w / 2), -(btn.y + btn.h / 2));
+
+      // Button glow
+      ctx.shadowColor = btn.color;
+      ctx.shadowBlur = 8;
+
+      // Button shadow
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.4)';
+      ctx.beginPath();
+      ctx.roundRect(btn.x + 4, btn.y + 4, btn.w, btn.h, 12);
+      ctx.fill();
+
+      // Button background with gradient
+      const btnGradient = ctx.createLinearGradient(btn.x, btn.y, btn.x, btn.y + btn.h);
+      if (i === 0) {
+        // TRUE button - green gradient
+        btnGradient.addColorStop(0, '#7DCF6B');
+        btnGradient.addColorStop(1, COLORS.success);
+      } else {
+        // FALSE button - red gradient
+        btnGradient.addColorStop(0, '#F07060');
+        btnGradient.addColorStop(1, COLORS.error);
+      }
+      ctx.fillStyle = btnGradient;
+      ctx.beginPath();
+      ctx.roundRect(btn.x, btn.y, btn.w, btn.h, 12);
+      ctx.fill();
+
+      // Button border
+      ctx.shadowColor = 'transparent';
+      ctx.shadowBlur = 0;
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.roundRect(btn.x, btn.y, btn.w, btn.h, 12);
+      ctx.stroke();
+
+      // Inner highlight
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.roundRect(btn.x + 3, btn.y + 3, btn.w - 6, btn.h / 2 - 3, 8);
+      ctx.stroke();
+
+      ctx.restore();
+
+      // Button text with Nunito Sans
+      drawText(btn.label, btn.x + btn.w / 2, btn.y + btn.h / 2, {
+        font: "bold 22px 'Nunito Sans', sans-serif",
+        color: '#FFFFFF',
+        align: 'center',
+        baseline: 'middle'
+      });
+    });
+  }
+
+  function drawResultAnimation() {
+    const isCorrect = selectedAnswer.choice.is_correct;
+    const progress = Math.min(phaseTimer / 0.5, 1);
+
+    if (isCorrect) {
+      // Player advances, enemy retreats
+      const prevEnemyX = enemy.x;
+      enemy.x = W * 0.60 + progress * 60;
+      player.x = player.targetX - progress * 20;
+      player.swordAngle = -0.3 - progress * 0.5;
+
+      // Spawn dust as enemy retreats
+      if (enemy.x !== prevEnemyX && Math.random() < 0.4) {
+        spawnDust(enemy.x, enemy.y + 25, 1);
+      }
+    } else {
+      // Enemy advances, player retreats
+      const prevPlayerX = player.x;
+      player.x = player.targetX + progress * 60;
+      enemy.x = W * 0.60 - progress * 20;
+      enemy.swordAngle = -0.3 - progress * 0.5;
+
+      // Spawn dust as player retreats
+      if (player.x !== prevPlayerX && Math.random() < 0.4) {
+        spawnDust(player.x, player.y + 25, -1);
+      }
+    }
+
+    // Flash effect
+    if (phaseTimer < 0.15) {
+      ctx.fillStyle = isCorrect ? 'rgba(107, 191, 89, 0.3)' : 'rgba(232, 93, 74, 0.3)';
+      ctx.fillRect(0, 0, W, H);
+    }
+
+    // Big spark burst at moment of answer and drop loser's sword
+    if (phaseTimer < 0.05) {
+      const clashX = (player.x + enemy.x) / 2;
+      const clashY = player.y - 15;
+      spawnSparks(clashX, clashY, 15);
+
+      // Drop the loser's sword
+      if (!droppedSword) {
+        if (isCorrect) {
+          startSwordDrop('enemy'); // Enemy loses, drops sword
+        } else {
+          startSwordDrop('player'); // Player loses, drops sword
+        }
+      }
+    }
+  }
+
+  function handleTouch(e, type) {
+    if (gameState !== 'playing') return;
+    if (phase !== 'response') return;
+    if (type !== 'start') return;
+
+    // Initialize audio on first touch
+    initAudio();
+
+    const touch = e.touches[0] || e.changedTouches[0];
+    const { x, y } = screenToLogical(touch.clientX, touch.clientY);
+
+    answerButtons.forEach(btn => {
+      if (pointInRect(x, y, btn)) {
+        // Play button tap sound
+        playSound('buttonTap');
+
+        selectedAnswer = btn;
+        phase = 'result';
+        phaseTimer = 0;
+
+        // Play victory or defeat sound
+        setTimeout(() => {
+          if (btn.choice.is_correct) {
+            playSound('victory');
+          } else {
+            playSound('defeat');
+          }
+        }, 100);
+      }
+    });
+  }
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 4: GAME LOOP - DO NOT MODIFY                                      ║
+  // ║  Standard loop with responsive scaling and touch handling.                 ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  let lastTime = performance.now();
+
+  function gameLoop(now) {
+    const dt = Math.min((now - lastTime) / 1000, 0.05); // Cap at 50ms
+    lastTime = now;
+
+    // Apply transform for logical coordinate system (non-uniform scaling)
+    ctx.setTransform(scaleX, 0, 0, scaleY, 0, 0);
+
+    if (gameState === 'playing') {
+      updateGame(dt);
+      drawGame();
+    } else {
+      drawGame(); // Draw game state behind overlay
+      drawEndScreen(dt);
+    }
+
+    // Reset transform for next frame
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+    requestAnimationFrame(gameLoop);
+  }
+
+  // Touch handlers
+  function onTouchStart(e) {
+    e.preventDefault();
+    if (gameState === 'ended') {
+      const touch = e.touches[0];
+      const { x, y } = screenToLogical(touch.clientX, touch.clientY);
+
+      if (gameResult) {
+        // Correct answer: check both buttons
+        if (pointInRect(x, y, restartButton)) {
+          gameState = 'playing';
+          gameResult = null;
+          gameExplanation = '';
+          confettiParticles = [];
+          initGame();
+          return;
+        }
+        if (pointInRect(x, y, nextButton)) {
+          // Notify parent to go to next question
+          if (window.parent && window.parent !== window) {
+            window.parent.postMessage({ type: 'quiz-next' }, '*');
+          }
+          return;
+        }
+      } else {
+        // Wrong answer: check centered restart button
+        if (pointInRect(x, y, centeredRestartButton)) {
+          gameState = 'playing';
+          gameResult = null;
+          gameExplanation = '';
+          confettiParticles = [];
+          initGame();
+          return;
+        }
+      }
+    }
+    handleTouch(e, 'start');
+  }
+
+  function onTouchMove(e) {
+    e.preventDefault();
+    handleTouch(e, 'move');
+  }
+
+  function onTouchEnd(e) {
+    e.preventDefault();
+    handleTouch(e, 'end');
+  }
+
+  canvas.addEventListener('touchstart', onTouchStart, { passive: false });
+  canvas.addEventListener('touchmove', onTouchMove, { passive: false });
+  canvas.addEventListener('touchend', onTouchEnd, { passive: false });
+
+  // Also support mouse for testing in browser
+  canvas.addEventListener('mousedown', (e) => {
+    const fakeTouch = { touches: [{ clientX: e.clientX, clientY: e.clientY }], changedTouches: [{ clientX: e.clientX, clientY: e.clientY }] };
+    onTouchStart(fakeTouch);
+  });
+
+  canvas.addEventListener('mouseup', (e) => {
+    const fakeTouch = { touches: [], changedTouches: [{ clientX: e.clientX, clientY: e.clientY }] };
+    onTouchEnd(fakeTouch);
+  });
+
+
+  // Cursor change handler for end screen buttons
+  canvas.addEventListener('mousemove', (e) => {
+    if (gameState !== 'ended') {
+      canvas.style.cursor = 'default';
+      return;
+    }
+    const { x, y } = screenToLogical(e.clientX, e.clientY);
+    if (gameResult) {
+      if (pointInRect(x, y, restartButton) || pointInRect(x, y, nextButton)) {
+        canvas.style.cursor = 'pointer';
+        return;
+      }
+    } else {
+      if (pointInRect(x, y, centeredRestartButton)) {
+        canvas.style.cursor = 'pointer';
+        return;
+      }
+    }
+    canvas.style.cursor = 'default';
+  });
+
+  // Handle resize
+  window.addEventListener('resize', resizeCanvas);
+  window.addEventListener('orientationchange', () => {
+    setTimeout(resizeCanvas, 100); // Delay for orientation change to complete
+  });
+
+  // Prevent pull-to-refresh and overscroll
+  document.body.addEventListener('touchmove', (e) => e.preventDefault(), { passive: false });
+
+  // Initialize
+  resizeCanvas();
+  initGame();
+  requestAnimationFrame(gameLoop);
+  </script>
+</body>
+</html>

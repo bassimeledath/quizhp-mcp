@@ -1,0 +1,969 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Bomb Defusal</title>
+  <!--
+  ╔══════════════════════════════════════════════════════════════════════════════╗
+  ║  GAME FACTORY TEMPLATE                                                        ║
+  ║  This template enforces critical invariants. Follow the section markers.      ║
+  ╚══════════════════════════════════════════════════════════════════════════════╝
+  -->
+  <style>
+    /* ═══════════════════════════════════════════════════════════════════════════
+       BASE STYLES - Can be extended, not removed
+       ═══════════════════════════════════════════════════════════════════════════ */
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+    }
+    body {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      background: #1a1a2e;
+      font-family: system-ui, -apple-system, sans-serif;
+    }
+    #gameCanvas {
+      background: #16213e;
+      border-radius: 8px;
+      display: block;
+      cursor: none;
+    }
+  </style>
+</head>
+<body>
+  <!-- ═══════════════════════════════════════════════════════════════════════════
+       CANVAS - Sized dynamically to fill available space
+       ═══════════════════════════════════════════════════════════════════════════ -->
+  <canvas id="gameCanvas"></canvas>
+
+  <script>
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 1: QUESTION PLACEHOLDER - DO NOT MODIFY FORMAT                    ║
+  // ║  Platform replaces this at runtime. Use these exact 60-char answers.       ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  const QUESTION = {
+    type: "true_false",
+    prompt: "The Earth is flat.",
+    choices: [
+      { text: "True", is_correct: false, explanation: "The Earth is roughly spherical, not flat." },
+      { text: "False", is_correct: true, explanation: "Correct! The Earth is an oblate spheroid." }
+    ],
+    isLastQuestion: false
+  };
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 2: ENGINE CORE - DO NOT MODIFY                                    ║
+  // ║  Standard engine interface and end screen. This is sacred.                 ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  const canvas = document.getElementById('gameCanvas');
+  const ctx = canvas.getContext('2d');
+
+  // Logical dimensions (game code works in this coordinate space)
+  const W = 720, H = 540;
+
+  // Scaling state (computed on resize)
+  let scale = 1;
+  let dpr = 1;
+
+  let gameState = 'playing'; // 'playing' | 'ended'
+  let gameResult = null;     // true (correct) | false (wrong)
+  let gameExplanation = '';
+  let endScreenTime = 0;
+  let confettiParticles = [];
+
+  // End screen button bounds (logical coordinates)
+  const restartButton = { x: W / 2 - 170, y: H / 2 + 60, w: 150, h: 48 };
+  const nextButton = { x: W / 2 + 20, y: H / 2 + 60, w: 150, h: 48 };
+
+  /** Check if point is inside rectangle */
+  function pointInRect(px, py, rect) {
+    return px >= rect.x && px <= rect.x + rect.w &&
+           py >= rect.y && py <= rect.y + rect.h;
+  }
+
+  /** Draw a styled button */
+  function drawButton(rect, label, color, pulse) {
+    const p = pulse ? 1 + Math.sin(endScreenTime * 4) * 0.03 : 1;
+    ctx.save();
+    ctx.translate(rect.x + rect.w / 2, rect.y + rect.h / 2);
+    ctx.scale(p, p);
+    ctx.translate(-(rect.x + rect.w / 2), -(rect.y + rect.h / 2));
+
+    // Button background
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.roundRect(rect.x, rect.y, rect.w, rect.h, 12);
+    ctx.fill();
+
+    // Button text
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = 'bold 18px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, rect.x + rect.w / 2, rect.y + rect.h / 2);
+
+    ctx.restore();
+  }
+
+  /**
+   * Resize canvas to fill available space with proper DPR scaling.
+   * Maintains logical coordinate system (720×540).
+   */
+  function resizeCanvas() {
+    dpr = window.devicePixelRatio || 1;
+
+    // Get available space
+    const availW = window.innerWidth;
+    const availH = window.innerHeight;
+
+    // Calculate scale to fit logical space (720×540) in available space
+    const scaleX = availW / W;
+    const scaleY = availH / H;
+    scale = Math.min(scaleX, scaleY);
+
+    // Physical canvas buffer (DPR-scaled for crisp rendering)
+    canvas.width = W * scale * dpr;
+    canvas.height = H * scale * dpr;
+
+    // CSS display size
+    canvas.style.width = (W * scale) + 'px';
+    canvas.style.height = (H * scale) + 'px';
+  }
+
+  /**
+   * Convert screen coordinates to logical coordinates.
+   * Use this for mouse/click events to get positions in 720×540 space.
+   */
+  function screenToLogical(screenX, screenY) {
+    const rect = canvas.getBoundingClientRect();
+    return {
+      x: (screenX - rect.left) * (W / rect.width),
+      y: (screenY - rect.top) * (H / rect.height)
+    };
+  }
+
+  const engine = {
+    /** Call this to end the game. DO NOT draw your own end screen. */
+    end(isCorrect, explanation) {
+      if (gameState === 'ended') return;
+      gameState = 'ended';
+      canvas.style.cursor = 'default';
+      gameResult = isCorrect;
+      gameExplanation = explanation || '';
+      endScreenTime = 0;
+
+      // Spawn confetti for correct answers
+      if (isCorrect) {
+        for (let i = 0; i < 50; i++) {
+          confettiParticles.push({
+            x: W / 2,
+            y: H / 2,
+            vx: (Math.random() - 0.5) * 600,
+            vy: -Math.random() * 400 - 100,
+            size: 4 + Math.random() * 6,
+            color: ['#FFD700', '#FF6B6B', '#4ECDC4', '#95E1D3', '#F38181'][Math.floor(Math.random() * 5)],
+            rotation: Math.random() * Math.PI * 2,
+            rotationSpeed: (Math.random() - 0.5) * 10
+          });
+        }
+      }
+
+      // Notify parent frame
+      if (window.parent && window.parent !== window) {
+        window.parent.postMessage({
+          type: 'quiz-end',
+          isCorrect: isCorrect,
+          explanation: explanation || ''
+        }, '*');
+      }
+    }
+  };
+
+  /** STANDARD END SCREEN - DO NOT MODIFY */
+  function drawEndScreen(dt) {
+    endScreenTime += dt;
+
+    // Update confetti
+    confettiParticles = confettiParticles.filter(p => {
+      p.vy += 800 * dt; // gravity
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.rotation += p.rotationSpeed * dt;
+      p.vx *= 0.99;
+      return p.y < H + 50;
+    });
+
+    // Dark overlay
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
+    ctx.fillRect(0, 0, W, H);
+
+    // Draw confetti
+    confettiParticles.forEach(p => {
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rotation);
+      ctx.fillStyle = p.color;
+      ctx.fillRect(-p.size / 2, -p.size / 4, p.size, p.size / 2);
+      ctx.restore();
+    });
+
+    // Result emoji
+    ctx.font = '72px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(gameResult ? '🎉' : '😢', W / 2, H / 2 - 50);
+
+    // Result text
+    ctx.fillStyle = gameResult ? '#4ADE80' : '#F87171';
+    ctx.font = 'bold 36px system-ui, sans-serif';
+    ctx.fillText(gameResult ? 'Correct!' : 'Wrong!', W / 2, H / 2 + 20);
+
+    // Buttons
+    if (gameResult) {
+      // Correct: show both Restart and Next/Finish
+      drawButton(restartButton, 'Restart', '#E87A3E', true);
+      const nextLabel = QUESTION.isLastQuestion ? 'Finish' : 'Next';
+      drawButton(nextButton, nextLabel, '#4ECDC4', true);
+    } else {
+      // Wrong: show only centered Restart button
+      const centeredRestart = { x: W / 2 - 75, y: H / 2 + 60, w: 150, h: 48 };
+      drawButton(centeredRestart, 'Restart', '#E87A3E', true);
+    }
+  }
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 3: YOUR GAME CODE - IMPLEMENT THESE FUNCTIONS                     ║
+  // ║  This is where your game logic goes. See requirements below.               ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+
+  // Reduced motion preference
+  const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // AUDIO SYSTEM
+  // ═══════════════════════════════════════════════════════════════════════════
+  let audioCtx = null;
+
+  function initAudio() {
+    if (audioCtx) return;
+    try {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    } catch (e) {
+      console.warn('Web Audio not supported');
+    }
+  }
+
+  function resumeAudio() {
+    if (audioCtx && audioCtx.state === 'suspended') {
+      audioCtx.resume();
+    }
+  }
+
+  function playSound(type) {
+    if (!audioCtx || prefersReducedMotion) return;
+    resumeAudio();
+
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+
+    const now = audioCtx.currentTime;
+
+    if (type === 'correct') {
+      // Ascending cheerful ding - bomb defused!
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(523, now);
+      osc.frequency.setValueAtTime(659, now + 0.1);
+      osc.frequency.setValueAtTime(784, now + 0.2);
+      gain.gain.setValueAtTime(0.25, now);
+      gain.gain.exponentialRampToValueAtTime(0.01, now + 0.4);
+      osc.start(now);
+      osc.stop(now + 0.4);
+    } else if (type === 'wrong') {
+      // Explosion rumble
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(80, now);
+      osc.frequency.exponentialRampToValueAtTime(30, now + 0.3);
+      gain.gain.setValueAtTime(0.3, now);
+      gain.gain.exponentialRampToValueAtTime(0.01, now + 0.4);
+      osc.start(now);
+      osc.stop(now + 0.4);
+    } else if (type === 'cut') {
+      // Wire snipping sound
+      osc.type = 'square';
+      osc.frequency.setValueAtTime(800, now);
+      osc.frequency.exponentialRampToValueAtTime(200, now + 0.08);
+      gain.gain.setValueAtTime(0.15, now);
+      gain.gain.exponentialRampToValueAtTime(0.01, now + 0.1);
+      osc.start(now);
+      osc.stop(now + 0.1);
+    } else if (type === 'spark') {
+      // Fuse spark crackle (subtle)
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(1200 + Math.random() * 400, now);
+      osc.frequency.exponentialRampToValueAtTime(600, now + 0.03);
+      gain.gain.setValueAtTime(0.008, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.05);
+      osc.start(now);
+      osc.stop(now + 0.05);
+    } else if (type === 'tick') {
+      // Timer tick
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(1000, now);
+      gain.gain.setValueAtTime(0.08, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.02);
+      osc.start(now);
+      osc.stop(now + 0.02);
+    }
+  }
+
+  // === GAME STATE ===
+  let mouseX = 0;
+  let mouseY = 0;
+  let bombX = 360;
+  let bombY = 180;
+  let bombShakeX = 0;
+  let bombShakeY = 0;
+  let countdown = 100 * 24 * 60 * 60 * 1000; // 100 days in milliseconds
+  let countdownSpeed = 10;
+  let backgroundWires = [];
+  let greenWire = null;
+  let redWire = null;
+  let sparks = [];
+  let sparkTimer = 0;
+  let cutting = false;
+  let cutTimer = 0;
+  let feedbackTimer = 0;
+  let selectedChoice = null;
+  let explosionParticles = [];
+  let defusalSparkles = [];
+
+  // Wire paths
+  const greenWirePath = [
+    { x: 280, y: 200 },
+    { x: 220, y: 280 },
+    { x: 160, y: 380 },
+    { x: 140, y: 320 },
+    { x: 200, y: 240 },
+    { x: 280, y: 160 }
+  ];
+
+  const redWirePath = [
+    { x: 440, y: 200 },
+    { x: 500, y: 280 },
+    { x: 560, y: 380 },
+    { x: 580, y: 320 },
+    { x: 520, y: 240 },
+    { x: 440, y: 160 }
+  ];
+
+  // Colors
+  const COLORS = {
+    bg: '#16213e',
+    bomb: '#1a1a2e',
+    bombBorder: '#4a5568',
+    muted: '#718096',
+    good: '#4ADE80',
+    bad: '#F87171',
+    ink: '#e2e8f0',
+    wireColors: ['#4a5568', '#6b7280', '#9ca3af', '#374151']
+  };
+
+  function initGame() {
+    // Reset state
+    canvas.style.cursor = 'none';
+    mouseX = W / 2;
+    mouseY = H / 2;
+    bombShakeX = 0;
+    bombShakeY = 0;
+    countdown = 100 * 24 * 60 * 60 * 1000;
+    sparks = [];
+    sparkTimer = 0;
+    cutting = false;
+    cutTimer = 0;
+    feedbackTimer = 0;
+    selectedChoice = null;
+    explosionParticles = [];
+    defusalSparkles = [];
+
+    greenWire = { path: greenWirePath, labelPos: 2, cut: false, cutPos: 1 };
+    redWire = { path: redWirePath, labelPos: 2, cut: false, cutPos: 1 };
+
+    // Generate tangled background wires
+    backgroundWires = [];
+    const centerX = 360;
+    const centerY = 200;
+
+    for (let i = 0; i < 20; i++) {
+      const points = [];
+      const controlPoints = [];
+      const numPoints = 8 + Math.floor(Math.random() * 8);
+
+      const boundWidth = 150 + Math.random() * 200;
+      const boundHeight = 100 + Math.random() * 150;
+      const offsetX = (Math.random() - 0.5) * 100;
+      const offsetY = (Math.random() - 0.5) * 80;
+      const angleOffset = Math.random() * Math.PI * 2;
+
+      for (let j = 0; j < numPoints; j++) {
+        const angle = angleOffset + (j / numPoints) * Math.PI * 2;
+        const radiusX = boundWidth / 2 + (Math.random() - 0.5) * 40;
+        const radiusY = boundHeight / 2 + (Math.random() - 0.5) * 40;
+        const px = centerX + offsetX + Math.cos(angle) * radiusX;
+        const py = centerY + offsetY + Math.sin(angle) * radiusY;
+
+        points.push({ x: px, y: py });
+        controlPoints.push({
+          cp1x: px + (Math.random() - 0.5) * 40,
+          cp1y: py + (Math.random() - 0.5) * 40,
+          cp2x: px + (Math.random() - 0.5) * 40,
+          cp2y: py + (Math.random() - 0.5) * 40
+        });
+      }
+
+      backgroundWires.push({
+        points: points,
+        controlPoints: controlPoints,
+        color: COLORS.wireColors[Math.floor(Math.random() * COLORS.wireColors.length)],
+        width: 2 + Math.random() * 3
+      });
+    }
+  }
+
+  function isNearWirePath(px, py, path) {
+    for (let i = 0; i < path.length - 1; i++) {
+      const p1 = path[i];
+      const p2 = path[i + 1];
+      const dx = p2.x - p1.x;
+      const dy = p2.y - p1.y;
+      const length = Math.sqrt(dx * dx + dy * dy);
+      const dot = ((px - p1.x) * dx + (py - p1.y) * dy) / (length * length);
+
+      if (dot >= 0 && dot <= 1) {
+        const closestX = p1.x + dot * dx;
+        const closestY = p1.y + dot * dy;
+        const dist = Math.sqrt((px - closestX) ** 2 + (py - closestY) ** 2);
+
+        if (dist < 30) return true;
+      }
+    }
+    return false;
+  }
+
+  function updateGame(dt) {
+    if (gameState !== 'playing') return;
+
+    // Update countdown
+    if (countdown > 0 && !greenWire.cut && !redWire.cut) {
+      countdown = Math.max(0, countdown - countdownSpeed * dt * 1000);
+    }
+
+    // Update spark animation
+    sparkTimer += dt;
+    if (sparkTimer > 0.15 && !greenWire.cut && !redWire.cut) {
+      sparkTimer = 0;
+      sparks.push({
+        x: bombX + 5 + (Math.random() - 0.5) * 10,
+        y: bombY - 50 - 30 + (Math.random() - 0.5) * 10,
+        life: 0.3,
+        vx: (Math.random() - 0.5) * 80,
+        vy: (Math.random() - 0.5) * 80 - 30
+      });
+    }
+
+    // Update sparks
+    for (let i = sparks.length - 1; i >= 0; i--) {
+      const spark = sparks[i];
+      spark.life -= dt;
+      spark.x += spark.vx * dt;
+      spark.y += spark.vy * dt;
+      if (spark.life <= 0) {
+        sparks.splice(i, 1);
+      }
+    }
+
+    // Handle cutting animation
+    if (cutting) {
+      cutTimer -= dt;
+      if (cutTimer <= 0) {
+        cutting = false;
+        if (selectedChoice === 0) {
+          greenWire.cut = true;
+        } else if (selectedChoice === 1) {
+          redWire.cut = true;
+        }
+
+        const choice = QUESTION.choices[selectedChoice];
+        const isCorrect = choice.is_correct;
+
+        // Play result sound
+        playSound(isCorrect ? 'correct' : 'wrong');
+
+        if (isCorrect) {
+          feedbackTimer = 1.5;
+          for (let i = 0; i < 30; i++) {
+            defusalSparkles.push({
+              x: bombX,
+              y: bombY,
+              vx: (Math.random() - 0.5) * 200,
+              vy: (Math.random() - 0.5) * 200,
+              life: 1.0
+            });
+          }
+        } else {
+          feedbackTimer = 1.5;
+          for (let i = 0; i < 40; i++) {
+            explosionParticles.push({
+              x: bombX,
+              y: bombY,
+              vx: (Math.random() - 0.5) * 300,
+              vy: (Math.random() - 0.5) * 300,
+              life: 1.0
+            });
+          }
+        }
+      }
+    }
+
+    // Handle feedback animation
+    if (feedbackTimer > 0) {
+      feedbackTimer -= dt;
+
+      const choice = QUESTION.choices[selectedChoice];
+      if (!choice.is_correct) {
+        bombShakeX = (Math.random() - 0.5) * 10;
+        bombShakeY = (Math.random() - 0.5) * 10;
+      }
+
+      // Update explosion particles
+      for (let i = explosionParticles.length - 1; i >= 0; i--) {
+        const p = explosionParticles[i];
+        p.life -= dt * 0.7;
+        p.x += p.vx * dt;
+        p.y += p.vy * dt;
+        p.vy += 200 * dt;
+        if (p.life <= 0) {
+          explosionParticles.splice(i, 1);
+        }
+      }
+
+      // Update defusal sparkles
+      for (let i = defusalSparkles.length - 1; i >= 0; i--) {
+        const p = defusalSparkles[i];
+        p.life -= dt * 0.7;
+        p.x += p.vx * dt;
+        p.y += p.vy * dt;
+        p.vy += 100 * dt;
+        if (p.life <= 0) {
+          defusalSparkles.splice(i, 1);
+        }
+      }
+
+      if (feedbackTimer <= 0) {
+        const choice = QUESTION.choices[selectedChoice];
+        engine.end(choice.is_correct, choice.explanation);
+      }
+    }
+  }
+
+  function drawWirePath(wire, color) {
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 8;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+
+    if (!wire.cut) {
+      ctx.beginPath();
+      ctx.moveTo(wire.path[0].x, wire.path[0].y);
+      for (let i = 0; i < wire.path.length - 1; i++) {
+        const p1 = wire.path[i];
+        const p2 = wire.path[i + 1];
+        const cpx = (p1.x + p2.x) / 2;
+        const cpy = (p1.y + p2.y) / 2;
+        ctx.quadraticCurveTo(p1.x, p1.y, cpx, cpy);
+      }
+      const last = wire.path[wire.path.length - 1];
+      ctx.lineTo(last.x, last.y);
+      ctx.stroke();
+    } else {
+      const cutIdx = wire.cutPos;
+
+      ctx.beginPath();
+      ctx.moveTo(wire.path[0].x, wire.path[0].y);
+      for (let i = 0; i < cutIdx; i++) {
+        const p1 = wire.path[i];
+        const p2 = wire.path[i + 1];
+        const cpx = (p1.x + p2.x) / 2;
+        const cpy = (p1.y + p2.y) / 2;
+        ctx.quadraticCurveTo(p1.x, p1.y, cpx, cpy);
+      }
+      const cutPoint = wire.path[cutIdx];
+      ctx.lineTo(cutPoint.x - 5, cutPoint.y - 5);
+      ctx.stroke();
+
+      ctx.beginPath();
+      ctx.moveTo(cutPoint.x + 5, cutPoint.y + 5);
+      for (let i = cutIdx; i < wire.path.length - 1; i++) {
+        const p1 = wire.path[i];
+        const p2 = wire.path[i + 1];
+        const cpx = (p1.x + p2.x) / 2;
+        const cpy = (p1.y + p2.y) / 2;
+        ctx.quadraticCurveTo(p1.x, p1.y, cpx, cpy);
+      }
+      const last = wire.path[wire.path.length - 1];
+      ctx.lineTo(last.x, last.y);
+      ctx.stroke();
+    }
+  }
+
+  function drawGame() {
+    // Clear canvas
+    ctx.fillStyle = COLORS.bg;
+    ctx.fillRect(0, 0, W, H);
+
+    // Draw background wires (tangled mess)
+    ctx.globalAlpha = 0.35;
+    for (const wire of backgroundWires) {
+      ctx.strokeStyle = wire.color;
+      ctx.lineWidth = wire.width;
+      ctx.beginPath();
+
+      if (wire.points.length > 0) {
+        ctx.moveTo(wire.points[0].x, wire.points[0].y);
+        for (let i = 0; i < wire.points.length; i++) {
+          const p2 = wire.points[(i + 1) % wire.points.length];
+          const cp = wire.controlPoints[i];
+          ctx.bezierCurveTo(cp.cp1x, cp.cp1y, cp.cp2x, cp.cp2y, p2.x, p2.y);
+        }
+      }
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+
+    // Draw green wire (True - choice 0)
+    drawWirePath(greenWire, COLORS.good);
+
+    // Draw red wire (False - choice 1)
+    drawWirePath(redWire, COLORS.bad);
+
+    // Draw wire labels
+    ctx.font = 'bold 20px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+
+    // Green wire label
+    const greenLabelPos = greenWire.path[greenWire.labelPos];
+    ctx.fillStyle = '#1a1a2e';
+    ctx.beginPath();
+    ctx.roundRect(greenLabelPos.x - 50, greenLabelPos.y - 18, 100, 36, 8);
+    ctx.fill();
+    ctx.fillStyle = COLORS.good;
+    ctx.fillText(QUESTION.choices[0].text, greenLabelPos.x, greenLabelPos.y);
+
+    // Red wire label
+    const redLabelPos = redWire.path[redWire.labelPos];
+    ctx.fillStyle = '#1a1a2e';
+    ctx.beginPath();
+    ctx.roundRect(redLabelPos.x - 50, redLabelPos.y - 18, 100, 36, 8);
+    ctx.fill();
+    ctx.fillStyle = COLORS.bad;
+    ctx.fillText(QUESTION.choices[1].text, redLabelPos.x, redLabelPos.y);
+
+    // Draw bomb
+    const bx = bombX + bombShakeX;
+    const by = bombY + bombShakeY;
+    const bombWidth = 160;
+    const bombHeight = 100;
+
+    // Bomb body
+    ctx.fillStyle = COLORS.bomb;
+    ctx.beginPath();
+    ctx.roundRect(bx - bombWidth / 2, by - bombHeight / 2, bombWidth, bombHeight, 8);
+    ctx.fill();
+
+    // Bomb border
+    ctx.strokeStyle = COLORS.bombBorder;
+    ctx.lineWidth = 3;
+    ctx.stroke();
+
+    // Bomb detail panels
+    ctx.fillStyle = COLORS.muted;
+    ctx.fillRect(bx - bombWidth / 2 + 10, by - bombHeight / 2 + 10, 30, 20);
+    ctx.fillRect(bx + bombWidth / 2 - 40, by - bombHeight / 2 + 10, 30, 20);
+
+    // Corner screws
+    ctx.fillStyle = COLORS.bombBorder;
+    const screwSize = 6;
+    const screwInset = 12;
+    ctx.beginPath();
+    ctx.arc(bx - bombWidth / 2 + screwInset, by - bombHeight / 2 + screwInset, screwSize / 2, 0, Math.PI * 2);
+    ctx.arc(bx + bombWidth / 2 - screwInset, by - bombHeight / 2 + screwInset, screwSize / 2, 0, Math.PI * 2);
+    ctx.arc(bx - bombWidth / 2 + screwInset, by + bombHeight / 2 - screwInset, screwSize / 2, 0, Math.PI * 2);
+    ctx.arc(bx + bombWidth / 2 - screwInset, by + bombHeight / 2 - screwInset, screwSize / 2, 0, Math.PI * 2);
+    ctx.fill();
+
+    // LED display background
+    ctx.fillStyle = '#0a0a0a';
+    ctx.beginPath();
+    ctx.roundRect(bx - 65, by - 15, 130, 30, 4);
+    ctx.fill();
+
+    // LED display border
+    ctx.strokeStyle = '#333';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    // LED countdown text
+    const totalMs = Math.floor(countdown);
+    const days = Math.floor(totalMs / (24 * 60 * 60 * 1000));
+    const hours = Math.floor((totalMs % (24 * 60 * 60 * 1000)) / (60 * 60 * 1000));
+    const minutes = Math.floor((totalMs % (60 * 60 * 1000)) / (60 * 1000));
+    const seconds = Math.floor((totalMs % (60 * 1000)) / 1000);
+    const milliseconds = Math.floor(totalMs % 1000);
+
+    const timeStr = `${days}:${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}:${String(milliseconds).padStart(3, '0')}`;
+
+    ctx.font = '14px monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = '#ff0000';
+    ctx.shadowColor = '#ff0000';
+    ctx.shadowBlur = 8;
+    ctx.fillText(timeStr, bx, by);
+    ctx.shadowBlur = 0;
+
+    // Fuse at top
+    ctx.strokeStyle = COLORS.muted;
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.moveTo(bx, by - bombHeight / 2);
+    ctx.lineTo(bx - 5, by - bombHeight / 2 - 15);
+    ctx.lineTo(bx + 5, by - bombHeight / 2 - 30);
+    ctx.stroke();
+
+    // Fuse spark
+    if (!greenWire.cut && !redWire.cut) {
+      ctx.fillStyle = '#ff9500';
+      ctx.beginPath();
+      ctx.arc(bx + 5, by - bombHeight / 2 - 30, 5, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Draw sparks
+      ctx.fillStyle = '#ff9500';
+      for (const spark of sparks) {
+        ctx.globalAlpha = spark.life / 0.3;
+        ctx.fillRect(spark.x - 2, spark.y - 2, 4, 4);
+      }
+      ctx.globalAlpha = 1;
+    }
+
+    // Draw explosion particles
+    for (const p of explosionParticles) {
+      ctx.globalAlpha = p.life;
+      ctx.fillStyle = COLORS.bad;
+      ctx.fillRect(p.x - 4, p.y - 4, 8, 8);
+    }
+    ctx.globalAlpha = 1;
+
+    // Draw defusal sparkles
+    for (const p of defusalSparkles) {
+      ctx.globalAlpha = p.life;
+      ctx.fillStyle = COLORS.good;
+      ctx.fillRect(p.x - 3, p.y - 3, 6, 6);
+    }
+    ctx.globalAlpha = 1;
+
+    // Draw feedback text
+    if (feedbackTimer > 0 && selectedChoice !== null) {
+      const choice = QUESTION.choices[selectedChoice];
+      ctx.font = 'bold 48px system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      if (choice.is_correct) {
+        ctx.fillStyle = COLORS.good;
+        ctx.fillText('DEFUSED!', W / 2, H / 2 + 120);
+      } else {
+        ctx.fillStyle = COLORS.bad;
+        ctx.fillText('BOOM!', W / 2, H / 2 + 120);
+      }
+    }
+
+    // Draw scissors cursor
+    ctx.font = '32px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+
+    if (cutting) {
+      ctx.save();
+      ctx.translate(mouseX, mouseY);
+      ctx.rotate(Math.PI / 4);
+      ctx.fillText('\u2702', 0, 0);
+      ctx.restore();
+    } else {
+      ctx.fillText('\u2702', mouseX, mouseY);
+    }
+
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+  }
+
+  function handleInput(e) {
+    if (gameState !== 'playing') return;
+    // Keyboard input not used in this game
+  }
+
+  function handleClick(x, y) {
+    if (gameState !== 'playing') return;
+    if (cutting || feedbackTimer > 0) return;
+
+    // Check if clicking on green wire (choice 0)
+    if (isNearWirePath(x, y, greenWire.path) && !greenWire.cut) {
+      initAudio();
+      playSound('cut');
+      cutting = true;
+      cutTimer = 0.5;
+      selectedChoice = 0;
+    }
+    // Check if clicking on red wire (choice 1)
+    else if (isNearWirePath(x, y, redWire.path) && !redWire.cut) {
+      initAudio();
+      playSound('cut');
+      cutting = true;
+      cutTimer = 0.5;
+      selectedChoice = 1;
+    }
+  }
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 4: GAME LOOP - DO NOT MODIFY                                      ║
+  // ║  Standard loop with responsive scaling and DPR support.                    ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  let lastTime = performance.now();
+
+  function gameLoop(now) {
+    const dt = Math.min((now - lastTime) / 1000, 0.05); // Cap at 50ms
+    lastTime = now;
+
+    // Apply transform for logical coordinate system
+    ctx.setTransform(scale * dpr, 0, 0, scale * dpr, 0, 0);
+
+    if (gameState === 'playing') {
+      updateGame(dt);
+      drawGame();
+    } else {
+      drawGame(); // Draw game state behind overlay
+      drawEndScreen(dt);
+    }
+
+    // Reset transform for next frame
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+    requestAnimationFrame(gameLoop);
+  }
+
+  // Input handlers
+  document.addEventListener('keydown', (e) => {
+    if (gameState === 'ended' && (e.code === 'KeyR')) {
+      // Restart game
+      gameState = 'playing';
+      gameResult = null;
+      gameExplanation = '';
+      confettiParticles = [];
+      initGame();
+      return;
+    }
+    handleInput(e);
+  });
+
+  document.addEventListener('keyup', (e) => {
+    // Optional: handle key release in your handleInput
+  });
+
+  // Mouse move handler for scissors cursor
+  canvas.addEventListener('mousemove', (e) => {
+    const pos = screenToLogical(e.clientX, e.clientY);
+    mouseX = pos.x;
+    mouseY = pos.y;
+  });
+
+  // Canvas click handler for end screen buttons and wire cutting
+  canvas.addEventListener('click', (e) => {
+    const { x, y } = screenToLogical(e.clientX, e.clientY);
+
+    if (gameState === 'playing') {
+      handleClick(x, y);
+      return;
+    }
+
+    if (gameState !== 'ended') return;
+
+    if (gameResult) {
+      // Correct answer: check both buttons
+      if (pointInRect(x, y, restartButton)) {
+        gameState = 'playing';
+        gameResult = null;
+        gameExplanation = '';
+        confettiParticles = [];
+        initGame();
+        return;
+      }
+      if (pointInRect(x, y, nextButton)) {
+        // Notify parent to go to next question
+        if (window.parent && window.parent !== window) {
+          window.parent.postMessage({ type: 'quiz-next' }, '*');
+        }
+        return;
+      }
+    } else {
+      // Wrong answer: check centered restart button
+      const centeredRestart = { x: W / 2 - 75, y: H / 2 + 60, w: 150, h: 48 };
+      if (pointInRect(x, y, centeredRestart)) {
+        gameState = 'playing';
+        gameResult = null;
+        gameExplanation = '';
+        confettiParticles = [];
+        initGame();
+        return;
+      }
+    }
+  });
+
+
+  // Cursor change handler for end screen buttons
+  canvas.addEventListener('mousemove', (e) => {
+    if (gameState !== 'ended') {
+      canvas.style.cursor = 'default';
+      return;
+    }
+    const { x, y } = screenToLogical(e.clientX, e.clientY);
+    if (gameResult) {
+      if (pointInRect(x, y, restartButton) || pointInRect(x, y, nextButton)) {
+        canvas.style.cursor = 'pointer';
+        return;
+      }
+    } else {
+      const centeredRestart = { x: W / 2 - 75, y: H / 2 + 60, w: 150, h: 48 };
+      if (pointInRect(x, y, centeredRestart)) {
+        canvas.style.cursor = 'pointer';
+        return;
+      }
+    }
+    canvas.style.cursor = 'default';
+  });
+
+  // Handle resize
+  window.addEventListener('resize', resizeCanvas);
+
+  // Initialize
+  resizeCanvas();
+  initGame();
+  requestAnimationFrame(gameLoop);
+  </script>
+</body>
+</html>

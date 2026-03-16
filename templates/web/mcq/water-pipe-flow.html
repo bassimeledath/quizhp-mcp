@@ -1,0 +1,1152 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Water Pipe Flow</title>
+  <link href="https://fonts.googleapis.com/css2?family=Belanosima:wght@400;600;700&family=Nunito+Sans:wght@400;500;600;700&family=Nunito:wght@400;500;600&display=swap" rel="stylesheet">
+  <!--
+  ╔══════════════════════════════════════════════════════════════════════════════╗
+  ║  GAME FACTORY TEMPLATE                                                        ║
+  ║  This template enforces critical invariants. Follow the section markers.      ║
+  ╚══════════════════════════════════════════════════════════════════════════════╝
+  -->
+  <style>
+    /* ═══════════════════════════════════════════════════════════════════════════
+       BASE STYLES - Can be extended, not removed
+       ═══════════════════════════════════════════════════════════════════════════ */
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+    }
+    body {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      background: #1C1C1A;
+      font-family: 'Nunito Sans', system-ui, -apple-system, sans-serif;
+    }
+    #gameCanvas {
+      background: #2A2A27;
+      border-radius: 12px;
+      display: block;
+    }
+  </style>
+</head>
+<body>
+  <!-- ═══════════════════════════════════════════════════════════════════════════
+       CANVAS - Sized dynamically to fill available space
+       ═══════════════════════════════════════════════════════════════════════════ -->
+  <canvas id="gameCanvas"></canvas>
+
+  <script>
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 1: QUESTION PLACEHOLDER - DO NOT MODIFY FORMAT                    ║
+  // ║  Platform replaces this at runtime. Use these exact 60-char answers.       ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  const QUESTION = {
+    type: "mcq",
+    prompt: "Sample question text",
+    choices: [
+      { text: "This is sample answer A which is long enough to test text overflow", is_correct: true, explanation: "Why A is correct" },
+      { text: "This is sample answer B which is long enough to test text overflow", is_correct: false, explanation: "Why B is wrong" },
+      { text: "This is sample answer C which is long enough to test text overflow", is_correct: false, explanation: "Why C is wrong" },
+      { text: "This is sample answer D which is long enough to test text overflow", is_correct: false, explanation: "Why D is wrong" }
+    ],
+    isLastQuestion: false
+  };
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 2: ENGINE CORE - DO NOT MODIFY                                    ║
+  // ║  Standard engine interface and end screen. This is sacred.                 ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  const canvas = document.getElementById('gameCanvas');
+  const ctx = canvas.getContext('2d');
+
+  // Logical dimensions (game code works in this coordinate space)
+  const W = 720, H = 540;
+
+  // Scaling state (computed on resize)
+  let scale = 1;
+  let dpr = 1;
+
+  let gameState = 'playing'; // 'playing' | 'ended'
+  let gameResult = null;     // true (correct) | false (wrong)
+  let gameExplanation = '';
+  let endScreenTime = 0;
+  let confettiParticles = [];
+
+  // End screen button bounds (logical coordinates)
+  const restartButton = { x: W / 2 - 170, y: H / 2 + 60, w: 150, h: 48 };
+  const nextButton = { x: W / 2 + 20, y: H / 2 + 60, w: 150, h: 48 };
+
+  /** Check if point is inside rectangle */
+  function pointInRect(px, py, rect) {
+    return px >= rect.x && px <= rect.x + rect.w &&
+           py >= rect.y && py <= rect.y + rect.h;
+  }
+
+  /** Draw a styled button */
+  function drawButton(rect, label, color, pulse) {
+    const p = pulse ? 1 + Math.sin(endScreenTime * 4) * 0.03 : 1;
+    ctx.save();
+    ctx.translate(rect.x + rect.w / 2, rect.y + rect.h / 2);
+    ctx.scale(p, p);
+    ctx.translate(-(rect.x + rect.w / 2), -(rect.y + rect.h / 2));
+
+    // Button background
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.roundRect(rect.x, rect.y, rect.w, rect.h, 12);
+    ctx.fill();
+
+    // Button text
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = 'bold 18px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, rect.x + rect.w / 2, rect.y + rect.h / 2);
+
+    ctx.restore();
+  }
+
+  /**
+   * Resize canvas to fill available space with proper DPR scaling.
+   * Maintains logical coordinate system (720×540).
+   */
+  function resizeCanvas() {
+    dpr = window.devicePixelRatio || 1;
+
+    // Get available space
+    const availW = window.innerWidth;
+    const availH = window.innerHeight;
+
+    // Calculate scale to fit logical space (720×540) in available space
+    const scaleX = availW / W;
+    const scaleY = availH / H;
+    scale = Math.min(scaleX, scaleY);
+
+    // Physical canvas buffer (DPR-scaled for crisp rendering)
+    canvas.width = W * scale * dpr;
+    canvas.height = H * scale * dpr;
+
+    // CSS display size
+    canvas.style.width = (W * scale) + 'px';
+    canvas.style.height = (H * scale) + 'px';
+  }
+
+  /**
+   * Convert screen coordinates to logical coordinates.
+   * Use this for mouse/click events to get positions in 720×540 space.
+   */
+  function screenToLogical(screenX, screenY) {
+    const rect = canvas.getBoundingClientRect();
+    return {
+      x: (screenX - rect.left) * (W / rect.width),
+      y: (screenY - rect.top) * (H / rect.height)
+    };
+  }
+
+  const engine = {
+    /** Call this to end the game. DO NOT draw your own end screen. */
+    end(isCorrect, explanation) {
+      if (gameState === 'ended') return;
+      gameState = 'ended';
+      gameResult = isCorrect;
+      gameExplanation = explanation || '';
+      endScreenTime = 0;
+
+      // Spawn confetti for correct answers
+      if (isCorrect) {
+        for (let i = 0; i < 50; i++) {
+          confettiParticles.push({
+            x: W / 2,
+            y: H / 2,
+            vx: (Math.random() - 0.5) * 600,
+            vy: -Math.random() * 400 - 100,
+            size: 4 + Math.random() * 6,
+            color: ['#FFD700', '#FF6B6B', '#4ECDC4', '#95E1D3', '#F38181'][Math.floor(Math.random() * 5)],
+            rotation: Math.random() * Math.PI * 2,
+            rotationSpeed: (Math.random() - 0.5) * 10
+          });
+        }
+      }
+
+      // Notify parent frame
+      if (window.parent && window.parent !== window) {
+        window.parent.postMessage({
+          type: 'quiz-end',
+          isCorrect: isCorrect,
+          explanation: explanation || ''
+        }, '*');
+      }
+    }
+  };
+
+  /** STANDARD END SCREEN - DO NOT MODIFY */
+  function drawEndScreen(dt) {
+    endScreenTime += dt;
+
+    // Update confetti
+    confettiParticles = confettiParticles.filter(p => {
+      p.vy += 800 * dt; // gravity
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.rotation += p.rotationSpeed * dt;
+      p.vx *= 0.99;
+      return p.y < H + 50;
+    });
+
+    // Dark overlay
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
+    ctx.fillRect(0, 0, W, H);
+
+    // Draw confetti
+    confettiParticles.forEach(p => {
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rotation);
+      ctx.fillStyle = p.color;
+      ctx.fillRect(-p.size / 2, -p.size / 4, p.size, p.size / 2);
+      ctx.restore();
+    });
+
+    // Result emoji
+    ctx.font = '72px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(gameResult ? '🎉' : '😢', W / 2, H / 2 - 50);
+
+    // Result text
+    ctx.fillStyle = gameResult ? '#4ADE80' : '#F87171';
+    ctx.font = 'bold 36px system-ui, sans-serif';
+    ctx.fillText(gameResult ? 'Correct!' : 'Wrong!', W / 2, H / 2 + 20);
+
+    // Buttons
+    if (gameResult) {
+      // Correct: show both Restart and Next/Finish
+      drawButton(restartButton, 'Restart', '#E87A3E', true);
+      const nextLabel = QUESTION.isLastQuestion ? 'Finish' : 'Next';
+      drawButton(nextButton, nextLabel, '#4ECDC4', true);
+    } else {
+      // Wrong: show only centered Restart button
+      const centeredRestart = { x: W / 2 - 75, y: H / 2 + 60, w: 150, h: 48 };
+      drawButton(centeredRestart, 'Restart', '#E87A3E', true);
+    }
+  }
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 3: YOUR GAME CODE - IMPLEMENT THESE FUNCTIONS                     ║
+  // ║  Water Pipe Flow - Click valves to direct water to answer boxes            ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // QuizHP Color Palette
+  // ═══════════════════════════════════════════════════════════════════════════
+  const COLORS = {
+    bgPrimary: '#2A2A27',
+    bgSurface: '#363633',
+    textPrimary: '#F5F5F0',
+    textSecondary: '#C2C2B8',
+    orange: '#E87A3E',
+    orangeHover: '#D66B31',
+    amber: '#F5A742',
+    cyan: '#4ECDC4',
+    cyanHover: '#45B8B0',
+    success: '#6BBF59',
+    error: '#E85D4A',
+    borderSubtle: '#424240',
+    borderStrong: '#5A5A56',
+    water: '#4ECDC4',
+    waterLight: '#7EDCD6',
+    waterDark: '#3DBDB5',
+    pipeOuter: '#424240',
+    pipeInner: '#363633'
+  };
+
+  // Reduced motion preference
+  const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Audio System
+  // ═══════════════════════════════════════════════════════════════════════════
+  let audioCtx = null;
+
+  function initAudio() {
+    if (!audioCtx) {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    if (audioCtx.state === 'suspended') {
+      audioCtx.resume();
+    }
+  }
+
+  function playSound(type) {
+    if (!audioCtx || prefersReducedMotion) return;
+
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+
+    if (type === 'correct') {
+      // Cheerful ascending ding
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(523, audioCtx.currentTime);
+      osc.frequency.setValueAtTime(659, audioCtx.currentTime + 0.1);
+      osc.frequency.setValueAtTime(784, audioCtx.currentTime + 0.2);
+      gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.4);
+      osc.start();
+      osc.stop(audioCtx.currentTime + 0.4);
+    } else if (type === 'wrong') {
+      // Sympathetic low buzz
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(180, audioCtx.currentTime);
+      osc.frequency.setValueAtTime(140, audioCtx.currentTime + 0.15);
+      gain.gain.setValueAtTime(0.2, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.25);
+      osc.start();
+      osc.stop(audioCtx.currentTime + 0.25);
+    } else if (type === 'valve') {
+      // Satisfying click-turn sound
+      osc.type = 'square';
+      osc.frequency.setValueAtTime(600, audioCtx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(200, audioCtx.currentTime + 0.08);
+      gain.gain.setValueAtTime(0.12, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.1);
+      osc.start();
+      osc.stop(audioCtx.currentTime + 0.1);
+    } else if (type === 'water') {
+      // Flowing water bubble sound
+      osc.type = 'sine';
+      const freq = 300 + Math.random() * 200;
+      osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(freq * 0.5, audioCtx.currentTime + 0.1);
+      gain.gain.setValueAtTime(0.05, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.1);
+      osc.start();
+      osc.stop(audioCtx.currentTime + 0.1);
+    } else if (type === 'splash') {
+      // Water splash arrival
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(800, audioCtx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(200, audioCtx.currentTime + 0.15);
+      gain.gain.setValueAtTime(0.15, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.2);
+      osc.start();
+      osc.stop(audioCtx.currentTime + 0.2);
+    }
+  }
+
+  // Game constants
+  const TANK_X = 50;
+  const TANK_Y = H / 2;
+  const TANK_SIZE = 60;
+  const PIPE_HEIGHT = 22;
+  const VALVE_SIZE = 34;
+  const VALVE_X = 200;
+  const FLOW_SPEED = 180;
+
+  // Answer box layout - wider boxes for 60-char text
+  const ANSWER_BOX_X = 490;
+  const ANSWER_BOX_WIDTH = 220;
+  const ANSWER_BOX_HEIGHT = 100;
+  const ANSWER_SPACING = 110;
+
+  // Pipe Y positions (centered around middle)
+  const PIPE_POSITIONS = [
+    H / 2 - ANSWER_SPACING * 1.5,
+    H / 2 - ANSWER_SPACING * 0.5,
+    H / 2 + ANSWER_SPACING * 0.5,
+    H / 2 + ANSWER_SPACING * 1.5
+  ];
+
+  // Game state
+  let pipes = [];
+  let selectedPipe = -1;
+  let waterBubbles = [];
+  let splashParticles = [];
+  let waterDroplets = [];
+  let time = 0;
+  let hoveredValve = -1;
+  let entranceAnimProgress = 0;
+  let waterSoundTimer = 0;
+  let gameEnding = false;
+  let endingTimer = 0;
+  let endingPipe = null;
+
+  function initGame() {
+    pipes = PIPE_POSITIONS.map((y, i) => ({
+      y: y,
+      valveOpen: false,
+      waterFlow: 0,
+      valveAngle: 0,
+      targetValveAngle: 0,
+      choice: QUESTION.choices[i],
+      scale: prefersReducedMotion ? 1 : 0,
+      alpha: prefersReducedMotion ? 1 : 0,
+      hoverScale: 1,
+      glowIntensity: 0
+    }));
+    selectedPipe = -1;
+    waterBubbles = [];
+    splashParticles = [];
+    waterDroplets = [];
+    time = 0;
+    hoveredValve = -1;
+    entranceAnimProgress = 0;
+    waterSoundTimer = 0;
+    gameEnding = false;
+    endingTimer = 0;
+    endingPipe = null;
+
+    // Start entrance animation
+    if (!prefersReducedMotion) {
+      bounceInElements();
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Animations
+  // ═══════════════════════════════════════════════════════════════════════════
+  function bounceInElements() {
+    pipes.forEach((pipe, i) => {
+      setTimeout(() => {
+        const duration = 350;
+        const start = performance.now();
+        const animate = (now) => {
+          const t = Math.min((now - start) / duration, 1);
+          const spring = 1 + Math.sin(t * Math.PI * 2) * 0.2 * (1 - t);
+          pipe.scale = t * spring;
+          pipe.alpha = t;
+          if (t < 1) requestAnimationFrame(animate);
+          else { pipe.scale = 1; pipe.alpha = 1; }
+        };
+        requestAnimationFrame(animate);
+      }, i * 80);
+    });
+  }
+
+  function spawnSplash(x, y, isCorrect) {
+    const colors = isCorrect
+      ? [COLORS.success, COLORS.cyan, COLORS.amber, '#FFFFFF']
+      : [COLORS.error, COLORS.orange, '#FFFFFF'];
+
+    for (let i = 0; i < 25; i++) {
+      const angle = (Math.PI / 2) + (Math.random() - 0.5) * Math.PI;
+      const speed = 100 + Math.random() * 200;
+      splashParticles.push({
+        x: x,
+        y: y,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed * -1,
+        size: 3 + Math.random() * 5,
+        color: colors[Math.floor(Math.random() * colors.length)],
+        alpha: 1,
+        gravity: 400
+      });
+    }
+  }
+
+  function spawnWaterDroplets(x, y) {
+    for (let i = 0; i < 3; i++) {
+      waterDroplets.push({
+        x: x + (Math.random() - 0.5) * 10,
+        y: y + (Math.random() - 0.5) * 10,
+        vx: (Math.random() - 0.5) * 30,
+        vy: -30 - Math.random() * 50,
+        size: 2 + Math.random() * 3,
+        alpha: 0.8,
+        gravity: 200
+      });
+    }
+  }
+
+  function updateGame(dt) {
+    if (gameState !== 'playing') return;
+
+    time += dt;
+    entranceAnimProgress = Math.min(entranceAnimProgress + dt * 2, 1);
+
+    // Handle ending animation
+    if (gameEnding) {
+      endingTimer += dt;
+      if (endingTimer >= 0.4) {
+        const isCorrect = endingPipe.choice.is_correct;
+        engine.end(isCorrect, endingPipe.choice.explanation);
+        return;
+      }
+    }
+
+    // Update pipes
+    for (let i = 0; i < pipes.length; i++) {
+      const pipe = pipes[i];
+
+      // Smooth valve rotation animation
+      if (pipe.valveOpen) {
+        pipe.targetValveAngle += dt * 4;
+      }
+      pipe.valveAngle += (pipe.targetValveAngle - pipe.valveAngle) * Math.min(dt * 8, 1);
+
+      // Hover animation
+      const targetHoverScale = (hoveredValve === i && !pipe.valveOpen) ? 1.1 : 1;
+      pipe.hoverScale += (targetHoverScale - pipe.hoverScale) * Math.min(dt * 12, 1);
+
+      // Glow animation for active pipe
+      const targetGlow = pipe.valveOpen ? 1 : 0;
+      pipe.glowIntensity += (targetGlow - pipe.glowIntensity) * Math.min(dt * 5, 1);
+
+      if (pipe.valveOpen && !gameEnding) {
+        // Increase water flow
+        pipe.waterFlow += FLOW_SPEED * dt;
+
+        // Water sound effect periodically
+        waterSoundTimer += dt;
+        if (waterSoundTimer > 0.15) {
+          waterSoundTimer = 0;
+          if (Math.random() < 0.4) {
+            playSound('water');
+          }
+        }
+
+        // Spawn water bubbles more frequently with shimmer
+        if (Math.random() < dt * 15) {
+          const startX = VALVE_X + VALVE_SIZE / 2 + pipe.waterFlow * 0.8;
+          if (startX < ANSWER_BOX_X - 10) {
+            waterBubbles.push({
+              x: startX,
+              y: pipe.y + (Math.random() - 0.5) * (PIPE_HEIGHT - 8),
+              size: 2 + Math.random() * 4,
+              alpha: 0.6 + Math.random() * 0.4,
+              shimmerOffset: Math.random() * Math.PI * 2
+            });
+          }
+        }
+
+        // Spawn droplets at water front
+        if (Math.random() < dt * 8) {
+          const frontX = VALVE_X + VALVE_SIZE / 2 + pipe.waterFlow;
+          if (frontX < ANSWER_BOX_X - 20) {
+            spawnWaterDroplets(frontX, pipe.y);
+          }
+        }
+
+        // Check if water reached the answer box
+        const maxFlow = ANSWER_BOX_X - VALVE_X - VALVE_SIZE / 2 - 10;
+        if (pipe.waterFlow >= maxFlow) {
+          // Start ending sequence with splash
+          gameEnding = true;
+          endingPipe = pipe;
+          endingTimer = 0;
+
+          const isCorrect = pipe.choice.is_correct;
+          playSound('splash');
+          spawnSplash(ANSWER_BOX_X, pipe.y, isCorrect);
+
+          setTimeout(() => {
+            playSound(isCorrect ? 'correct' : 'wrong');
+          }, 100);
+
+          return;
+        }
+      }
+    }
+
+    // Update water bubbles with shimmer
+    waterBubbles = waterBubbles.filter(b => {
+      b.x += FLOW_SPEED * 0.6 * dt;
+      b.alpha -= dt * 0.4;
+      return b.alpha > 0 && b.x < ANSWER_BOX_X;
+    });
+
+    // Update splash particles
+    splashParticles = splashParticles.filter(p => {
+      p.vy += p.gravity * dt;
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.alpha -= dt * 1.5;
+      return p.alpha > 0 && p.y < H + 20;
+    });
+
+    // Update water droplets
+    waterDroplets = waterDroplets.filter(d => {
+      d.vy += d.gravity * dt;
+      d.x += d.vx * dt;
+      d.y += d.vy * dt;
+      d.alpha -= dt * 2;
+      return d.alpha > 0;
+    });
+  }
+
+  function drawGame() {
+    // Clear canvas with QuizHP dark background
+    ctx.fillStyle = COLORS.bgPrimary;
+    ctx.fillRect(0, 0, W, H);
+
+    // Draw subtle grid pattern for depth
+    ctx.strokeStyle = COLORS.borderSubtle;
+    ctx.lineWidth = 0.5;
+    ctx.globalAlpha = 0.2;
+    for (let x = 0; x < W; x += 40) {
+      ctx.beginPath();
+      ctx.moveTo(x, 0);
+      ctx.lineTo(x, H);
+      ctx.stroke();
+    }
+    for (let y = 0; y < H; y += 40) {
+      ctx.beginPath();
+      ctx.moveTo(0, y);
+      ctx.lineTo(W, y);
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+
+    // Draw water tank
+    drawTank();
+
+    // Draw main vertical pipe
+    drawVerticalPipe();
+
+    // Draw horizontal pipes with valves and answer boxes
+    for (let i = 0; i < pipes.length; i++) {
+      drawPipeSystem(i);
+    }
+
+    // Draw water bubbles
+    drawWaterBubbles();
+
+    // Draw water droplets
+    drawWaterDroplets();
+
+    // Draw splash particles
+    drawSplashParticles();
+  }
+
+  function drawTank() {
+    const tankScale = prefersReducedMotion ? 1 : Math.min(entranceAnimProgress * 2, 1);
+
+    ctx.save();
+    ctx.translate(TANK_X, TANK_Y);
+    ctx.scale(tankScale, tankScale);
+    ctx.translate(-TANK_X, -TANK_Y);
+
+    // Tank shadow
+    ctx.fillStyle = 'rgba(0,0,0,0.3)';
+    ctx.beginPath();
+    ctx.roundRect(TANK_X - TANK_SIZE / 2 + 4, TANK_Y - TANK_SIZE / 2 + 4, TANK_SIZE, TANK_SIZE, 8);
+    ctx.fill();
+
+    // Tank container
+    ctx.fillStyle = COLORS.bgSurface;
+    ctx.strokeStyle = COLORS.borderStrong;
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.roundRect(TANK_X - TANK_SIZE / 2, TANK_Y - TANK_SIZE / 2, TANK_SIZE, TANK_SIZE, 8);
+    ctx.fill();
+    ctx.stroke();
+
+    // Water inside tank (animated)
+    const waterLevel = 0.75 + Math.sin(time * 2) * 0.05;
+    const waterGradient = ctx.createLinearGradient(0, TANK_Y - TANK_SIZE/2, 0, TANK_Y + TANK_SIZE/2);
+    waterGradient.addColorStop(0, COLORS.waterLight);
+    waterGradient.addColorStop(1, COLORS.water);
+    ctx.fillStyle = waterGradient;
+    ctx.beginPath();
+    ctx.roundRect(
+      TANK_X - TANK_SIZE / 2 + 4,
+      TANK_Y - TANK_SIZE / 2 + 4 + (1 - waterLevel) * (TANK_SIZE - 8),
+      TANK_SIZE - 8,
+      (TANK_SIZE - 8) * waterLevel,
+      4
+    );
+    ctx.fill();
+
+    // Water wave effect
+    ctx.strokeStyle = COLORS.waterLight;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    const waveY = TANK_Y - TANK_SIZE / 2 + 4 + (1 - waterLevel) * (TANK_SIZE - 8);
+    for (let wx = TANK_X - TANK_SIZE / 2 + 6; wx < TANK_X + TANK_SIZE / 2 - 6; wx += 2) {
+      const wy = waveY + Math.sin((wx + time * 50) * 0.1) * 2;
+      if (wx === TANK_X - TANK_SIZE / 2 + 6) {
+        ctx.moveTo(wx, wy);
+      } else {
+        ctx.lineTo(wx, wy);
+      }
+    }
+    ctx.stroke();
+
+    // Water droplet icon
+    ctx.font = "28px 'Nunito Sans', sans-serif";
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('\uD83D\uDCA7', TANK_X, TANK_Y - 5);
+
+    ctx.restore();
+  }
+
+  function drawVerticalPipe() {
+    const pipeX = TANK_X + TANK_SIZE / 2;
+    const pipeWidth = 20;
+    const topY = PIPE_POSITIONS[0];
+    const bottomY = PIPE_POSITIONS[3];
+
+    // Pipe shadow
+    ctx.fillStyle = 'rgba(0,0,0,0.2)';
+    ctx.fillRect(pipeX + 3, topY - PIPE_HEIGHT / 2 + 3, pipeWidth, bottomY - topY + PIPE_HEIGHT);
+
+    // Pipe border
+    ctx.fillStyle = COLORS.pipeOuter;
+    ctx.fillRect(pipeX, topY - PIPE_HEIGHT / 2, pipeWidth, bottomY - topY + PIPE_HEIGHT);
+
+    // Water inside vertical pipe with shimmer
+    const gradient = ctx.createLinearGradient(pipeX, 0, pipeX + pipeWidth, 0);
+    gradient.addColorStop(0, COLORS.waterDark);
+    gradient.addColorStop(0.3, COLORS.water);
+    gradient.addColorStop(0.7, COLORS.waterLight);
+    gradient.addColorStop(1, COLORS.water);
+    ctx.fillStyle = gradient;
+    ctx.fillRect(pipeX + 2, topY - PIPE_HEIGHT / 2 + 2, pipeWidth - 4, bottomY - topY + PIPE_HEIGHT - 4);
+  }
+
+  function drawPipeSystem(index) {
+    const pipe = pipes[index];
+    const y = pipe.y;
+    const verticalPipeRight = TANK_X + TANK_SIZE / 2 + 20;
+
+    ctx.save();
+    ctx.globalAlpha = pipe.alpha;
+
+    // Glow effect for active pipe
+    if (pipe.glowIntensity > 0.01) {
+      ctx.shadowColor = COLORS.cyan;
+      ctx.shadowBlur = 15 * pipe.glowIntensity;
+    }
+
+    // Horizontal pipe from vertical to valve (shadow)
+    ctx.fillStyle = 'rgba(0,0,0,0.2)';
+    ctx.fillRect(verticalPipeRight - 2 + 2, y - PIPE_HEIGHT / 2 + 2, VALVE_X - verticalPipeRight - VALVE_SIZE / 2 + 2, PIPE_HEIGHT);
+
+    // Horizontal pipe from vertical to valve
+    ctx.fillStyle = COLORS.pipeOuter;
+    ctx.fillRect(verticalPipeRight - 2, y - PIPE_HEIGHT / 2, VALVE_X - verticalPipeRight - VALVE_SIZE / 2 + 2, PIPE_HEIGHT);
+
+    // Water in pre-valve pipe (always filled) with shimmer
+    const preValveGradient = ctx.createLinearGradient(0, y - PIPE_HEIGHT/2, 0, y + PIPE_HEIGHT/2);
+    preValveGradient.addColorStop(0, COLORS.water);
+    preValveGradient.addColorStop(0.5, COLORS.waterLight);
+    preValveGradient.addColorStop(1, COLORS.water);
+    ctx.fillStyle = preValveGradient;
+    ctx.fillRect(verticalPipeRight, y - PIPE_HEIGHT / 2 + 2, VALVE_X - verticalPipeRight - VALVE_SIZE / 2, PIPE_HEIGHT - 4);
+
+    ctx.shadowBlur = 0;
+
+    // Pipe from valve to answer box (shadow)
+    ctx.fillStyle = 'rgba(0,0,0,0.15)';
+    ctx.fillRect(VALVE_X + VALVE_SIZE / 2 + 2, y - PIPE_HEIGHT / 2 + 2, ANSWER_BOX_X - VALVE_X - VALVE_SIZE / 2, PIPE_HEIGHT);
+
+    // Pipe from valve to answer box
+    ctx.fillStyle = COLORS.pipeOuter;
+    ctx.fillRect(VALVE_X + VALVE_SIZE / 2, y - PIPE_HEIGHT / 2, ANSWER_BOX_X - VALVE_X - VALVE_SIZE / 2, PIPE_HEIGHT);
+
+    // Empty pipe interior
+    ctx.fillStyle = COLORS.pipeInner;
+    ctx.fillRect(VALVE_X + VALVE_SIZE / 2, y - PIPE_HEIGHT / 2 + 2, ANSWER_BOX_X - VALVE_X - VALVE_SIZE / 2, PIPE_HEIGHT - 4);
+
+    // Water flow after valve
+    if (pipe.valveOpen && pipe.waterFlow > 0) {
+      const waterWidth = Math.min(pipe.waterFlow, ANSWER_BOX_X - VALVE_X - VALVE_SIZE / 2 - 10);
+
+      // Create animated gradient for flowing water with shimmer
+      const shimmerOffset = (time * 100) % waterWidth;
+      const gradient = ctx.createLinearGradient(
+        VALVE_X + VALVE_SIZE / 2, 0,
+        VALVE_X + VALVE_SIZE / 2 + waterWidth, 0
+      );
+      gradient.addColorStop(0, COLORS.water);
+      gradient.addColorStop(Math.min(0.3 + shimmerOffset / waterWidth * 0.2, 0.9), COLORS.waterLight);
+      gradient.addColorStop(1, COLORS.water);
+
+      ctx.fillStyle = gradient;
+      ctx.fillRect(VALVE_X + VALVE_SIZE / 2, y - PIPE_HEIGHT / 2 + 2, waterWidth, PIPE_HEIGHT - 4);
+
+      // Water front highlight
+      ctx.fillStyle = COLORS.waterLight;
+      ctx.globalAlpha = pipe.alpha * 0.6;
+      ctx.beginPath();
+      ctx.arc(VALVE_X + VALVE_SIZE / 2 + waterWidth, y, PIPE_HEIGHT / 2 - 2, -Math.PI/2, Math.PI/2);
+      ctx.fill();
+      ctx.globalAlpha = pipe.alpha;
+    }
+
+    // Draw valve
+    drawValve(VALVE_X, y, pipe, index);
+
+    // Draw answer box
+    drawAnswerBox(index);
+
+    ctx.restore();
+  }
+
+  function drawValve(x, y, pipe, index) {
+    const isOpen = pipe.valveOpen;
+    const angle = pipe.valveAngle;
+    const isHovered = hoveredValve === index && !isOpen;
+
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.scale(pipe.hoverScale * pipe.scale, pipe.hoverScale * pipe.scale);
+    ctx.translate(-x, -y);
+
+    // Valve glow on hover
+    if (isHovered) {
+      ctx.shadowColor = COLORS.cyan;
+      ctx.shadowBlur = 12;
+    }
+
+    // Valve body
+    const valveGradient = ctx.createRadialGradient(x - 5, y - 5, 0, x, y, VALVE_SIZE / 2);
+    if (isOpen) {
+      valveGradient.addColorStop(0, '#6EDCD5');
+      valveGradient.addColorStop(1, COLORS.cyan);
+    } else if (isHovered) {
+      valveGradient.addColorStop(0, COLORS.cyanHover);
+      valveGradient.addColorStop(1, COLORS.borderStrong);
+    } else {
+      valveGradient.addColorStop(0, '#6A6A66');
+      valveGradient.addColorStop(1, COLORS.borderSubtle);
+    }
+    ctx.fillStyle = valveGradient;
+    ctx.strokeStyle = isOpen ? COLORS.cyanHover : (isHovered ? COLORS.cyan : COLORS.borderStrong);
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(x, y, VALVE_SIZE / 2, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.shadowBlur = 0;
+
+    // Valve handle with rotation
+    ctx.strokeStyle = '#FFFFFF';
+    ctx.lineWidth = 4;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    const handleLen = VALVE_SIZE / 2 - 6;
+    ctx.moveTo(x, y);
+    ctx.lineTo(x + Math.cos(angle) * handleLen, y + Math.sin(angle) * handleLen);
+    ctx.stroke();
+
+    // Center dot
+    ctx.fillStyle = '#FFFFFF';
+    ctx.beginPath();
+    ctx.arc(x, y, 5, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.restore();
+  }
+
+  function drawAnswerBox(index) {
+    const pipe = pipes[index];
+    const y = pipe.y - ANSWER_BOX_HEIGHT / 2;
+    const choice = pipe.choice;
+    const isEnding = gameEnding && endingPipe === pipe;
+    const isCorrect = choice.is_correct;
+
+    ctx.save();
+    ctx.translate(ANSWER_BOX_X + ANSWER_BOX_WIDTH / 2, pipe.y);
+    ctx.scale(pipe.scale, pipe.scale);
+    ctx.translate(-(ANSWER_BOX_X + ANSWER_BOX_WIDTH / 2), -pipe.y);
+
+    // Box shadow
+    ctx.fillStyle = 'rgba(0,0,0,0.25)';
+    ctx.beginPath();
+    ctx.roundRect(ANSWER_BOX_X + 3, y + 3, ANSWER_BOX_WIDTH, ANSWER_BOX_HEIGHT, 12);
+    ctx.fill();
+
+    // Box background - changes color when ending
+    let bgColor = COLORS.bgSurface;
+    let borderColor = COLORS.borderStrong;
+    if (isEnding) {
+      bgColor = isCorrect ? '#E8F8E5' : '#FDECEB';
+      borderColor = isCorrect ? COLORS.success : COLORS.error;
+    } else if (pipe.valveOpen) {
+      borderColor = COLORS.cyan;
+    }
+
+    ctx.fillStyle = bgColor;
+    ctx.strokeStyle = borderColor;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.roundRect(ANSWER_BOX_X, y, ANSWER_BOX_WIDTH, ANSWER_BOX_HEIGHT, 12);
+    ctx.fill();
+    ctx.stroke();
+
+    // Answer text with word wrap using Nunito font
+    const text = choice.text;
+    const fontSize = 14;
+    const lineHeight = fontSize * 1.4;
+    const maxWidth = ANSWER_BOX_WIDTH - 20;
+    const padding = 10;
+
+    ctx.font = `500 ${fontSize}px 'Nunito', sans-serif`;
+    ctx.fillStyle = isEnding ? (isCorrect ? '#2B5A1E' : '#8B2920') : COLORS.textPrimary;
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+
+    // Word wrap
+    const words = text.split(' ');
+    const lines = [];
+    let currentLine = words[0];
+
+    for (let i = 1; i < words.length; i++) {
+      const testLine = currentLine + ' ' + words[i];
+      const metrics = ctx.measureText(testLine);
+      if (metrics.width > maxWidth) {
+        lines.push(currentLine);
+        currentLine = words[i];
+      } else {
+        currentLine = testLine;
+      }
+    }
+    lines.push(currentLine);
+
+    // Center text vertically
+    const totalHeight = lines.length * lineHeight;
+    let textY = y + (ANSWER_BOX_HEIGHT - totalHeight) / 2;
+
+    for (const line of lines) {
+      ctx.fillText(line, ANSWER_BOX_X + padding, textY);
+      textY += lineHeight;
+    }
+
+    ctx.restore();
+  }
+
+  function drawWaterBubbles() {
+    for (const bubble of waterBubbles) {
+      const shimmer = 0.8 + Math.sin(time * 8 + bubble.shimmerOffset) * 0.2;
+      ctx.globalAlpha = bubble.alpha * shimmer;
+
+      // Gradient bubble
+      const gradient = ctx.createRadialGradient(
+        bubble.x - bubble.size * 0.3, bubble.y - bubble.size * 0.3, 0,
+        bubble.x, bubble.y, bubble.size
+      );
+      gradient.addColorStop(0, '#FFFFFF');
+      gradient.addColorStop(0.4, COLORS.waterLight);
+      gradient.addColorStop(1, COLORS.water);
+
+      ctx.fillStyle = gradient;
+      ctx.beginPath();
+      ctx.arc(bubble.x, bubble.y, bubble.size, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  function drawWaterDroplets() {
+    for (const droplet of waterDroplets) {
+      ctx.globalAlpha = droplet.alpha;
+      ctx.fillStyle = COLORS.waterLight;
+      ctx.beginPath();
+      ctx.arc(droplet.x, droplet.y, droplet.size, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  function drawSplashParticles() {
+    for (const p of splashParticles) {
+      ctx.globalAlpha = p.alpha;
+      ctx.fillStyle = p.color;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  function handleInput(e) {
+    // Keyboard input not used for this game - uses mouse clicks
+  }
+
+  // Mouse move handler for hover effects
+  canvas.addEventListener('mousemove', (e) => {
+    if (gameState !== 'playing') return;
+
+    const { x, y } = screenToLogical(e.clientX, e.clientY);
+    hoveredValve = -1;
+
+    for (let i = 0; i < pipes.length; i++) {
+      const pipe = pipes[i];
+      const dx = x - VALVE_X;
+      const dy = y - pipe.y;
+      const distance = Math.sqrt(dx * dx + dy * dy);
+
+      if (distance <= VALVE_SIZE / 2 + 5) {
+        hoveredValve = i;
+        canvas.style.cursor = 'pointer';
+        return;
+      }
+    }
+    canvas.style.cursor = 'default';
+  });
+
+  canvas.addEventListener('mouseleave', () => {
+    hoveredValve = -1;
+    canvas.style.cursor = 'default';
+  });
+
+  // Mouse click handler for valves
+  canvas.addEventListener('click', (e) => {
+    if (gameState !== 'playing' || gameEnding) return;
+
+    // Initialize audio on first click
+    initAudio();
+
+    const { x, y } = screenToLogical(e.clientX, e.clientY);
+
+    // Check if clicked on any valve
+    for (let i = 0; i < pipes.length; i++) {
+      const pipe = pipes[i];
+      const dx = x - VALVE_X;
+      const dy = y - pipe.y;
+      const distance = Math.sqrt(dx * dx + dy * dy);
+
+      if (distance <= VALVE_SIZE / 2 + 5) {
+        // Play valve click sound
+        playSound('valve');
+
+        // Close all other valves
+        for (let j = 0; j < pipes.length; j++) {
+          if (j !== i) {
+            pipes[j].valveOpen = false;
+            pipes[j].waterFlow = 0;
+          }
+        }
+        // Open this valve
+        pipes[i].valveOpen = true;
+        selectedPipe = i;
+        break;
+      }
+    }
+  });
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 4: GAME LOOP - DO NOT MODIFY                                      ║
+  // ║  Standard loop with responsive scaling and DPR support.                    ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  let lastTime = performance.now();
+
+  function gameLoop(now) {
+    const dt = Math.min((now - lastTime) / 1000, 0.05); // Cap at 50ms
+    lastTime = now;
+
+    // Apply transform for logical coordinate system
+    ctx.setTransform(scale * dpr, 0, 0, scale * dpr, 0, 0);
+
+    if (gameState === 'playing') {
+      updateGame(dt);
+      drawGame();
+    } else {
+      drawGame(); // Draw game state behind overlay
+      drawEndScreen(dt);
+    }
+
+    // Reset transform for next frame
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+    requestAnimationFrame(gameLoop);
+  }
+
+  // Input handlers
+  document.addEventListener('keydown', (e) => {
+    if (gameState === 'ended' && (e.code === 'KeyR')) {
+      // Restart game
+      gameState = 'playing';
+      gameResult = null;
+      gameExplanation = '';
+      confettiParticles = [];
+      initGame();
+      return;
+    }
+    handleInput(e);
+  });
+
+  document.addEventListener('keyup', (e) => {
+    // Optional: handle key release in your handleInput
+  });
+
+  // Canvas click handler for end screen buttons
+  canvas.addEventListener('click', (e) => {
+    if (gameState !== 'ended') return;
+
+    const { x, y } = screenToLogical(e.clientX, e.clientY);
+
+    if (gameResult) {
+      // Correct answer: check both buttons
+      if (pointInRect(x, y, restartButton)) {
+        gameState = 'playing';
+        gameResult = null;
+        gameExplanation = '';
+        confettiParticles = [];
+        initGame();
+        return;
+      }
+      if (pointInRect(x, y, nextButton)) {
+        // Notify parent to go to next question
+        if (window.parent && window.parent !== window) {
+          window.parent.postMessage({ type: 'quiz-next' }, '*');
+        }
+        return;
+      }
+    } else {
+      // Wrong answer: check centered restart button
+      const centeredRestart = { x: W / 2 - 75, y: H / 2 + 60, w: 150, h: 48 };
+      if (pointInRect(x, y, centeredRestart)) {
+        gameState = 'playing';
+        gameResult = null;
+        gameExplanation = '';
+        confettiParticles = [];
+        initGame();
+        return;
+      }
+    }
+  });
+
+
+  // Cursor change handler for end screen buttons
+  canvas.addEventListener('mousemove', (e) => {
+    if (gameState !== 'ended') {
+      canvas.style.cursor = 'default';
+      return;
+    }
+    const { x, y } = screenToLogical(e.clientX, e.clientY);
+    if (gameResult) {
+      if (pointInRect(x, y, restartButton) || pointInRect(x, y, nextButton)) {
+        canvas.style.cursor = 'pointer';
+        return;
+      }
+    } else {
+      const centeredRestart = { x: W / 2 - 75, y: H / 2 + 60, w: 150, h: 48 };
+      if (pointInRect(x, y, centeredRestart)) {
+        canvas.style.cursor = 'pointer';
+        return;
+      }
+    }
+    canvas.style.cursor = 'default';
+  });
+
+  // Handle resize
+  window.addEventListener('resize', resizeCanvas);
+
+  // Initialize
+  resizeCanvas();
+  initGame();
+  requestAnimationFrame(gameLoop);
+  </script>
+</body>
+</html>

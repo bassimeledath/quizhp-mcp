@@ -1,0 +1,1146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Pokemon Battle Arena</title>
+  <link href="https://fonts.googleapis.com/css2?family=Belanosima:wght@400;600;700&family=Nunito+Sans:wght@400;500;600;700&family=Nunito:wght@400;500;600&display=swap" rel="stylesheet">
+  <!--
+  ╔══════════════════════════════════════════════════════════════════════════════╗
+  ║  GAME FACTORY TEMPLATE                                                        ║
+  ║  This template enforces critical invariants. Follow the section markers.      ║
+  ╚══════════════════════════════════════════════════════════════════════════════╝
+  -->
+  <style>
+    /* ═══════════════════════════════════════════════════════════════════════════
+       BASE STYLES - Can be extended, not removed
+       ═══════════════════════════════════════════════════════════════════════════ */
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+    }
+    body {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      background: #1C1C1A;
+      font-family: 'Nunito Sans', system-ui, -apple-system, sans-serif;
+    }
+    #gameCanvas {
+      background: #2A2A27;
+      border-radius: 12px;
+      display: block;
+    }
+  </style>
+</head>
+<body>
+  <!-- ═══════════════════════════════════════════════════════════════════════════
+       CANVAS - Sized dynamically to fill available space
+       ═══════════════════════════════════════════════════════════════════════════ -->
+  <canvas id="gameCanvas"></canvas>
+
+  <script>
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 1: QUESTION PLACEHOLDER - DO NOT MODIFY FORMAT                    ║
+  // ║  Platform replaces this at runtime. Use these exact 60-char answers.       ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  const QUESTION = {
+    type: "mcq",
+    prompt: "Sample question text",
+    choices: [
+      { text: "This is sample answer A which is long enough to test text overflow", is_correct: true, explanation: "Why A is correct" },
+      { text: "This is sample answer B which is long enough to test text overflow", is_correct: false, explanation: "Why B is wrong" },
+      { text: "This is sample answer C which is long enough to test text overflow", is_correct: false, explanation: "Why C is wrong" },
+      { text: "This is sample answer D which is long enough to test text overflow", is_correct: false, explanation: "Why D is wrong" }
+    ],
+    isLastQuestion: false
+  };
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 2: ENGINE CORE - DO NOT MODIFY                                    ║
+  // ║  Standard engine interface and end screen. This is sacred.                 ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  const canvas = document.getElementById('gameCanvas');
+  const ctx = canvas.getContext('2d');
+
+  // Logical dimensions (game code works in this coordinate space)
+  const W = 720, H = 540;
+
+  // Scaling state (computed on resize)
+  let scale = 1;
+  let dpr = 1;
+
+  let gameState = 'playing'; // 'playing' | 'ended'
+  let gameResult = null;     // true (correct) | false (wrong)
+  let gameExplanation = '';
+  let endScreenTime = 0;
+  let confettiParticles = [];
+
+  // End screen button bounds (logical coordinates)
+  const restartButton = { x: W / 2 - 170, y: H / 2 + 60, w: 150, h: 48 };
+  const nextButton = { x: W / 2 + 20, y: H / 2 + 60, w: 150, h: 48 };
+
+  /** Check if point is inside rectangle */
+  function pointInRect(px, py, rect) {
+    return px >= rect.x && px <= rect.x + rect.w &&
+           py >= rect.y && py <= rect.y + rect.h;
+  }
+
+  /** Draw a styled button */
+  function drawButton(rect, label, color, pulse) {
+    const p = pulse ? 1 + Math.sin(endScreenTime * 4) * 0.03 : 1;
+    ctx.save();
+    ctx.translate(rect.x + rect.w / 2, rect.y + rect.h / 2);
+    ctx.scale(p, p);
+    ctx.translate(-(rect.x + rect.w / 2), -(rect.y + rect.h / 2));
+
+    // Button background
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.roundRect(rect.x, rect.y, rect.w, rect.h, 12);
+    ctx.fill();
+
+    // Button text
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = 'bold 18px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, rect.x + rect.w / 2, rect.y + rect.h / 2);
+
+    ctx.restore();
+  }
+
+  /**
+   * Resize canvas to fill available space with proper DPR scaling.
+   * Maintains logical coordinate system (720×540).
+   */
+  function resizeCanvas() {
+    dpr = window.devicePixelRatio || 1;
+
+    // Get available space
+    const availW = window.innerWidth;
+    const availH = window.innerHeight;
+
+    // Calculate scale to fit logical space (720×540) in available space
+    const scaleX = availW / W;
+    const scaleY = availH / H;
+    scale = Math.min(scaleX, scaleY);
+
+    // Physical canvas buffer (DPR-scaled for crisp rendering)
+    canvas.width = W * scale * dpr;
+    canvas.height = H * scale * dpr;
+
+    // CSS display size
+    canvas.style.width = (W * scale) + 'px';
+    canvas.style.height = (H * scale) + 'px';
+  }
+
+  /**
+   * Convert screen coordinates to logical coordinates.
+   * Use this for mouse/click events to get positions in 720×540 space.
+   */
+  function screenToLogical(screenX, screenY) {
+    const rect = canvas.getBoundingClientRect();
+    return {
+      x: (screenX - rect.left) * (W / rect.width),
+      y: (screenY - rect.top) * (H / rect.height)
+    };
+  }
+
+  const engine = {
+    /** Call this to end the game. DO NOT draw your own end screen. */
+    end(isCorrect, explanation) {
+      if (gameState === 'ended') return;
+      gameState = 'ended';
+      gameResult = isCorrect;
+      gameExplanation = explanation || '';
+      endScreenTime = 0;
+
+      // Spawn confetti for correct answers
+      if (isCorrect) {
+        for (let i = 0; i < 50; i++) {
+          confettiParticles.push({
+            x: W / 2,
+            y: H / 2,
+            vx: (Math.random() - 0.5) * 600,
+            vy: -Math.random() * 400 - 100,
+            size: 4 + Math.random() * 6,
+            color: ['#FFD700', '#FF6B6B', '#4ECDC4', '#95E1D3', '#F38181'][Math.floor(Math.random() * 5)],
+            rotation: Math.random() * Math.PI * 2,
+            rotationSpeed: (Math.random() - 0.5) * 10
+          });
+        }
+      }
+
+      // Notify parent frame
+      if (window.parent && window.parent !== window) {
+        window.parent.postMessage({
+          type: 'quiz-end',
+          isCorrect: isCorrect,
+          explanation: explanation || ''
+        }, '*');
+      }
+    }
+  };
+
+  /** STANDARD END SCREEN - DO NOT MODIFY */
+  function drawEndScreen(dt) {
+    endScreenTime += dt;
+
+    // Update confetti
+    confettiParticles = confettiParticles.filter(p => {
+      p.vy += 800 * dt; // gravity
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.rotation += p.rotationSpeed * dt;
+      p.vx *= 0.99;
+      return p.y < H + 50;
+    });
+
+    // Dark overlay
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
+    ctx.fillRect(0, 0, W, H);
+
+    // Draw confetti
+    confettiParticles.forEach(p => {
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rotation);
+      ctx.fillStyle = p.color;
+      ctx.fillRect(-p.size / 2, -p.size / 4, p.size, p.size / 2);
+      ctx.restore();
+    });
+
+    // Result emoji
+    ctx.font = '72px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(gameResult ? '🎉' : '😢', W / 2, H / 2 - 50);
+
+    // Result text
+    ctx.fillStyle = gameResult ? '#4ADE80' : '#F87171';
+    ctx.font = 'bold 36px system-ui, sans-serif';
+    ctx.fillText(gameResult ? 'Correct!' : 'Wrong!', W / 2, H / 2 + 20);
+
+    // Buttons
+    if (gameResult) {
+      // Correct: show both Restart and Next/Finish
+      drawButton(restartButton, 'Restart', '#E87A3E', true);
+      const nextLabel = QUESTION.isLastQuestion ? 'Finish' : 'Next';
+      drawButton(nextButton, nextLabel, '#4ECDC4', true);
+    } else {
+      // Wrong: show only centered Restart button
+      const centeredRestart = { x: W / 2 - 75, y: H / 2 + 60, w: 150, h: 48 };
+      drawButton(centeredRestart, 'Restart', '#E87A3E', true);
+    }
+  }
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 3: YOUR GAME CODE - IMPLEMENT THESE FUNCTIONS                     ║
+  // ║  Pokemon Battle Arena - Click answer buttons to attack!                    ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+
+  // Theme colors - neutral scheme that works in both light and dark modes
+  const THEME = {
+    bg: '#2D3748',        // Neutral slate blue
+    bgDark: '#1A202C',    // Darker slate
+    bgSky: '#4A5E7A',     // Lighter slate blue for sky
+    panel: '#4A5568',     // Mid-tone slate
+    ink: '#F7FAFC',       // Off-white text
+    border: '#718096',    // Medium gray border
+    accent: '#E87A3E',
+    accentHover: '#D66B31',
+    good: '#6BBF59',
+    bad: '#E85D4A',
+    cyan: '#4ECDC4',
+    amber: '#F5A742',
+    shadowAlpha: 0.25,
+    hpBg: '#1A202C',
+    buttonBg: '#2D3748',
+    buttonBgHover: '#E87A3E'
+  };
+
+  // Reduced motion preference
+  const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  // Web Audio API for sounds
+  let audioCtx = null;
+  function initAudio() {
+    if (!audioCtx) {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    if (audioCtx.state === 'suspended') {
+      audioCtx.resume();
+    }
+  }
+
+  function playSound(type) {
+    if (!audioCtx || prefersReducedMotion) return;
+    try {
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+
+      if (type === 'attack') {
+        // Whoosh sound for projectile
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(400, audioCtx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(200, audioCtx.currentTime + 0.15);
+        gain.gain.setValueAtTime(0.15, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.15);
+        osc.start();
+        osc.stop(audioCtx.currentTime + 0.15);
+      } else if (type === 'impact_good') {
+        // Satisfying hit sound for correct
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(523, audioCtx.currentTime);
+        osc.frequency.setValueAtTime(659, audioCtx.currentTime + 0.08);
+        osc.frequency.setValueAtTime(784, audioCtx.currentTime + 0.16);
+        gain.gain.setValueAtTime(0.25, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.35);
+        osc.start();
+        osc.stop(audioCtx.currentTime + 0.35);
+      } else if (type === 'impact_bad') {
+        // Thud sound for wrong
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(150, audioCtx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(80, audioCtx.currentTime + 0.2);
+        gain.gain.setValueAtTime(0.2, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.2);
+        osc.start();
+        osc.stop(audioCtx.currentTime + 0.2);
+      } else if (type === 'hover') {
+        // Subtle click for button hover
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(600, audioCtx.currentTime);
+        gain.gain.setValueAtTime(0.05, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.03);
+        osc.start();
+        osc.stop(audioCtx.currentTime + 0.03);
+      } else if (type === 'click') {
+        // Click sound for button press
+        osc.type = 'square';
+        osc.frequency.setValueAtTime(800, audioCtx.currentTime);
+        gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.05);
+        osc.start();
+        osc.stop(audioCtx.currentTime + 0.05);
+      } else if (type === 'victory') {
+        // Victory fanfare
+        const notes = [523, 659, 784, 1047];
+        notes.forEach((freq, i) => {
+          const o = audioCtx.createOscillator();
+          const g = audioCtx.createGain();
+          o.connect(g);
+          g.connect(audioCtx.destination);
+          o.type = 'sine';
+          o.frequency.setValueAtTime(freq, audioCtx.currentTime + i * 0.1);
+          g.gain.setValueAtTime(0.2, audioCtx.currentTime + i * 0.1);
+          g.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + i * 0.1 + 0.3);
+          o.start(audioCtx.currentTime + i * 0.1);
+          o.stop(audioCtx.currentTime + i * 0.1 + 0.3);
+        });
+        return;
+      } else if (type === 'defeat') {
+        // Sad descending tone
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(400, audioCtx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(200, audioCtx.currentTime + 0.4);
+        gain.gain.setValueAtTime(0.15, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.4);
+        osc.start();
+        osc.stop(audioCtx.currentTime + 0.4);
+      }
+    } catch (e) {
+      // Silently fail if audio not supported
+    }
+  }
+
+  // Game state variables
+  let state = {};
+
+  function initGame() {
+    state = {
+      // Characters
+      playerEmoji: '🐉',
+      opponentEmoji: '👾',
+      playerX: 80,
+      playerY: 180,
+      opponentX: 560,
+      opponentY: 50,
+      characterSize: 64,
+
+      // Animation
+      idleTime: 0,
+      attacking: false,
+      attackTimer: 0,
+      shaking: false,
+      shakeTimer: 0,
+      targetIsOpponent: true,
+
+      // Entrance animation state
+      entranceTime: 0,
+      playerEntranceScale: prefersReducedMotion ? 1 : 0,
+      opponentEntranceScale: prefersReducedMotion ? 1 : 0,
+      playerEntranceY: prefersReducedMotion ? 0 : -50,
+      opponentEntranceY: prefersReducedMotion ? 0 : -50,
+      buttonsEntranceScale: [1, 1, 1, 1], // All buttons same size always
+      entranceComplete: prefersReducedMotion,
+
+      // HP
+      playerHP: 1.0,
+      opponentHP: 1.0,
+
+      // Buttons (2x2 grid in bottom panel)
+      buttons: [],
+      hoveredButton: -1,
+      lastHoveredButton: -1,
+      answered: false,
+
+      // Particles
+      particles: [],
+      bgElements: [],
+      impactRings: [],
+
+      // Projectiles
+      projectiles: []
+    };
+
+    // Create floating background elements
+    const bgEmojis = ['🍃', '☁️', '💨', '✨', '🌸'];
+    for (let i = 0; i < 10; i++) {
+      state.bgElements.push({
+        emoji: bgEmojis[Math.floor(Math.random() * bgEmojis.length)],
+        x: Math.random() * W,
+        y: Math.random() * 250,
+        speed: 10 + Math.random() * 30,
+        opacity: 0.15 + Math.random() * 0.15,
+        verticalFloat: Math.random() * Math.PI * 2,
+        verticalSpeed: 0.3 + Math.random() * 0.5
+      });
+    }
+
+    // Create answer buttons (2x2 grid)
+    const panelY = 260;
+    const buttonW = 340;
+    const buttonH = 120;
+    const gapX = 20;
+    const gapY = 15;
+    const startX = (W - (buttonW * 2 + gapX)) / 2;
+    const startY = panelY + 15;
+
+    for (let i = 0; i < 4; i++) {
+      const col = i % 2;
+      const row = Math.floor(i / 2);
+      state.buttons.push({
+        x: Math.floor(startX + col * (buttonW + gapX)),
+        y: Math.floor(startY + row * (buttonH + gapY)),
+        w: buttonW,
+        h: buttonH,
+        index: i,
+        pulse: 0
+      });
+    }
+  }
+
+  // Spring easing function for entrance
+  function springEase(t) {
+    return 1 + Math.sin(t * Math.PI * 2) * 0.2 * (1 - t);
+  }
+
+  function updateGame(dt) {
+    if (gameState !== 'playing') return;
+
+    state.idleTime += dt;
+
+    // Entrance animations
+    if (!state.entranceComplete) {
+      state.entranceTime += dt;
+
+      // Player entrance (starts at 0ms)
+      const playerT = Math.min(state.entranceTime / 0.4, 1);
+      if (playerT < 1) {
+        state.playerEntranceScale = playerT * springEase(playerT);
+        state.playerEntranceY = -50 * (1 - playerT);
+      } else {
+        state.playerEntranceScale = 1;
+        state.playerEntranceY = 0;
+      }
+
+      // Opponent entrance (starts at 150ms)
+      const opponentDelay = 0.15;
+      const opponentT = Math.max(0, Math.min((state.entranceTime - opponentDelay) / 0.4, 1));
+      if (opponentT > 0 && opponentT < 1) {
+        state.opponentEntranceScale = opponentT * springEase(opponentT);
+        state.opponentEntranceY = -50 * (1 - opponentT);
+      } else if (opponentT >= 1) {
+        state.opponentEntranceScale = 1;
+        state.opponentEntranceY = 0;
+      }
+
+      // Check if entrance complete (characters only)
+      if (state.entranceTime > 0.55) {
+        state.entranceComplete = true;
+      }
+    }
+
+    // Update background elements
+    for (const elem of state.bgElements) {
+      elem.x += elem.speed * dt;
+      elem.verticalFloat += elem.verticalSpeed * dt;
+      if (elem.x > W + 30) {
+        elem.x = -30;
+        elem.y = Math.random() * 250;
+      }
+    }
+
+    // Update button pulse with hover sound
+    for (const btn of state.buttons) {
+      if (btn.index === state.hoveredButton) {
+        btn.pulse = Math.min(1, btn.pulse + dt * 4);
+      } else {
+        btn.pulse = Math.max(0, btn.pulse - dt * 4);
+      }
+    }
+
+    // Play hover sound when hovering a new button
+    if (state.hoveredButton !== -1 && state.hoveredButton !== state.lastHoveredButton && !state.answered) {
+      playSound('hover');
+    }
+    state.lastHoveredButton = state.hoveredButton;
+
+    // Update impact rings
+    for (let i = state.impactRings.length - 1; i >= 0; i--) {
+      const ring = state.impactRings[i];
+      ring.progress += dt * 2;
+      if (ring.progress >= 1) {
+        state.impactRings.splice(i, 1);
+      }
+    }
+
+    // Update projectiles
+    for (let i = state.projectiles.length - 1; i >= 0; i--) {
+      const proj = state.projectiles[i];
+      proj.progress += dt * proj.speed;
+
+      // Add trail effect
+      proj.trail.push({ x: proj.x, y: proj.y, age: 0 });
+      if (proj.trail.length > 8) proj.trail.shift();
+      for (const t of proj.trail) t.age += dt * 3;
+
+      // Move projectile toward target
+      proj.x += (proj.targetX - proj.x) * 0.15;
+      proj.y += (proj.targetY - proj.y) * 0.15;
+
+      if (proj.progress >= 1) {
+        state.projectiles.splice(i, 1);
+
+        // Play impact sound
+        playSound(proj.isGood ? 'impact_good' : 'impact_bad');
+
+        // Create impact ring
+        state.impactRings.push({
+          x: proj.targetX,
+          y: proj.targetY,
+          progress: 0,
+          isGood: proj.isGood
+        });
+
+        // Create enhanced impact particles
+        const particleCount = proj.isGood ? 20 : 12;
+        for (let j = 0; j < particleCount; j++) {
+          const angle = (Math.PI * 2 * j) / particleCount + Math.random() * 0.3;
+          const speed = proj.isGood ? (60 + Math.random() * 80) : (40 + Math.random() * 40);
+          state.particles.push({
+            x: proj.targetX,
+            y: proj.targetY,
+            vx: Math.cos(angle) * speed,
+            vy: Math.sin(angle) * speed - (proj.isGood ? 50 : 0),
+            life: proj.isGood ? 0.8 : 0.5,
+            maxLife: proj.isGood ? 0.8 : 0.5,
+            size: proj.isGood ? (4 + Math.random() * 5) : (3 + Math.random() * 3),
+            isGood: proj.isGood,
+            rotation: Math.random() * Math.PI * 2,
+            rotationSpeed: (Math.random() - 0.5) * 8
+          });
+        }
+
+        // Add sparkles for correct answer
+        if (proj.isGood) {
+          for (let j = 0; j < 8; j++) {
+            const angle = Math.random() * Math.PI * 2;
+            state.particles.push({
+              x: proj.targetX + (Math.random() - 0.5) * 40,
+              y: proj.targetY + (Math.random() - 0.5) * 40,
+              vx: Math.cos(angle) * 20,
+              vy: Math.sin(angle) * 20 - 30,
+              life: 0.6,
+              maxLife: 0.6,
+              size: 2 + Math.random() * 2,
+              isGood: true,
+              isSparkle: true
+            });
+          }
+        }
+      }
+    }
+
+    // Update particles
+    for (let i = state.particles.length - 1; i >= 0; i--) {
+      const p = state.particles[i];
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.vy += (p.isSparkle ? 60 : 120) * dt; // gravity (lighter for sparkles)
+      if (p.rotation !== undefined) {
+        p.rotation += (p.rotationSpeed || 0) * dt;
+      }
+      p.life -= dt;
+      if (p.life <= 0) state.particles.splice(i, 1);
+    }
+
+    // Attack animation
+    if (state.attacking) {
+      state.attackTimer -= dt;
+      if (state.attackTimer <= 0) {
+        state.attacking = false;
+        state.shaking = true;
+        state.shakeTimer = 0.4;
+
+        if (state.targetIsOpponent) {
+          state.opponentHP = 0; // Opponent defeated on correct answer
+        } else {
+          state.playerHP = Math.max(0, state.playerHP - 0.5);
+        }
+      }
+    }
+
+    // Shake animation
+    if (state.shaking) {
+      state.shakeTimer -= dt;
+      if (state.shakeTimer <= 0) state.shaking = false;
+    }
+  }
+
+  function drawGame() {
+    // Draw background gradient - lighter at top (sky-like)
+    const gradient = ctx.createLinearGradient(0, 0, 0, 260);
+    gradient.addColorStop(0, THEME.bgSky);
+    gradient.addColorStop(0.6, THEME.bg);
+    gradient.addColorStop(1, THEME.bgDark);
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, W, 260);
+
+    // Draw ground line
+    ctx.strokeStyle = THEME.border;
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(0, 255);
+    ctx.lineTo(W, 255);
+    ctx.stroke();
+
+    // Draw floating background elements
+    ctx.font = '24px Arial';
+    ctx.textBaseline = 'top';
+    for (const elem of state.bgElements) {
+      const verticalOffset = Math.sin(elem.verticalFloat) * 12;
+      ctx.globalAlpha = elem.opacity;
+      ctx.fillText(elem.emoji, Math.floor(elem.x), Math.floor(elem.y + verticalOffset));
+    }
+    ctx.globalAlpha = 1;
+
+    // Character animations
+    const playerBob = Math.sin(state.idleTime * 2.5) * 4;
+    const opponentBob = Math.sin(state.idleTime * 2.8 + Math.PI) * 4;
+
+    let playerOffsetX = 0, playerOffsetY = playerBob;
+    let opponentOffsetX = 0, opponentOffsetY = opponentBob;
+
+    // Shake effect
+    if (state.shaking) {
+      const intensity = state.shakeTimer / 0.4;
+      const shakeAmount = 6 * intensity;
+      const offset = Math.sin(state.shakeTimer * 60) * shakeAmount;
+      if (state.targetIsOpponent) {
+        opponentOffsetX = offset;
+      } else {
+        playerOffsetX = offset;
+      }
+    }
+
+    // Draw platform shadows
+    const drawPlatformShadow = (x, y, s) => {
+      ctx.fillStyle = `rgba(0, 0, 0, ${THEME.shadowAlpha * s})`;
+      ctx.beginPath();
+      ctx.ellipse(x + 32, y + 65, 40 * s, 10 * s, 0, 0, Math.PI * 2);
+      ctx.fill();
+    };
+
+    drawPlatformShadow(state.playerX, state.playerY, 1 - playerOffsetY * 0.01);
+    drawPlatformShadow(state.opponentX, state.opponentY, 1 - opponentOffsetY * 0.01);
+
+    // Draw HP bars
+    const drawHPBar = (x, y, hp, label) => {
+      const w = 140, h = 18;
+
+      // Background with rounded corners
+      ctx.fillStyle = THEME.border;
+      ctx.beginPath();
+      ctx.roundRect(x - 2, y - 2, w + 4, h + 4, 4);
+      ctx.fill();
+      ctx.fillStyle = THEME.hpBg;
+      ctx.beginPath();
+      ctx.roundRect(x, y, w, h, 3);
+      ctx.fill();
+
+      // HP fill with gradient
+      const hpWidth = Math.floor((w - 4) * hp);
+      const hpGradient = ctx.createLinearGradient(x + 2, y + 2, x + 2, y + h - 2);
+      const color = hp > 0.3 ? THEME.good : THEME.bad;
+      hpGradient.addColorStop(0, color);
+      hpGradient.addColorStop(1, hp > 0.3 ? '#5AAF4A' : '#D04A3A');
+      ctx.fillStyle = hpGradient;
+      ctx.beginPath();
+      ctx.roundRect(x + 2, y + 2, hpWidth, h - 4, 2);
+      ctx.fill();
+
+      // Shine
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.25)';
+      ctx.beginPath();
+      ctx.roundRect(x + 2, y + 2, hpWidth, (h - 4) / 2, 2);
+      ctx.fill();
+
+      // Label with Nunito Sans font
+      ctx.font = "600 12px 'Nunito Sans', sans-serif";
+      ctx.fillStyle = THEME.ink;
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'bottom';
+      ctx.fillText(label, x, y - 4);
+    };
+
+    drawHPBar(550, 30, state.opponentHP, 'OPPONENT');
+    drawHPBar(30, 155, state.playerHP, 'YOU');
+
+    // Draw characters with entrance animation
+    ctx.textBaseline = 'top';
+
+    // Opponent with entrance animation (fades out when defeated)
+    const opponentScale = state.opponentEntranceScale;
+    const opponentEntranceY = state.opponentEntranceY;
+    const opponentAlpha = state.opponentHP > 0 ? 1 : Math.max(0, 1 - (state.shaking ? 0 : 1)); // Fade when dead
+    if (opponentScale > 0 && state.opponentHP > 0) {
+      ctx.save();
+      ctx.globalAlpha = opponentAlpha;
+      const opX = state.opponentX + state.characterSize / 2 + opponentOffsetX;
+      const opY = state.opponentY + state.characterSize / 2 + opponentOffsetY + opponentEntranceY;
+      ctx.translate(opX, opY);
+      ctx.scale(opponentScale, opponentScale);
+      ctx.font = `${state.characterSize}px Arial`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(state.opponentEmoji, 0, 0);
+      ctx.restore();
+      ctx.globalAlpha = 1;
+    }
+
+    // Player with entrance animation
+    const playerScale = state.playerEntranceScale;
+    const playerEntranceY = state.playerEntranceY;
+    if (playerScale > 0) {
+      ctx.save();
+      const plX = state.playerX + state.characterSize / 2 + playerOffsetX;
+      const plY = state.playerY + state.characterSize / 2 + playerOffsetY + playerEntranceY;
+      ctx.translate(plX, plY);
+      ctx.scale(playerScale, playerScale);
+      ctx.font = `${state.characterSize}px Arial`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(state.playerEmoji, 0, 0);
+      ctx.restore();
+    }
+
+    // Draw impact rings
+    for (const ring of state.impactRings) {
+      const progress = ring.progress;
+      const radius = 20 + progress * 60;
+      const opacity = (1 - progress) * 0.6;
+      ctx.strokeStyle = ring.isGood ?
+        `rgba(107, 191, 89, ${opacity})` :
+        `rgba(232, 93, 74, ${opacity})`;
+      ctx.lineWidth = 3 * (1 - progress);
+      ctx.beginPath();
+      ctx.arc(ring.x, ring.y, radius, 0, Math.PI * 2);
+      ctx.stroke();
+
+      // Second ring for more impact
+      if (ring.isGood) {
+        const radius2 = 10 + progress * 40;
+        ctx.strokeStyle = `rgba(245, 167, 66, ${opacity * 0.5})`;
+        ctx.lineWidth = 2 * (1 - progress);
+        ctx.beginPath();
+        ctx.arc(ring.x, ring.y, radius2, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+    }
+
+    // Draw projectiles with trail
+    for (const proj of state.projectiles) {
+      // Trail with QuizHP colors
+      for (const t of proj.trail) {
+        const opacity = (1 - t.age) * 0.5;
+        const size = 6 * (1 - t.age);
+        ctx.fillStyle = proj.isGood ?
+          `rgba(107, 191, 89, ${opacity})` :
+          `rgba(232, 93, 74, ${opacity})`;
+        ctx.beginPath();
+        ctx.arc(t.x, t.y, size, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      // Main projectile with enhanced glow
+      ctx.shadowColor = proj.isGood ? THEME.good : THEME.bad;
+      ctx.shadowBlur = 16;
+      ctx.fillStyle = proj.isGood ? THEME.good : THEME.bad;
+      ctx.beginPath();
+      ctx.arc(proj.x, proj.y, 10, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Outer glow ring
+      ctx.shadowBlur = 0;
+      ctx.strokeStyle = proj.isGood ?
+        'rgba(107, 191, 89, 0.4)' :
+        'rgba(232, 93, 74, 0.4)';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(proj.x, proj.y, 14, 0, Math.PI * 2);
+      ctx.stroke();
+
+      // Inner glow
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+      ctx.beginPath();
+      ctx.arc(proj.x, proj.y, 4, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Draw particles with enhanced rendering
+    for (const p of state.particles) {
+      const opacity = p.life / p.maxLife;
+
+      if (p.isSparkle) {
+        // Sparkle effect - draw as star shape
+        ctx.fillStyle = `rgba(245, 167, 66, ${opacity})`;
+        ctx.save();
+        ctx.translate(p.x, p.y);
+        ctx.rotate(p.rotation || 0);
+        ctx.beginPath();
+        for (let i = 0; i < 4; i++) {
+          const angle = (Math.PI / 2) * i;
+          ctx.moveTo(0, 0);
+          ctx.lineTo(Math.cos(angle) * p.size * 2, Math.sin(angle) * p.size * 2);
+        }
+        ctx.strokeStyle = `rgba(245, 167, 66, ${opacity})`;
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        ctx.restore();
+      } else {
+        // Regular particle with rotation
+        ctx.save();
+        ctx.translate(p.x, p.y);
+        if (p.rotation !== undefined) {
+          ctx.rotate(p.rotation);
+        }
+        ctx.fillStyle = p.isGood ?
+          `rgba(107, 191, 89, ${opacity})` :
+          `rgba(232, 93, 74, ${opacity})`;
+        ctx.fillRect(-p.size / 2, -p.size / 4, p.size, p.size / 2);
+        ctx.restore();
+      }
+    }
+
+    // Draw answer panel with subtle gradient
+    const panelGradient = ctx.createLinearGradient(0, 260, 0, H);
+    panelGradient.addColorStop(0, THEME.panel);
+    panelGradient.addColorStop(1, THEME.bg);
+    ctx.fillStyle = panelGradient;
+    ctx.fillRect(0, 260, W, H - 260);
+
+    // Subtle top border for panel
+    ctx.strokeStyle = THEME.border;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(0, 260);
+    ctx.lineTo(W, 260);
+    ctx.stroke();
+
+    // Draw answer buttons with entrance animation
+    ctx.textBaseline = 'top';
+    for (const btn of state.buttons) {
+      const choice = QUESTION.choices[btn.index];
+      if (!choice) continue;
+
+      const isHovered = state.hoveredButton === btn.index && !state.answered;
+
+      // Fixed button dimensions (all buttons same size)
+      const btnX = btn.x;
+      const btnY = btn.y;
+      const btnW = btn.w;
+      const btnH = btn.h;
+      const centerX = btnX + btnW / 2;
+      const centerY = btnY + btnH / 2;
+
+      // Button shadow for depth
+      if (isHovered) {
+        ctx.shadowColor = 'rgba(232, 122, 62, 0.25)';
+        ctx.shadowBlur = 12;
+        ctx.shadowOffsetY = 4;
+      }
+
+      // Button background with improved gradient
+      const btnGradient = ctx.createLinearGradient(btnX, btnY, btnX, btnY + btnH);
+      if (isHovered) {
+        btnGradient.addColorStop(0, THEME.accent);
+        btnGradient.addColorStop(1, THEME.accentHover);
+      } else {
+        btnGradient.addColorStop(0, THEME.buttonBg);
+        btnGradient.addColorStop(1, THEME.bgDark);
+      }
+      ctx.fillStyle = btnGradient;
+
+      ctx.beginPath();
+      ctx.roundRect(Math.floor(btnX), Math.floor(btnY), Math.floor(btnW), Math.floor(btnH), 12);
+      ctx.fill();
+
+      // Reset shadow
+      ctx.shadowColor = 'transparent';
+      ctx.shadowBlur = 0;
+      ctx.shadowOffsetY = 0;
+
+      // Button border with hover effect
+      ctx.strokeStyle = isHovered ? THEME.cyan : THEME.border;
+      ctx.lineWidth = isHovered ? 2.5 : 2;
+      ctx.stroke();
+
+      // Button text - word wrap to fit with Nunito font
+      const fontSize = 14;
+      const lineHeight = fontSize * 1.4;
+      ctx.fillStyle = isHovered ? '#FFFFFF' : '#F7FAFC';
+      ctx.font = `500 ${fontSize}px 'Nunito', sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+
+      // Word wrap
+      const words = choice.text.split(' ');
+      const maxWidth = btn.w - 24;
+      const lines = [];
+      let currentLine = '';
+
+      for (const word of words) {
+        const testLine = currentLine ? currentLine + ' ' + word : word;
+        if (ctx.measureText(testLine).width > maxWidth && currentLine) {
+          lines.push(currentLine);
+          currentLine = word;
+        } else {
+          currentLine = testLine;
+        }
+      }
+      if (currentLine) lines.push(currentLine);
+
+      const totalHeight = lines.length * lineHeight;
+      const textStartY = centerY - totalHeight / 2 + lineHeight / 2;
+
+      for (let i = 0; i < lines.length; i++) {
+        ctx.fillText(lines[i], centerX, Math.floor(textStartY + i * lineHeight));
+      }
+    }
+  }
+
+  function handleInput(e) {
+    if (gameState !== 'playing') return;
+    // Keyboard input not used - game is mouse/click based
+  }
+
+  // Mouse click handler
+  canvas.addEventListener('click', (e) => {
+    // Initialize audio on first click (required for iOS/Safari)
+    initAudio();
+
+    if (gameState !== 'playing' || state.answered) return;
+
+    const { x, y } = screenToLogical(e.clientX, e.clientY);
+
+    for (const btn of state.buttons) {
+      if (x >= btn.x && x <= btn.x + btn.w &&
+          y >= btn.y && y <= btn.y + btn.h) {
+        const choice = QUESTION.choices[btn.index];
+        if (!choice) return;
+
+        // Play click and attack sounds
+        playSound('click');
+        setTimeout(() => playSound('attack'), 50);
+
+        state.answered = true;
+        state.attacking = true;
+        state.attackTimer = 0.5;
+        state.targetIsOpponent = choice.is_correct;
+
+        // Create attack projectile
+        const startX = state.playerX + state.characterSize / 2;
+        const startY = state.playerY + state.characterSize / 3;
+        const endX = state.opponentX + state.characterSize / 2;
+        const endY = state.opponentY + state.characterSize / 2;
+
+        state.projectiles.push({
+          x: startX,
+          y: startY,
+          targetX: endX,
+          targetY: endY,
+          progress: 0,
+          speed: 2.5,
+          isGood: choice.is_correct,
+          trail: []
+        });
+
+        setTimeout(() => {
+          // Play victory or defeat sound
+          playSound(choice.is_correct ? 'victory' : 'defeat');
+          engine.end(choice.is_correct, choice.explanation);
+        }, 800);
+
+        break;
+      }
+    }
+  });
+
+  // Mouse move handler for hover effects
+  canvas.addEventListener('mousemove', (e) => {
+    if (gameState !== 'playing' || state.answered) return;
+
+    const { x, y } = screenToLogical(e.clientX, e.clientY);
+
+    state.hoveredButton = -1;
+    for (const btn of state.buttons) {
+      if (x >= btn.x && x <= btn.x + btn.w &&
+          y >= btn.y && y <= btn.y + btn.h) {
+        state.hoveredButton = btn.index;
+        break;
+      }
+    }
+  });
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 4: GAME LOOP - DO NOT MODIFY                                      ║
+  // ║  Standard loop with responsive scaling and DPR support.                    ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  let lastTime = performance.now();
+
+  function gameLoop(now) {
+    const dt = Math.min((now - lastTime) / 1000, 0.05); // Cap at 50ms
+    lastTime = now;
+
+    // Apply transform for logical coordinate system
+    ctx.setTransform(scale * dpr, 0, 0, scale * dpr, 0, 0);
+
+    if (gameState === 'playing') {
+      updateGame(dt);
+      drawGame();
+    } else {
+      drawGame(); // Draw game state behind overlay
+      drawEndScreen(dt);
+    }
+
+    // Reset transform for next frame
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+    requestAnimationFrame(gameLoop);
+  }
+
+  // Input handlers
+  document.addEventListener('keydown', (e) => {
+    if (gameState === 'ended' && (e.code === 'KeyR')) {
+      // Restart game
+      gameState = 'playing';
+      gameResult = null;
+      gameExplanation = '';
+      confettiParticles = [];
+      initGame();
+      return;
+    }
+    handleInput(e);
+  });
+
+  document.addEventListener('keyup', (e) => {
+    // Optional: handle key release in your handleInput
+  });
+
+  // Canvas click handler for end screen buttons
+  canvas.addEventListener('click', (e) => {
+    if (gameState !== 'ended') return;
+
+    const { x, y } = screenToLogical(e.clientX, e.clientY);
+
+    if (gameResult) {
+      // Correct answer: check both buttons
+      if (pointInRect(x, y, restartButton)) {
+        gameState = 'playing';
+        gameResult = null;
+        gameExplanation = '';
+        confettiParticles = [];
+        initGame();
+        return;
+      }
+      if (pointInRect(x, y, nextButton)) {
+        // Notify parent to go to next question
+        if (window.parent && window.parent !== window) {
+          window.parent.postMessage({ type: 'quiz-next' }, '*');
+        }
+        return;
+      }
+    } else {
+      // Wrong answer: check centered restart button
+      const centeredRestart = { x: W / 2 - 75, y: H / 2 + 60, w: 150, h: 48 };
+      if (pointInRect(x, y, centeredRestart)) {
+        gameState = 'playing';
+        gameResult = null;
+        gameExplanation = '';
+        confettiParticles = [];
+        initGame();
+        return;
+      }
+    }
+  });
+
+
+  // Cursor change handler for end screen buttons
+  canvas.addEventListener('mousemove', (e) => {
+    if (gameState !== 'ended') {
+      canvas.style.cursor = 'default';
+      return;
+    }
+    const { x, y } = screenToLogical(e.clientX, e.clientY);
+    if (gameResult) {
+      if (pointInRect(x, y, restartButton) || pointInRect(x, y, nextButton)) {
+        canvas.style.cursor = 'pointer';
+        return;
+      }
+    } else {
+      const centeredRestart = { x: W / 2 - 75, y: H / 2 + 60, w: 150, h: 48 };
+      if (pointInRect(x, y, centeredRestart)) {
+        canvas.style.cursor = 'pointer';
+        return;
+      }
+    }
+    canvas.style.cursor = 'default';
+  });
+
+  // Handle resize
+  window.addEventListener('resize', resizeCanvas);
+
+  // Initialize
+  resizeCanvas();
+  initGame();
+  requestAnimationFrame(gameLoop);
+  </script>
+</body>
+</html>

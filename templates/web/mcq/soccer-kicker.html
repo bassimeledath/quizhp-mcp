@@ -1,0 +1,1173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Soccer Kicker</title>
+  <link href="https://fonts.googleapis.com/css2?family=Belanosima:wght@400;600;700&family=Nunito+Sans:wght@400;500;600;700&family=Nunito:wght@400;500;600&display=swap" rel="stylesheet">
+  <!--
+  ╔══════════════════════════════════════════════════════════════════════════════╗
+  ║  GAME FACTORY TEMPLATE                                                        ║
+  ║  This template enforces critical invariants. Follow the section markers.      ║
+  ╚══════════════════════════════════════════════════════════════════════════════╝
+  -->
+  <style>
+    /* ═══════════════════════════════════════════════════════════════════════════
+       BASE STYLES - Can be extended, not removed
+       ═══════════════════════════════════════════════════════════════════════════ */
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+    }
+    body {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      background: #1C1C1A;
+      font-family: 'Nunito Sans', system-ui, -apple-system, sans-serif;
+    }
+    #gameCanvas {
+      background: #2A5A3B;
+      border-radius: 12px;
+      display: block;
+    }
+  </style>
+</head>
+<body>
+  <!-- ═══════════════════════════════════════════════════════════════════════════
+       CANVAS - Sized dynamically to fill available space
+       ═══════════════════════════════════════════════════════════════════════════ -->
+  <canvas id="gameCanvas"></canvas>
+
+  <script>
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 1: QUESTION PLACEHOLDER - DO NOT MODIFY FORMAT                    ║
+  // ║  Platform replaces this at runtime. Use these exact 60-char answers.       ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  const QUESTION = {
+    type: "mcq",
+    prompt: "Sample question text",
+    choices: [
+      { text: "This is sample answer A which is long enough to test text overflow", is_correct: true, explanation: "Why A is correct" },
+      { text: "This is sample answer B which is long enough to test text overflow", is_correct: false, explanation: "Why B is wrong" },
+      { text: "This is sample answer C which is long enough to test text overflow", is_correct: false, explanation: "Why C is wrong" },
+      { text: "This is sample answer D which is long enough to test text overflow", is_correct: false, explanation: "Why D is wrong" }
+    ],
+    isLastQuestion: false
+  };
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 2: ENGINE CORE - DO NOT MODIFY                                    ║
+  // ║  Standard engine interface and end screen. This is sacred.                 ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  const canvas = document.getElementById('gameCanvas');
+  const ctx = canvas.getContext('2d');
+
+  // Logical dimensions (game code works in this coordinate space)
+  const W = 720, H = 540;
+
+  // Scaling state (computed on resize)
+  let scale = 1;
+  let dpr = 1;
+
+  let gameState = 'playing'; // 'playing' | 'ended'
+  let gameResult = null;     // true (correct) | false (wrong)
+  let gameExplanation = '';
+  let endScreenTime = 0;
+  let confettiParticles = [];
+
+  // End screen button bounds (logical coordinates)
+  const restartButton = { x: W / 2 - 170, y: H / 2 + 60, w: 150, h: 48 };
+  const nextButton = { x: W / 2 + 20, y: H / 2 + 60, w: 150, h: 48 };
+
+  /** Check if point is inside rectangle */
+  function pointInRect(px, py, rect) {
+    return px >= rect.x && px <= rect.x + rect.w &&
+           py >= rect.y && py <= rect.y + rect.h;
+  }
+
+  /** Draw a styled button */
+  function drawButton(rect, label, color, pulse) {
+    const p = pulse ? 1 + Math.sin(endScreenTime * 4) * 0.03 : 1;
+    ctx.save();
+    ctx.translate(rect.x + rect.w / 2, rect.y + rect.h / 2);
+    ctx.scale(p, p);
+    ctx.translate(-(rect.x + rect.w / 2), -(rect.y + rect.h / 2));
+
+    // Button background
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.roundRect(rect.x, rect.y, rect.w, rect.h, 12);
+    ctx.fill();
+
+    // Button text
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = 'bold 18px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, rect.x + rect.w / 2, rect.y + rect.h / 2);
+
+    ctx.restore();
+  }
+
+  /**
+   * Resize canvas to fill available space with proper DPR scaling.
+   * Maintains logical coordinate system (720×540).
+   */
+  function resizeCanvas() {
+    dpr = window.devicePixelRatio || 1;
+
+    // Get available space
+    const availW = window.innerWidth;
+    const availH = window.innerHeight;
+
+    // Calculate scale to fit logical space (720×540) in available space
+    const scaleX = availW / W;
+    const scaleY = availH / H;
+    scale = Math.min(scaleX, scaleY);
+
+    // Physical canvas buffer (DPR-scaled for crisp rendering)
+    canvas.width = W * scale * dpr;
+    canvas.height = H * scale * dpr;
+
+    // CSS display size
+    canvas.style.width = (W * scale) + 'px';
+    canvas.style.height = (H * scale) + 'px';
+  }
+
+  /**
+   * Convert screen coordinates to logical coordinates.
+   * Use this for mouse/click events to get positions in 720×540 space.
+   */
+  function screenToLogical(screenX, screenY) {
+    const rect = canvas.getBoundingClientRect();
+    return {
+      x: (screenX - rect.left) * (W / rect.width),
+      y: (screenY - rect.top) * (H / rect.height)
+    };
+  }
+
+  const engine = {
+    /** Call this to end the game. DO NOT draw your own end screen. */
+    end(isCorrect, explanation) {
+      if (gameState === 'ended') return;
+      gameState = 'ended';
+      gameResult = isCorrect;
+      gameExplanation = explanation || '';
+      endScreenTime = 0;
+
+      // Spawn confetti for correct answers
+      if (isCorrect) {
+        for (let i = 0; i < 50; i++) {
+          confettiParticles.push({
+            x: W / 2,
+            y: H / 2,
+            vx: (Math.random() - 0.5) * 600,
+            vy: -Math.random() * 400 - 100,
+            size: 4 + Math.random() * 6,
+            color: ['#FFD700', '#FF6B6B', '#4ECDC4', '#95E1D3', '#F38181'][Math.floor(Math.random() * 5)],
+            rotation: Math.random() * Math.PI * 2,
+            rotationSpeed: (Math.random() - 0.5) * 10
+          });
+        }
+      }
+
+      // Notify parent frame
+      if (window.parent && window.parent !== window) {
+        window.parent.postMessage({
+          type: 'quiz-end',
+          isCorrect: isCorrect,
+          explanation: explanation || ''
+        }, '*');
+      }
+    }
+  };
+
+  /** STANDARD END SCREEN - DO NOT MODIFY */
+  function drawEndScreen(dt) {
+    endScreenTime += dt;
+
+    // Update confetti
+    confettiParticles = confettiParticles.filter(p => {
+      p.vy += 800 * dt; // gravity
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.rotation += p.rotationSpeed * dt;
+      p.vx *= 0.99;
+      return p.y < H + 50;
+    });
+
+    // Dark overlay
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
+    ctx.fillRect(0, 0, W, H);
+
+    // Draw confetti
+    confettiParticles.forEach(p => {
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rotation);
+      ctx.fillStyle = p.color;
+      ctx.fillRect(-p.size / 2, -p.size / 4, p.size, p.size / 2);
+      ctx.restore();
+    });
+
+    // Result emoji
+    ctx.font = '72px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(gameResult ? '🎉' : '😢', W / 2, H / 2 - 50);
+
+    // Result text
+    ctx.fillStyle = gameResult ? '#4ADE80' : '#F87171';
+    ctx.font = 'bold 36px system-ui, sans-serif';
+    ctx.fillText(gameResult ? 'Correct!' : 'Wrong!', W / 2, H / 2 + 20);
+
+    // Buttons
+    if (gameResult) {
+      // Correct: show both Restart and Next/Finish
+      drawButton(restartButton, 'Restart', '#E87A3E', true);
+      const nextLabel = QUESTION.isLastQuestion ? 'Finish' : 'Next';
+      drawButton(nextButton, nextLabel, '#4ECDC4', true);
+    } else {
+      // Wrong: show only centered Restart button
+      const centeredRestart = { x: W / 2 - 75, y: H / 2 + 60, w: 150, h: 48 };
+      drawButton(centeredRestart, 'Restart', '#E87A3E', true);
+    }
+  }
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 3: YOUR GAME CODE - IMPLEMENT THESE FUNCTIONS                     ║
+  // ║  Soccer Kicker - Click goals to kick ball and select answer                ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+
+  // === QUIZHP COLOR PALETTE ===
+  const COLORS = {
+    bgPrimary: '#FAFAF7',
+    bgSurface: '#FFFFFF',
+    textPrimary: '#2B2B28',
+    textSecondary: '#5A5A54',
+    orange: '#E87A3E',
+    orangeHover: '#D66B31',
+    amber: '#F5A742',
+    cyan: '#4ECDC4',
+    success: '#6BBF59',
+    error: '#E85D4A',
+    borderSubtle: '#E6E6E0',
+    borderStrong: '#D4D4CC',
+    grassDark: '#3D6B4A',
+    grassLight: '#4A7C59'
+  };
+
+  // Check for reduced motion preference
+  const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  // === SOUND SYSTEM (Web Audio API) ===
+  let audioCtx = null;
+  function getAudioContext() {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+    return audioCtx;
+  }
+
+  function playKickSound() {
+    try {
+      const ctx = getAudioContext();
+      // Punchy kick sound - thump with a bit of crack
+      const osc = ctx.createOscillator();
+      const osc2 = ctx.createOscillator();
+      const gain = ctx.createGain();
+      const gain2 = ctx.createGain();
+
+      osc.connect(gain);
+      osc2.connect(gain2);
+      gain.connect(ctx.destination);
+      gain2.connect(ctx.destination);
+
+      // Low thump
+      osc.frequency.setValueAtTime(180, ctx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(60, ctx.currentTime + 0.12);
+      gain.gain.setValueAtTime(0.35, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.15);
+
+      // High crack
+      osc2.type = 'square';
+      osc2.frequency.setValueAtTime(600, ctx.currentTime);
+      osc2.frequency.exponentialRampToValueAtTime(200, ctx.currentTime + 0.05);
+      gain2.gain.setValueAtTime(0.08, ctx.currentTime);
+      gain2.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.05);
+
+      osc.start(ctx.currentTime);
+      osc.stop(ctx.currentTime + 0.15);
+      osc2.start(ctx.currentTime);
+      osc2.stop(ctx.currentTime + 0.05);
+    } catch (e) {}
+  }
+
+  function playWhooshSound() {
+    try {
+      const ctx = getAudioContext();
+      // Whoosh sound for ball flying
+      const osc = ctx.createOscillator();
+      const filter = ctx.createBiquadFilter();
+      const gain = ctx.createGain();
+
+      osc.type = 'sawtooth';
+      filter.type = 'bandpass';
+      filter.frequency.setValueAtTime(800, ctx.currentTime);
+      filter.Q.setValueAtTime(2, ctx.currentTime);
+
+      osc.connect(filter);
+      filter.connect(gain);
+      gain.connect(ctx.destination);
+
+      osc.frequency.setValueAtTime(200, ctx.currentTime);
+      osc.frequency.linearRampToValueAtTime(100, ctx.currentTime + 0.3);
+      gain.gain.setValueAtTime(0.05, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.3);
+
+      osc.start(ctx.currentTime);
+      osc.stop(ctx.currentTime + 0.3);
+    } catch (e) {}
+  }
+
+  function playGoalSound(correct) {
+    try {
+      const ctx = getAudioContext();
+      if (correct) {
+        // Stadium cheering effect with rising arpeggio
+        [0, 0.08, 0.16, 0.24].forEach((delay, i) => {
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          osc.frequency.setValueAtTime([523, 659, 784, 1047][i], ctx.currentTime + delay);
+          gain.gain.setValueAtTime(0.18, ctx.currentTime + delay);
+          gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + delay + 0.35);
+          osc.start(ctx.currentTime + delay);
+          osc.stop(ctx.currentTime + delay + 0.35);
+        });
+        // Add a subtle celebration noise
+        setTimeout(() => {
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.type = 'sawtooth';
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          osc.frequency.setValueAtTime(880, ctx.currentTime);
+          gain.gain.setValueAtTime(0.05, ctx.currentTime);
+          gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.5);
+          osc.start(ctx.currentTime);
+          osc.stop(ctx.currentTime + 0.5);
+        }, 200);
+      } else {
+        // Net hit with sad descending tone
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.frequency.setValueAtTime(350, ctx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(80, ctx.currentTime + 0.4);
+        gain.gain.setValueAtTime(0.2, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.4);
+        osc.start(ctx.currentTime);
+        osc.stop(ctx.currentTime + 0.4);
+      }
+    } catch (e) {}
+  }
+
+  function playHoverSound() {
+    try {
+      const ctx = getAudioContext();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.frequency.setValueAtTime(600, ctx.currentTime);
+      gain.gain.setValueAtTime(0.04, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.05);
+      osc.start(ctx.currentTime);
+      osc.stop(ctx.currentTime + 0.05);
+    } catch (e) {}
+  }
+
+  // === PARTICLE SYSTEM ===
+  let particles = [];
+  let ballTrail = [];
+
+  function spawnGoalParticles(x, y, correct) {
+    if (prefersReducedMotion) return;
+    const colors = correct
+      ? [COLORS.success, COLORS.cyan, COLORS.amber, '#FFD700', COLORS.orange]
+      : [COLORS.error, COLORS.orange, COLORS.orangeHover];
+    const count = correct ? 45 : 20;
+
+    for (let i = 0; i < count; i++) {
+      const angle = (Math.PI * 2 * i) / count + Math.random() * 0.3;
+      const speed = correct ? 200 + Math.random() * 300 : 100 + Math.random() * 150;
+      particles.push({
+        x, y,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed - (correct ? 150 : 50),
+        size: correct ? 5 + Math.random() * 8 : 4 + Math.random() * 5,
+        color: colors[Math.floor(Math.random() * colors.length)],
+        rotation: Math.random() * Math.PI * 2,
+        rotationSpeed: (Math.random() - 0.5) * 15,
+        alpha: 1,
+        gravity: 500,
+        type: correct && Math.random() > 0.6 ? 'star' : 'rect'
+      });
+    }
+
+    // Add extra burst rings for correct answers
+    if (correct) {
+      for (let ring = 0; ring < 2; ring++) {
+        setTimeout(() => {
+          for (let i = 0; i < 12; i++) {
+            const angle = (Math.PI * 2 * i) / 12;
+            particles.push({
+              x, y,
+              vx: Math.cos(angle) * (250 + ring * 100),
+              vy: Math.sin(angle) * (250 + ring * 100) - 50,
+              size: 6,
+              color: COLORS.amber,
+              rotation: 0,
+              rotationSpeed: 0,
+              alpha: 0.8,
+              gravity: 200,
+              type: 'circle'
+            });
+          }
+        }, ring * 80);
+      }
+    }
+  }
+
+  function spawnKickParticles(x, y) {
+    if (prefersReducedMotion) return;
+    // Grass and dust particles on kick
+    const colors = ['#6BBF59', '#4A7C59', '#3D6B4A', '#8B7355'];
+    for (let i = 0; i < 15; i++) {
+      const angle = Math.PI + (Math.random() - 0.5) * 1.2;
+      const speed = 80 + Math.random() * 120;
+      particles.push({
+        x: x + (Math.random() - 0.5) * 20,
+        y: y,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed - 50,
+        size: 3 + Math.random() * 4,
+        color: colors[Math.floor(Math.random() * colors.length)],
+        rotation: Math.random() * Math.PI * 2,
+        rotationSpeed: (Math.random() - 0.5) * 8,
+        alpha: 0.9,
+        gravity: 300,
+        type: 'rect'
+      });
+    }
+  }
+
+  function updateParticles(dt) {
+    particles = particles.filter(p => {
+      p.vy += p.gravity * dt;
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.rotation += p.rotationSpeed * dt;
+      p.alpha -= dt * 1.2;
+      p.vx *= 0.99;
+      return p.alpha > 0 && p.y < H + 50;
+    });
+
+    // Update ball trail
+    ballTrail = ballTrail.filter(t => {
+      t.alpha -= dt * 4;
+      t.size *= 0.95;
+      return t.alpha > 0;
+    });
+  }
+
+  function addBallTrail(x, y) {
+    if (prefersReducedMotion) return;
+    ballTrail.push({
+      x, y,
+      alpha: 0.6,
+      size: ballSize * 0.8
+    });
+  }
+
+  function drawParticles() {
+    // Draw ball trail first (behind everything)
+    ballTrail.forEach(t => {
+      ctx.save();
+      ctx.globalAlpha = t.alpha * 0.5;
+      ctx.font = `${t.size}px sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('\u26BD', t.x, t.y);
+      ctx.restore();
+    });
+
+    // Draw particles
+    particles.forEach(p => {
+      ctx.save();
+      ctx.globalAlpha = p.alpha;
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rotation);
+      ctx.fillStyle = p.color;
+
+      if (p.type === 'star') {
+        // Draw a star shape
+        ctx.beginPath();
+        for (let i = 0; i < 5; i++) {
+          const angle = (i * Math.PI * 2) / 5 - Math.PI / 2;
+          const outerR = p.size;
+          const innerR = p.size * 0.4;
+          ctx.lineTo(Math.cos(angle) * outerR, Math.sin(angle) * outerR);
+          const innerAngle = angle + Math.PI / 5;
+          ctx.lineTo(Math.cos(innerAngle) * innerR, Math.sin(innerAngle) * innerR);
+        }
+        ctx.closePath();
+        ctx.fill();
+      } else if (p.type === 'circle') {
+        ctx.beginPath();
+        ctx.arc(0, 0, p.size / 2, 0, Math.PI * 2);
+        ctx.fill();
+      } else {
+        ctx.fillRect(-p.size / 2, -p.size / 2, p.size, p.size);
+      }
+
+      ctx.restore();
+    });
+    ctx.globalAlpha = 1;
+  }
+
+  // === EASING FUNCTIONS ===
+  function easeOutBack(t) {
+    const c1 = 1.70158;
+    const c3 = c1 + 1;
+    return 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2);
+  }
+
+  function easeOutBounce(t) {
+    const n1 = 7.5625, d1 = 2.75;
+    if (t < 1 / d1) return n1 * t * t;
+    if (t < 2 / d1) return n1 * (t -= 1.5 / d1) * t + 0.75;
+    if (t < 2.5 / d1) return n1 * (t -= 2.25 / d1) * t + 0.9375;
+    return n1 * (t -= 2.625 / d1) * t + 0.984375;
+  }
+
+  // === GAME STATE ===
+  let ball = { x: 360, y: 480, rotation: 0, scale: 1 };
+  let ballSize = 32;
+  let kicking = false;
+  let targetGoal = null;
+  let kickSpeed = 600;
+  let kickProgress = 0;
+  let goals = [];
+  let hoveredGoal = null;
+  let lastHoveredGoal = null;
+
+  // Animation state
+  let entranceTime = 0;
+  const entranceDuration = 0.6;
+  let ballEntranceTime = 0;
+  const ballEntranceDuration = 0.5;
+  let trailTimer = 0;
+
+  // Impact animation
+  let impactAnim = { active: false, x: 0, y: 0, time: 0, correct: false };
+
+  // Goal dimensions for 2x2 grid - sized to fit 60-char text
+  const goalWidth = 320;
+  const goalHeight = 140;
+  const goalSpacing = 20;
+  const startX = (W - (goalWidth * 2 + goalSpacing)) / 2;
+  const startY = 30;
+
+  function initGame() {
+    // Reset ball position (starts above screen for entrance)
+    ball = { x: W / 2, y: -50, rotation: 0, scale: 1 };
+    kicking = false;
+    targetGoal = null;
+    kickProgress = 0;
+    particles = [];
+    ballTrail = [];
+    hoveredGoal = null;
+    lastHoveredGoal = null;
+    impactAnim = { active: false, x: 0, y: 0, time: 0, correct: false };
+
+    // Reset entrance animation
+    entranceTime = 0;
+    ballEntranceTime = 0;
+    trailTimer = 0;
+
+    // Setup 4 goals in 2x2 grid
+    goals = [];
+    for (let i = 0; i < 4; i++) {
+      const col = i % 2;
+      const row = Math.floor(i / 2);
+      goals.push({
+        x: startX + col * (goalWidth + goalSpacing),
+        y: startY + row * (goalHeight + goalSpacing),
+        width: goalWidth,
+        height: goalHeight,
+        choiceIndex: i,
+        entranceDelay: i * 0.08,
+        scale: 0,
+        hover: 0,
+        shake: 0,
+        shakeTime: 0,
+        glow: 0,
+        netWobble: 0
+      });
+    }
+  }
+
+  function updateGame(dt) {
+    if (gameState !== 'playing') return;
+
+    // Update entrance animations
+    entranceTime += dt;
+    ballEntranceTime += dt;
+
+    // Animate goals entrance
+    for (const goal of goals) {
+      const t = Math.max(0, Math.min(1, (entranceTime - goal.entranceDelay) / 0.35));
+      goal.scale = easeOutBack(t);
+
+      // Update hover animation (smooth transition)
+      const targetHover = (goal === hoveredGoal && !kicking) ? 1 : 0;
+      goal.hover += (targetHover - goal.hover) * Math.min(1, dt * 12);
+
+      // Update glow effect
+      if (goal === targetGoal && kicking) {
+        goal.glow = Math.min(1, goal.glow + dt * 3);
+      } else {
+        goal.glow *= 0.95;
+      }
+
+      // Update shake animation (for wrong answers)
+      if (goal.shake > 0) {
+        goal.shakeTime += dt;
+        goal.shake = Math.max(0, goal.shake - dt * 3);
+      }
+
+      // Update net wobble (when ball hits)
+      if (goal.netWobble > 0) {
+        goal.netWobble = Math.max(0, goal.netWobble - dt * 4);
+      }
+    }
+
+    // Animate ball entrance (bounces in from top)
+    if (!kicking && ballEntranceTime < ballEntranceDuration) {
+      const t = Math.min(1, ballEntranceTime / ballEntranceDuration);
+      const targetY = H - 60;
+      ball.y = -50 + (targetY + 50) * easeOutBounce(t);
+    } else if (!kicking) {
+      ball.y = H - 60;
+      // Subtle idle bounce animation
+      if (!prefersReducedMotion) {
+        ball.y += Math.sin(entranceTime * 3) * 2;
+        ball.scale = 1 + Math.sin(entranceTime * 3) * 0.02;
+      }
+    }
+
+    // Update particles
+    updateParticles(dt);
+
+    // Update impact animation
+    if (impactAnim.active) {
+      impactAnim.time += dt;
+      if (impactAnim.time > 0.5) {
+        impactAnim.active = false;
+      }
+    }
+
+    // Animate ball to target goal with curve and trail
+    if (kicking && targetGoal) {
+      const startX = W / 2;
+      const startY = H - 60;
+      const targetX = targetGoal.x + targetGoal.width / 2;
+      const targetY = targetGoal.y + 50;
+
+      kickProgress += dt * 2.5; // Controls overall speed
+      const t = Math.min(1, kickProgress);
+
+      // Eased progress for smooth deceleration at end
+      const easedT = 1 - Math.pow(1 - t, 3);
+
+      // Calculate position with slight arc
+      const prevX = ball.x;
+      const prevY = ball.y;
+
+      ball.x = startX + (targetX - startX) * easedT;
+      // Add arc: ball rises then falls
+      const arcHeight = -80 * Math.sin(t * Math.PI);
+      ball.y = startY + (targetY - startY) * easedT + arcHeight;
+
+      // Rotate ball while flying (faster rotation)
+      ball.rotation += dt * 20;
+
+      // Grow ball slightly as it approaches for impact feel
+      ball.scale = 1 + easedT * 0.15;
+
+      // Add trail effect
+      trailTimer += dt;
+      if (trailTimer > 0.02) {
+        addBallTrail(ball.x, ball.y);
+        trailTimer = 0;
+      }
+
+      // Check if ball reached goal
+      if (t >= 1) {
+        const choice = QUESTION.choices[targetGoal.choiceIndex];
+
+        // Trigger impact animation
+        impactAnim = {
+          active: true,
+          x: ball.x,
+          y: ball.y,
+          time: 0,
+          correct: choice.is_correct
+        };
+
+        // Net wobble effect
+        targetGoal.netWobble = 1;
+
+        // Spawn particles and play sound
+        spawnGoalParticles(ball.x, ball.y, choice.is_correct);
+        playGoalSound(choice.is_correct);
+
+        // Shake animation for wrong answer
+        if (!choice.is_correct) {
+          targetGoal.shake = 1;
+          targetGoal.shakeTime = 0;
+        }
+
+        // Delay end slightly to show celebration/feedback
+        setTimeout(() => {
+          engine.end(choice.is_correct, choice.explanation);
+        }, choice.is_correct ? 350 : 250);
+      }
+    }
+  }
+
+  function drawGame() {
+    // Draw grass field background with gradient
+    const grassGrad = ctx.createLinearGradient(0, 0, 0, H);
+    grassGrad.addColorStop(0, COLORS.grassDark);
+    grassGrad.addColorStop(0.5, COLORS.grassLight);
+    grassGrad.addColorStop(1, COLORS.grassDark);
+    ctx.fillStyle = grassGrad;
+    ctx.fillRect(0, 0, W, H);
+
+    // Draw grass stripe pattern (alternating shades)
+    for (let i = 0; i < W; i += 60) {
+      ctx.fillStyle = 'rgba(60, 100, 70, 0.15)';
+      ctx.fillRect(i, 0, 30, H);
+    }
+
+    // Draw field lines
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.35)';
+    ctx.lineWidth = 3;
+    ctx.strokeRect(20, 20, W - 40, H - 40);
+
+    // Center circle
+    ctx.beginPath();
+    ctx.arc(W / 2, H / 2 + 60, 45, 0, Math.PI * 2);
+    ctx.stroke();
+
+    // Center dot
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.35)';
+    ctx.beginPath();
+    ctx.arc(W / 2, H / 2 + 60, 5, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Center line
+    ctx.beginPath();
+    ctx.moveTo(20, H / 2 + 60);
+    ctx.lineTo(W - 20, H / 2 + 60);
+    ctx.stroke();
+
+    // Draw goals with entrance animation and hover effects
+    for (const goal of goals) {
+      if (goal.scale <= 0) continue;
+
+      ctx.save();
+
+      // Apply shake for wrong answer
+      let shakeOffset = 0;
+      if (goal.shake > 0) {
+        shakeOffset = Math.sin(goal.shakeTime * 50) * 6 * goal.shake;
+      }
+
+      // Scale and hover transform
+      const hoverScale = 1 + goal.hover * 0.03;
+      const hoverY = goal.hover * -3;
+
+      ctx.translate(goal.x + goal.width / 2 + shakeOffset, goal.y + goal.height / 2 + hoverY);
+      ctx.scale(goal.scale * hoverScale, goal.scale * hoverScale);
+      ctx.translate(-(goal.x + goal.width / 2), -(goal.y + goal.height / 2));
+
+      // Glow effect for targeted goal
+      if (goal.glow > 0) {
+        ctx.shadowColor = COLORS.cyan;
+        ctx.shadowBlur = 20 * goal.glow;
+      }
+
+      // Goal background (net area) with subtle gradient
+      const netGrad = ctx.createLinearGradient(goal.x, goal.y, goal.x, goal.y + goal.height);
+      netGrad.addColorStop(0, '#f5f0e6');
+      netGrad.addColorStop(1, '#e5ddd0');
+      ctx.fillStyle = netGrad;
+      ctx.beginPath();
+      ctx.roundRect(goal.x, goal.y, goal.width, goal.height, 10);
+      ctx.fill();
+
+      // Hover highlight
+      if (goal.hover > 0) {
+        ctx.fillStyle = `rgba(78, 205, 196, ${goal.hover * 0.1})`;
+        ctx.beginPath();
+        ctx.roundRect(goal.x, goal.y, goal.width, goal.height, 10);
+        ctx.fill();
+      }
+
+      ctx.shadowBlur = 0;
+
+      // Net pattern inside goal with wobble effect
+      ctx.strokeStyle = 'rgba(140, 130, 115, 0.25)';
+      ctx.lineWidth = 1;
+      const wobbleAmp = goal.netWobble * 3;
+      for (let nx = goal.x + 18; nx < goal.x + goal.width; nx += 18) {
+        ctx.beginPath();
+        const wobble = Math.sin((nx + goal.netWobble * 20) * 0.3) * wobbleAmp;
+        ctx.moveTo(nx + wobble, goal.y + 8);
+        ctx.lineTo(nx - wobble, goal.y + goal.height - 8);
+        ctx.stroke();
+      }
+      for (let ny = goal.y + 18; ny < goal.y + goal.height; ny += 18) {
+        ctx.beginPath();
+        const wobble = Math.sin((ny + goal.netWobble * 20) * 0.3) * wobbleAmp;
+        ctx.moveTo(goal.x + 8 + wobble, ny);
+        ctx.lineTo(goal.x + goal.width - 8 - wobble, ny);
+        ctx.stroke();
+      }
+
+      // Goal frame (posts and crossbar) with depth effect
+      // Shadow/depth
+      ctx.strokeStyle = 'rgba(0, 0, 0, 0.15)';
+      ctx.lineWidth = 8;
+      ctx.beginPath();
+      ctx.roundRect(goal.x + 2, goal.y + 2, goal.width, goal.height, 10);
+      ctx.stroke();
+
+      // Main frame
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 6;
+      ctx.beginPath();
+      ctx.roundRect(goal.x, goal.y, goal.width, goal.height, 10);
+      ctx.stroke();
+
+      // Answer text with wrapping
+      const choice = QUESTION.choices[goal.choiceIndex];
+      if (choice) {
+        wrapText(ctx, choice.text, goal.x + 15, goal.y + 46, goal.width - 30, 18, COLORS.textPrimary);
+      }
+
+      ctx.restore();
+
+      // Draw goal post emoji AFTER restoring transform (so it's not affected by scale/translate)
+      // But apply only the hover lift
+      ctx.save();
+      ctx.globalAlpha = 1.0; // Full opacity
+      ctx.shadowBlur = 0; // Clear any shadow
+      const hoverScale2 = 1 + goal.hover * 0.03;
+      const hoverY2 = goal.hover * -3;
+      ctx.translate(goal.x + goal.width / 2 + shakeOffset, goal.y + 6 + hoverY2);
+      ctx.scale(goal.scale * hoverScale2, goal.scale * hoverScale2);
+      ctx.font = "36px sans-serif";
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'top';
+      // Draw emoji twice for more solid appearance
+      ctx.fillText('\uD83E\uDD45', 0, 0);
+      ctx.fillText('\uD83E\uDD45', 0, 0);
+      ctx.restore();
+    }
+
+    // Draw particles (behind ball)
+    drawParticles();
+
+    // Draw impact effect
+    if (impactAnim.active) {
+      const t = impactAnim.time / 0.5;
+      const radius = 30 + t * 60;
+      const alpha = (1 - t) * 0.6;
+      ctx.strokeStyle = impactAnim.correct ? COLORS.success : COLORS.error;
+      ctx.lineWidth = 4 * (1 - t);
+      ctx.globalAlpha = alpha;
+      ctx.beginPath();
+      ctx.arc(impactAnim.x, impactAnim.y, radius, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
+
+    // Draw soccer ball with rotation and scale
+    ctx.save();
+    ctx.translate(ball.x, ball.y);
+    ctx.rotate(ball.rotation);
+    ctx.scale(ball.scale || 1, ball.scale || 1);
+
+    // Ball shadow
+    ctx.globalAlpha = 0.3;
+    ctx.font = `${ballSize}px sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('\u26BD', 3, 3);
+
+    // Ball
+    ctx.globalAlpha = 1;
+    ctx.fillText('\u26BD', 0, 0);
+    ctx.restore();
+
+    // Draw "Click a goal!" hint if entrance complete and not kicking
+    if (entranceTime > entranceDuration + 0.3 && !kicking && ballEntranceTime > ballEntranceDuration) {
+      const hintAlpha = 0.6 + Math.sin(entranceTime * 3) * 0.2;
+      ctx.globalAlpha = hintAlpha;
+      ctx.fillStyle = COLORS.bgSurface;
+      ctx.font = "600 16px 'Nunito Sans', sans-serif";
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('Click a goal to kick!', W / 2, H - 25);
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  /** Wrap text within maxWidth, drawing multiple lines */
+  function wrapText(ctx, text, x, y, maxWidth, lineHeight, color) {
+    ctx.font = "500 15px 'Nunito', sans-serif";
+    ctx.fillStyle = color;
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+
+    const words = text.split(/\s+/);
+    let line = '';
+    let yPos = y;
+    let lineCount = 0;
+    const maxLines = 4;
+
+    for (const word of words) {
+      const testLine = line ? line + ' ' + word : word;
+      const metrics = ctx.measureText(testLine);
+
+      if (metrics.width > maxWidth && line) {
+        lineCount++;
+        if (lineCount >= maxLines) {
+          // Truncate with ellipsis
+          ctx.fillText(line.slice(0, -3) + '...', x, yPos);
+          return;
+        }
+        ctx.fillText(line, x, yPos);
+        line = word;
+        yPos += lineHeight;
+      } else {
+        line = testLine;
+      }
+    }
+    if (line) {
+      ctx.fillText(line, x, yPos);
+    }
+  }
+
+  function handleInput(e) {
+    if (gameState !== 'playing') return;
+    // Keyboard not used in this game - click only
+  }
+
+  /** Handle mouse move for hover effect */
+  function handleMouseMove(e) {
+    if (gameState !== 'playing' || kicking) return;
+    if (entranceTime < entranceDuration) return;
+
+    const { x, y } = screenToLogical(e.clientX, e.clientY);
+
+    // Check if hovering over a goal
+    let found = null;
+    for (const goal of goals) {
+      if (x >= goal.x && x <= goal.x + goal.width &&
+          y >= goal.y && y <= goal.y + goal.height) {
+        found = goal;
+        break;
+      }
+    }
+
+    if (found !== hoveredGoal) {
+      hoveredGoal = found;
+      if (found && found !== lastHoveredGoal) {
+        playHoverSound();
+        lastHoveredGoal = found;
+      }
+      canvas.style.cursor = found ? 'pointer' : 'default';
+    }
+  }
+
+  /** Handle click to kick ball at goal */
+  function handleClick(e) {
+    if (gameState !== 'playing' || kicking) return;
+    // Wait for entrance animations to complete
+    if (entranceTime < entranceDuration) return;
+
+    const { x, y } = screenToLogical(e.clientX, e.clientY);
+
+    // Check if clicked on a goal
+    for (const goal of goals) {
+      if (x >= goal.x && x <= goal.x + goal.width &&
+          y >= goal.y && y <= goal.y + goal.height) {
+        kicking = true;
+        targetGoal = goal;
+        kickProgress = 0;
+
+        // Store kick start position
+        ball.startX = ball.x;
+        ball.startY = ball.y;
+
+        // Play kick sound and spawn grass particles
+        playKickSound();
+        spawnKickParticles(ball.x, ball.y);
+
+        // Play whoosh sound slightly delayed
+        setTimeout(() => playWhooshSound(), 50);
+
+        break;
+      }
+    }
+  }
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 4: GAME LOOP - DO NOT MODIFY                                      ║
+  // ║  Standard loop with responsive scaling and DPR support.                    ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  let lastTime = performance.now();
+
+  function gameLoop(now) {
+    const dt = Math.min((now - lastTime) / 1000, 0.05); // Cap at 50ms
+    lastTime = now;
+
+    // Apply transform for logical coordinate system
+    ctx.setTransform(scale * dpr, 0, 0, scale * dpr, 0, 0);
+
+    if (gameState === 'playing') {
+      updateGame(dt);
+      drawGame();
+    } else {
+      drawGame(); // Draw game state behind overlay
+      drawEndScreen(dt);
+    }
+
+    // Reset transform for next frame
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+    requestAnimationFrame(gameLoop);
+  }
+
+  // Input handlers
+  document.addEventListener('keydown', (e) => {
+    if (gameState === 'ended' && (e.code === 'KeyR')) {
+      // Restart game
+      gameState = 'playing';
+      gameResult = null;
+      gameExplanation = '';
+      confettiParticles = [];
+      initGame();
+      return;
+    }
+    handleInput(e);
+  });
+
+  document.addEventListener('keyup', (e) => {
+    // Optional: handle key release in your handleInput
+  });
+
+  // Canvas click handler for end screen buttons AND game clicks
+  canvas.addEventListener('click', (e) => {
+    if (gameState === 'playing') {
+      handleClick(e);
+      return;
+    }
+
+    if (gameState !== 'ended') return;
+
+    const { x, y } = screenToLogical(e.clientX, e.clientY);
+
+    if (gameResult) {
+      // Correct answer: check both buttons
+      if (pointInRect(x, y, restartButton)) {
+        gameState = 'playing';
+        gameResult = null;
+        gameExplanation = '';
+        confettiParticles = [];
+        initGame();
+        return;
+      }
+      if (pointInRect(x, y, nextButton)) {
+        // Notify parent to go to next question
+        if (window.parent && window.parent !== window) {
+          window.parent.postMessage({ type: 'quiz-next' }, '*');
+        }
+        return;
+      }
+    } else {
+      // Wrong answer: check centered restart button
+      const centeredRestart = { x: W / 2 - 75, y: H / 2 + 60, w: 150, h: 48 };
+      if (pointInRect(x, y, centeredRestart)) {
+        gameState = 'playing';
+        gameResult = null;
+        gameExplanation = '';
+        confettiParticles = [];
+        initGame();
+        return;
+      }
+    }
+  });
+
+
+  // Cursor change handler for end screen buttons
+  canvas.addEventListener('mousemove', (e) => {
+    if (gameState !== 'ended') {
+      canvas.style.cursor = 'default';
+      return;
+    }
+    const { x, y } = screenToLogical(e.clientX, e.clientY);
+    if (gameResult) {
+      if (pointInRect(x, y, restartButton) || pointInRect(x, y, nextButton)) {
+        canvas.style.cursor = 'pointer';
+        return;
+      }
+    } else {
+      const centeredRestart = { x: W / 2 - 75, y: H / 2 + 60, w: 150, h: 48 };
+      if (pointInRect(x, y, centeredRestart)) {
+        canvas.style.cursor = 'pointer';
+        return;
+      }
+    }
+    canvas.style.cursor = 'default';
+  });
+
+  // Handle resize
+  window.addEventListener('resize', resizeCanvas);
+
+  // Handle mouse move for hover effects
+  canvas.addEventListener('mousemove', handleMouseMove);
+
+  // Reset hover on mouse leave
+  canvas.addEventListener('mouseleave', () => {
+    hoveredGoal = null;
+    canvas.style.cursor = 'default';
+  });
+
+  // Initialize
+  resizeCanvas();
+  initGame();
+  requestAnimationFrame(gameLoop);
+  </script>
+</body>
+</html>

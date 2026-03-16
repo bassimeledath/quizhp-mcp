@@ -1,0 +1,887 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Game Template</title>
+  <link href="https://fonts.googleapis.com/css2?family=Belanosima:wght@400;600;700&family=Nunito+Sans:wght@400;500;600;700&family=Nunito:wght@400;500;600&display=swap" rel="stylesheet">
+  <!--
+  +========================================================================+
+  |  GAME FACTORY TEMPLATE                                                    |
+  |  This template enforces critical invariants. Follow the section markers.  |
+  +========================================================================+
+  -->
+  <style>
+    /* =====================================================================
+       BASE STYLES - Can be extended, not removed
+       ===================================================================== */
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+    }
+    body {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      background: #1a1a2e;
+      font-family: system-ui, -apple-system, sans-serif;
+    }
+    #gameCanvas {
+      background: #16213e;
+      border-radius: 8px;
+      display: block;
+    }
+  </style>
+</head>
+<body>
+  <!-- =====================================================================
+       CANVAS - Sized dynamically to fill available space
+       ===================================================================== -->
+  <canvas id="gameCanvas"></canvas>
+
+  <script>
+  // +======================================================================+
+  // |  SECTION 1: QUESTION PLACEHOLDER - DO NOT MODIFY FORMAT                |
+  // |  Platform replaces this at runtime. Use these exact 60-char answers.   |
+  // +======================================================================+
+  const QUESTION = {
+    type: "mcq",
+    prompt: "Sample question text",
+    choices: [
+      { text: "This is sample answer A which is long enough to test text overflow", is_correct: true, explanation: "Why A is correct" },
+      { text: "This is sample answer B which is long enough to test text overflow", is_correct: false, explanation: "Why B is wrong" },
+      { text: "This is sample answer C which is long enough to test text overflow", is_correct: false, explanation: "Why C is wrong" },
+      { text: "This is sample answer D which is long enough to test text overflow", is_correct: false, explanation: "Why D is wrong" }
+    ],
+    isLastQuestion: false
+  };
+
+  // +======================================================================+
+  // |  SECTION 2: ENGINE CORE - DO NOT MODIFY                                |
+  // |  Standard engine interface and end screen. This is sacred.             |
+  // +======================================================================+
+  const canvas = document.getElementById('gameCanvas');
+  const ctx = canvas.getContext('2d');
+
+  // Logical dimensions (game code works in this coordinate space)
+  const W = 720, H = 540;
+
+  // Scaling state (computed on resize)
+  let scale = 1;
+  let dpr = 1;
+
+  let gameState = 'playing'; // 'playing' | 'ended'
+  let gameResult = null;     // true (correct) | false (wrong)
+  let gameExplanation = '';
+  let endScreenTime = 0;
+  let confettiParticles = [];
+
+  // End screen button bounds (logical coordinates)
+  const restartButton = { x: W / 2 - 170, y: H / 2 + 60, w: 150, h: 48 };
+  const nextButton = { x: W / 2 + 20, y: H / 2 + 60, w: 150, h: 48 };
+
+  /** Check if point is inside rectangle */
+  function pointInRect(px, py, rect) {
+    return px >= rect.x && px <= rect.x + rect.w &&
+           py >= rect.y && py <= rect.y + rect.h;
+  }
+
+  /** Draw a styled button */
+  function drawButton(rect, label, color, pulse) {
+    const p = pulse ? 1 + Math.sin(endScreenTime * 4) * 0.03 : 1;
+    ctx.save();
+    ctx.translate(rect.x + rect.w / 2, rect.y + rect.h / 2);
+    ctx.scale(p, p);
+    ctx.translate(-(rect.x + rect.w / 2), -(rect.y + rect.h / 2));
+
+    // Button background
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.roundRect(rect.x, rect.y, rect.w, rect.h, 12);
+    ctx.fill();
+
+    // Button text
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = 'bold 18px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, rect.x + rect.w / 2, rect.y + rect.h / 2);
+
+    ctx.restore();
+  }
+
+  /**
+   * Resize canvas to fill available space with proper DPR scaling.
+   * Maintains logical coordinate system (720x540).
+   */
+  function resizeCanvas() {
+    dpr = window.devicePixelRatio || 1;
+
+    // Get available space
+    const availW = window.innerWidth;
+    const availH = window.innerHeight;
+
+    // Calculate scale to fit logical space (720x540) in available space
+    const scaleX = availW / W;
+    const scaleY = availH / H;
+    scale = Math.min(scaleX, scaleY);
+
+    // Physical canvas buffer (DPR-scaled for crisp rendering)
+    canvas.width = W * scale * dpr;
+    canvas.height = H * scale * dpr;
+
+    // CSS display size
+    canvas.style.width = (W * scale) + 'px';
+    canvas.style.height = (H * scale) + 'px';
+  }
+
+  /**
+   * Convert screen coordinates to logical coordinates.
+   * Use this for mouse/click events to get positions in 720x540 space.
+   */
+  function screenToLogical(screenX, screenY) {
+    const rect = canvas.getBoundingClientRect();
+    return {
+      x: (screenX - rect.left) * (W / rect.width),
+      y: (screenY - rect.top) * (H / rect.height)
+    };
+  }
+
+  const engine = {
+    /** Call this to end the game. DO NOT draw your own end screen. */
+    end(isCorrect, explanation) {
+      if (gameState === 'ended') return;
+      gameState = 'ended';
+      gameResult = isCorrect;
+      gameExplanation = explanation || '';
+      endScreenTime = 0;
+
+      // Spawn confetti for correct answers
+      if (isCorrect) {
+        for (let i = 0; i < 50; i++) {
+          confettiParticles.push({
+            x: W / 2,
+            y: H / 2,
+            vx: (Math.random() - 0.5) * 600,
+            vy: -Math.random() * 400 - 100,
+            size: 4 + Math.random() * 6,
+            color: ['#FFD700', '#FF6B6B', '#4ECDC4', '#95E1D3', '#F38181'][Math.floor(Math.random() * 5)],
+            rotation: Math.random() * Math.PI * 2,
+            rotationSpeed: (Math.random() - 0.5) * 10
+          });
+        }
+      }
+
+      // Notify parent frame
+      if (window.parent && window.parent !== window) {
+        window.parent.postMessage({
+          type: 'quiz-end',
+          isCorrect: isCorrect,
+          explanation: explanation || ''
+        }, '*');
+      }
+    }
+  };
+
+  /** STANDARD END SCREEN - DO NOT MODIFY */
+  function drawEndScreen(dt) {
+    endScreenTime += dt;
+
+    // Update confetti
+    confettiParticles = confettiParticles.filter(p => {
+      p.vy += 800 * dt; // gravity
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.rotation += p.rotationSpeed * dt;
+      p.vx *= 0.99;
+      return p.y < H + 50;
+    });
+
+    // Dark overlay
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
+    ctx.fillRect(0, 0, W, H);
+
+    // Draw confetti
+    confettiParticles.forEach(p => {
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rotation);
+      ctx.fillStyle = p.color;
+      ctx.fillRect(-p.size / 2, -p.size / 4, p.size, p.size / 2);
+      ctx.restore();
+    });
+
+    // Result emoji
+    ctx.font = '72px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(gameResult ? '🎉' : '😢', W / 2, H / 2 - 50);
+
+    // Result text
+    ctx.fillStyle = gameResult ? '#4ADE80' : '#F87171';
+    ctx.font = 'bold 36px system-ui, sans-serif';
+    ctx.fillText(gameResult ? 'Correct!' : 'Wrong!', W / 2, H / 2 + 20);
+
+    // Buttons
+    if (gameResult) {
+      // Correct: show both Restart and Next/Finish
+      drawButton(restartButton, 'Restart', '#E87A3E', true);
+      const nextLabel = QUESTION.isLastQuestion ? 'Finish' : 'Next';
+      drawButton(nextButton, nextLabel, '#4ECDC4', true);
+    } else {
+      // Wrong: show only centered Restart button
+      const centeredRestart = { x: W / 2 - 75, y: H / 2 + 60, w: 150, h: 48 };
+      drawButton(centeredRestart, 'Restart', '#E87A3E', true);
+    }
+  }
+
+  // +======================================================================+
+  // |  SECTION 3: YOUR GAME CODE - IMPLEMENT THESE FUNCTIONS                 |
+  // |  This is where your game logic goes. See requirements below.           |
+  // +======================================================================+
+
+  // === COLORS ===
+  const COLORS = {
+    bgPrimary: '#FAFAF7',
+    bgSurface: '#FFFFFF',
+    textPrimary: '#2B2B28',
+    textSecondary: '#5A5A54',
+    orange: '#E87A3E',
+    orangeHover: '#D66B31',
+    amber: '#F5A742',
+    cyan: '#4ECDC4',
+    success: '#6BBF59',
+    error: '#E85D4A',
+    borderSubtle: '#E6E6E0',
+    borderStrong: '#D4D4CC'
+  };
+
+  // === WESTERN THEME COLORS ===
+  const WESTERN = {
+    wallWood: '#8B6914',
+    wallWoodDark: '#6B4F10',
+    wallWoodLight: '#A0802A',
+    posterPaper: '#F5E6C8',
+    posterPaperAged: '#E8D4A8',
+    posterBorder: '#8B4513',
+    posterShadow: 'rgba(0,0,0,0.3)',
+    nailColor: '#808080',
+    dustColor: '#C4A46C',
+    saloonFloor: '#5C3A1E',
+    wantedRed: '#8B0000',
+    inkBlack: '#1A1008',
+    ropeColor: '#A0804A'
+  };
+
+  // === GAME STATE ===
+  let posters = [];
+  let hoveredPoster = -1;
+  let selectedPoster = -1;
+  let gameTime = 0;
+  let dustMotes = [];
+  let gameParticles = [];
+  let feedbackTimer = 0;
+  let feedbackType = null; // 'correct' or 'wrong'
+
+  // Audio context for sounds
+  let audioCtx = null;
+  function getAudioCtx() {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    return audioCtx;
+  }
+
+  function playClickSound() {
+    try {
+      const ac = getAudioCtx();
+      const osc = ac.createOscillator();
+      const gain = ac.createGain();
+      osc.connect(gain);
+      gain.connect(ac.destination);
+      osc.frequency.setValueAtTime(800, ac.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(400, ac.currentTime + 0.08);
+      gain.gain.setValueAtTime(0.15, ac.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ac.currentTime + 0.1);
+      osc.start(ac.currentTime);
+      osc.stop(ac.currentTime + 0.1);
+    } catch(e) {}
+  }
+
+  function playCorrectSound() {
+    try {
+      const ac = getAudioCtx();
+      const osc = ac.createOscillator();
+      const gain = ac.createGain();
+      osc.connect(gain);
+      gain.connect(ac.destination);
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(523, ac.currentTime);
+      osc.frequency.setValueAtTime(659, ac.currentTime + 0.1);
+      osc.frequency.setValueAtTime(784, ac.currentTime + 0.2);
+      gain.gain.setValueAtTime(0.2, ac.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ac.currentTime + 0.4);
+      osc.start(ac.currentTime);
+      osc.stop(ac.currentTime + 0.4);
+    } catch(e) {}
+  }
+
+  function playWrongSound() {
+    try {
+      const ac = getAudioCtx();
+      const osc = ac.createOscillator();
+      const gain = ac.createGain();
+      osc.connect(gain);
+      gain.connect(ac.destination);
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(200, ac.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(100, ac.currentTime + 0.3);
+      gain.gain.setValueAtTime(0.12, ac.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ac.currentTime + 0.3);
+      osc.start(ac.currentTime);
+      osc.stop(ac.currentTime + 0.3);
+    } catch(e) {}
+  }
+
+  // Word-wrap text into lines that fit a given width
+  function wrapText(text, maxWidth, font) {
+    ctx.font = font;
+    const words = text.split(' ');
+    const lines = [];
+    let currentLine = '';
+    for (const word of words) {
+      const testLine = currentLine ? currentLine + ' ' + word : word;
+      if (ctx.measureText(testLine).width > maxWidth) {
+        if (currentLine) lines.push(currentLine);
+        currentLine = word;
+      } else {
+        currentLine = testLine;
+      }
+    }
+    if (currentLine) lines.push(currentLine);
+    return lines;
+  }
+
+  function initGame() {
+    posters = [];
+    hoveredPoster = -1;
+    selectedPoster = -1;
+    gameTime = 0;
+    dustMotes = [];
+    gameParticles = [];
+    feedbackTimer = 0;
+    feedbackType = null;
+
+    // 2x2 grid layout for wanted posters
+    const posterW = 310;
+    const posterH = 215;
+    const gapX = 20;
+    const gapY = 16;
+    const startX = (W - posterW * 2 - gapX) / 2;
+    const startY = (H - posterH * 2 - gapY) / 2 + 10;
+
+    const positions = [
+      { x: startX, y: startY },
+      { x: startX + posterW + gapX, y: startY },
+      { x: startX, y: startY + posterH + gapY },
+      { x: startX + posterW + gapX, y: startY + posterH + gapY }
+    ];
+
+    QUESTION.choices.forEach((choice, i) => {
+      const pos = positions[i];
+      posters.push({
+        x: pos.x,
+        y: pos.y,
+        w: posterW,
+        h: posterH,
+        choice: choice,
+        index: i,
+        // Animation state
+        scale: 0,
+        alpha: 0,
+        rotation: (Math.random() - 0.5) * 0.04,
+        baseRotation: (Math.random() - 0.5) * 0.04,
+        offsetY: 0,
+        shakeX: 0,
+        // Nail positions (slightly random)
+        nailX: posterW / 2 + (Math.random() - 0.5) * 20,
+        nailY: 6,
+        // Entrance delay
+        entranceDelay: i * 0.1,
+        entranceStarted: false
+      });
+    });
+
+    // Initialize dust motes
+    for (let i = 0; i < 15; i++) {
+      dustMotes.push({
+        x: Math.random() * W,
+        y: Math.random() * H,
+        size: 1 + Math.random() * 2.5,
+        speed: 8 + Math.random() * 15,
+        alpha: 0.15 + Math.random() * 0.25,
+        drift: Math.random() * Math.PI * 2
+      });
+    }
+  }
+
+  function updateGame(dt) {
+    if (gameState !== 'playing') return;
+
+    gameTime += dt;
+
+    // Entrance animations
+    posters.forEach(poster => {
+      if (gameTime >= poster.entranceDelay) {
+        if (!poster.entranceStarted) {
+          poster.entranceStarted = true;
+        }
+        const t = Math.min((gameTime - poster.entranceDelay) / 0.4, 1);
+        // Spring easing
+        const spring = 1 + Math.sin(t * Math.PI * 2) * 0.15 * (1 - t);
+        poster.scale = t * spring;
+        poster.alpha = Math.min(t * 1.5, 1);
+      }
+    });
+
+    // Update dust motes
+    dustMotes.forEach(mote => {
+      mote.drift += dt * 0.3;
+      mote.x += Math.sin(mote.drift) * mote.speed * dt;
+      mote.y -= mote.speed * 0.3 * dt;
+      if (mote.y < -10) {
+        mote.y = H + 10;
+        mote.x = Math.random() * W;
+      }
+      if (mote.x < -10) mote.x = W + 10;
+      if (mote.x > W + 10) mote.x = -10;
+    });
+
+    // Hover wobble
+    posters.forEach((poster, i) => {
+      if (i === hoveredPoster && selectedPoster === -1) {
+        poster.offsetY = Math.sin(gameTime * 6) * 2 - 3;
+        poster.rotation = poster.baseRotation + Math.sin(gameTime * 4) * 0.01;
+      } else if (selectedPoster === -1) {
+        poster.offsetY *= 0.9;
+        poster.rotation = poster.baseRotation + Math.sin(gameTime * 1.5 + i) * 0.005;
+      }
+    });
+
+    // Feedback animation
+    if (feedbackType) {
+      feedbackTimer += dt;
+      if (feedbackType === 'wrong') {
+        const poster = posters[selectedPoster];
+        if (poster && feedbackTimer < 0.4) {
+          const decay = 1 - (feedbackTimer / 0.4);
+          poster.shakeX = Math.sin(feedbackTimer * Math.PI * 10) * 8 * decay;
+        }
+      }
+      if (feedbackTimer > 0.6) {
+        const choice = posters[selectedPoster].choice;
+        if (feedbackType === 'correct') {
+          playCorrectSound();
+        } else {
+          playWrongSound();
+        }
+        engine.end(choice.is_correct, choice.explanation);
+      }
+    }
+
+    // Update particles
+    gameParticles = gameParticles.filter(p => {
+      p.vy += 300 * dt;
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.rotation += p.rotationSpeed * dt;
+      p.alpha -= dt * 1.2;
+      return p.alpha > 0 && p.y < H + 20;
+    });
+  }
+
+  function drawGame() {
+    // === BACKGROUND: Saloon wall ===
+    // Wood plank background
+    ctx.fillStyle = WESTERN.wallWood;
+    ctx.fillRect(0, 0, W, H);
+
+    // Horizontal wood planks
+    const plankH = 45;
+    for (let py = 0; py < H; py += plankH) {
+      // Plank groove
+      ctx.fillStyle = WESTERN.wallWoodDark;
+      ctx.fillRect(0, py, W, 2);
+
+      // Subtle color variation per plank
+      const shade = (Math.sin(py * 0.1) * 10) | 0;
+      const r = 139 + shade;
+      const g = 105 + shade;
+      const b = 20 + (shade / 2) | 0;
+      ctx.fillStyle = `rgba(${r}, ${g}, ${b}, 0.3)`;
+      ctx.fillRect(0, py + 2, W, plankH - 2);
+
+      // Wood grain lines
+      ctx.strokeStyle = 'rgba(107, 79, 16, 0.15)';
+      ctx.lineWidth = 0.5;
+      for (let g = 0; g < 3; g++) {
+        const grainY = py + 8 + g * 14 + Math.sin(py) * 3;
+        ctx.beginPath();
+        ctx.moveTo(0, grainY);
+        for (let gx = 0; gx < W; gx += 40) {
+          ctx.lineTo(gx + 20, grainY + Math.sin(gx * 0.02 + py) * 2);
+        }
+        ctx.stroke();
+      }
+    }
+
+    // Slight vignette on walls
+    const vignette = ctx.createRadialGradient(W/2, H/2, 100, W/2, H/2, 450);
+    vignette.addColorStop(0, 'rgba(0,0,0,0)');
+    vignette.addColorStop(1, 'rgba(0,0,0,0.35)');
+    ctx.fillStyle = vignette;
+    ctx.fillRect(0, 0, W, H);
+
+    // Warm ambient light from above
+    const light = ctx.createRadialGradient(W/2, -50, 10, W/2, 100, 400);
+    light.addColorStop(0, 'rgba(255, 200, 100, 0.12)');
+    light.addColorStop(1, 'rgba(255, 200, 100, 0)');
+    ctx.fillStyle = light;
+    ctx.fillRect(0, 0, W, H);
+
+    // === DUST MOTES ===
+    dustMotes.forEach(mote => {
+      ctx.beginPath();
+      ctx.arc(mote.x, mote.y, mote.size, 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(210, 190, 140, ${mote.alpha})`;
+      ctx.fill();
+    });
+
+    // === WANTED POSTERS ===
+    posters.forEach((poster, i) => {
+      if (poster.alpha <= 0) return;
+
+      ctx.save();
+      const cx = poster.x + poster.w / 2;
+      const cy = poster.y + poster.h / 2;
+
+      ctx.globalAlpha = poster.alpha;
+      ctx.translate(cx + poster.shakeX, cy + poster.offsetY);
+      ctx.rotate(poster.rotation);
+      ctx.scale(poster.scale, poster.scale);
+      ctx.translate(-cx, -cy);
+
+      const isHovered = (i === hoveredPoster && selectedPoster === -1);
+      const isSelected = (i === selectedPoster);
+
+      // Poster shadow
+      ctx.fillStyle = WESTERN.posterShadow;
+      ctx.beginPath();
+      ctx.roundRect(poster.x + 4, poster.y + 4, poster.w, poster.h, 3);
+      ctx.fill();
+
+      // Poster background (aged paper)
+      const paperGrad = ctx.createLinearGradient(poster.x, poster.y, poster.x + poster.w, poster.y + poster.h);
+      paperGrad.addColorStop(0, WESTERN.posterPaper);
+      paperGrad.addColorStop(0.5, '#F0DDB8');
+      paperGrad.addColorStop(1, WESTERN.posterPaperAged);
+      ctx.fillStyle = paperGrad;
+      ctx.beginPath();
+      ctx.roundRect(poster.x, poster.y, poster.w, poster.h, 3);
+      ctx.fill();
+
+      // Poster border
+      let borderColor = WESTERN.posterBorder;
+      let borderWidth = 2;
+      if (isSelected && feedbackType === 'correct') {
+        borderColor = COLORS.success;
+        borderWidth = 3;
+      } else if (isSelected && feedbackType === 'wrong') {
+        borderColor = COLORS.error;
+        borderWidth = 3;
+      } else if (isHovered) {
+        borderColor = COLORS.cyan;
+        borderWidth = 2.5;
+      }
+      ctx.strokeStyle = borderColor;
+      ctx.lineWidth = borderWidth;
+      ctx.beginPath();
+      ctx.roundRect(poster.x, poster.y, poster.w, poster.h, 3);
+      ctx.stroke();
+
+      // Hover glow
+      if (isHovered) {
+        ctx.shadowColor = COLORS.cyan;
+        ctx.shadowBlur = 12;
+        ctx.strokeStyle = 'rgba(78, 205, 196, 0.3)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.roundRect(poster.x - 2, poster.y - 2, poster.w + 4, poster.h + 4, 5);
+        ctx.stroke();
+        ctx.shadowBlur = 0;
+      }
+
+      // "WANTED" header - classic western style
+      const headerY = poster.y + 28;
+      ctx.fillStyle = WESTERN.wantedRed;
+      ctx.font = "700 22px 'Belanosima', serif";
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('WANTED', poster.x + poster.w / 2, headerY);
+
+      // Decorative lines under WANTED
+      const lineY = headerY + 14;
+      ctx.strokeStyle = WESTERN.wantedRed;
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(poster.x + 30, lineY);
+      ctx.lineTo(poster.x + poster.w - 30, lineY);
+      ctx.stroke();
+
+      ctx.lineWidth = 0.8;
+      ctx.beginPath();
+      ctx.moveTo(poster.x + 50, lineY + 4);
+      ctx.lineTo(poster.x + poster.w - 50, lineY + 4);
+      ctx.stroke();
+
+      // "DEAD OR ALIVE" subtitle
+      ctx.fillStyle = WESTERN.inkBlack;
+      ctx.font = "600 14px 'Nunito Sans', sans-serif";
+      ctx.fillText('DEAD OR ALIVE', poster.x + poster.w / 2, lineY + 18);
+
+      // Answer text area - word wrapped
+      const textFont = "400 16px 'Nunito', sans-serif";
+      const textMaxW = poster.w - 32;
+      const lines = wrapText(poster.choice.text, textMaxW, textFont);
+      const lineHeight = 20;
+      const textStartY = poster.y + 92;
+
+      ctx.font = textFont;
+      ctx.fillStyle = WESTERN.inkBlack;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'top';
+      lines.forEach((line, li) => {
+        ctx.fillText(line, poster.x + poster.w / 2, textStartY + li * lineHeight);
+      });
+
+      // "REWARD" footer
+      const rewardY = poster.y + poster.h - 22;
+      ctx.fillStyle = WESTERN.wantedRed;
+      ctx.font = "600 14px 'Nunito Sans', sans-serif";
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('REWARD', poster.x + poster.w / 2, rewardY);
+
+      // Decorative line above reward
+      ctx.strokeStyle = WESTERN.posterBorder;
+      ctx.lineWidth = 0.8;
+      ctx.beginPath();
+      ctx.moveTo(poster.x + 40, rewardY - 10);
+      ctx.lineTo(poster.x + poster.w - 40, rewardY - 10);
+      ctx.stroke();
+
+      // Nail at top
+      ctx.beginPath();
+      ctx.arc(poster.x + poster.nailX, poster.y + poster.nailY, 4, 0, Math.PI * 2);
+      ctx.fillStyle = '#A0A0A0';
+      ctx.fill();
+      ctx.strokeStyle = '#606060';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+
+      // Nail highlight
+      ctx.beginPath();
+      ctx.arc(poster.x + poster.nailX - 1, poster.y + poster.nailY - 1, 1.5, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(255,255,255,0.4)';
+      ctx.fill();
+
+      // Selection feedback background tint
+      if (isSelected && feedbackType === 'correct') {
+        ctx.fillStyle = 'rgba(107, 191, 89, 0.15)';
+        ctx.beginPath();
+        ctx.roundRect(poster.x, poster.y, poster.w, poster.h, 3);
+        ctx.fill();
+      } else if (isSelected && feedbackType === 'wrong') {
+        ctx.fillStyle = 'rgba(232, 93, 74, 0.15)';
+        ctx.beginPath();
+        ctx.roundRect(poster.x, poster.y, poster.w, poster.h, 3);
+        ctx.fill();
+      }
+
+      ctx.restore();
+    });
+
+    // === PARTICLES ===
+    gameParticles.forEach(p => {
+      ctx.save();
+      ctx.globalAlpha = p.alpha;
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rotation);
+      ctx.fillStyle = p.color;
+      ctx.fillRect(-p.size / 2, -p.size / 4, p.size, p.size / 2);
+      ctx.restore();
+    });
+  }
+
+  function handleInput(e) {
+    if (gameState !== 'playing') return;
+    // Keyboard: 1-4 to select
+    if (selectedPoster !== -1) return;
+    const num = parseInt(e.key);
+    if (num >= 1 && num <= 4) {
+      selectPoster(num - 1);
+    }
+  }
+
+  // === MOUSE HANDLING ===
+  canvas.addEventListener('mousemove', (e) => {
+    if (gameState !== 'playing' || selectedPoster !== -1) return;
+    const { x, y } = screenToLogical(e.clientX, e.clientY);
+    hoveredPoster = -1;
+    posters.forEach((poster, i) => {
+      if (poster.alpha > 0.5 && poster.scale > 0.8) {
+        if (x >= poster.x && x <= poster.x + poster.w &&
+            y >= poster.y && y <= poster.y + poster.h) {
+          hoveredPoster = i;
+        }
+      }
+    });
+    canvas.style.cursor = hoveredPoster >= 0 ? 'pointer' : 'default';
+  });
+
+  canvas.addEventListener('click', (e) => {
+    if (gameState !== 'playing' || selectedPoster !== -1) return;
+    const { x, y } = screenToLogical(e.clientX, e.clientY);
+    posters.forEach((poster, i) => {
+      if (poster.alpha > 0.5 && poster.scale > 0.8) {
+        if (x >= poster.x && x <= poster.x + poster.w &&
+            y >= poster.y && y <= poster.y + poster.h) {
+          selectPoster(i);
+        }
+      }
+    });
+  });
+
+  function selectPoster(index) {
+    if (selectedPoster !== -1) return;
+    selectedPoster = index;
+    playClickSound();
+
+    const choice = posters[index].choice;
+    feedbackType = choice.is_correct ? 'correct' : 'wrong';
+    feedbackTimer = 0;
+
+    // Spawn particles on correct answer
+    if (choice.is_correct) {
+      const poster = posters[index];
+      const cx = poster.x + poster.w / 2;
+      const cy = poster.y + poster.h / 2;
+      const particleColors = [COLORS.orange, COLORS.amber, COLORS.cyan, COLORS.success];
+      for (let i = 0; i < 25; i++) {
+        gameParticles.push({
+          x: cx,
+          y: cy,
+          vx: (Math.random() - 0.5) * 350,
+          vy: -Math.random() * 250 - 50,
+          size: 4 + Math.random() * 6,
+          color: particleColors[Math.floor(Math.random() * particleColors.length)],
+          rotation: Math.random() * Math.PI * 2,
+          rotationSpeed: (Math.random() - 0.5) * 8,
+          alpha: 1
+        });
+      }
+    }
+  }
+
+  // +======================================================================+
+  // |  SECTION 4: GAME LOOP - DO NOT MODIFY                                  |
+  // |  Standard loop with responsive scaling and DPR support.                |
+  // +======================================================================+
+  let lastTime = performance.now();
+
+  function gameLoop(now) {
+    const dt = Math.min((now - lastTime) / 1000, 0.05); // Cap at 50ms
+    lastTime = now;
+
+    // Apply transform for logical coordinate system
+    ctx.setTransform(scale * dpr, 0, 0, scale * dpr, 0, 0);
+
+    if (gameState === 'playing') {
+      updateGame(dt);
+      drawGame();
+    } else {
+      drawGame(); // Draw game state behind overlay
+      drawEndScreen(dt);
+    }
+
+    // Reset transform for next frame
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+    requestAnimationFrame(gameLoop);
+  }
+
+  // Input handlers
+  document.addEventListener('keydown', (e) => {
+    if (gameState === 'ended' && (e.code === 'KeyR')) {
+      // Restart game
+      gameState = 'playing';
+      gameResult = null;
+      gameExplanation = '';
+      confettiParticles = [];
+      initGame();
+      return;
+    }
+    handleInput(e);
+  });
+
+  document.addEventListener('keyup', (e) => {
+    // Optional: handle key release in your handleInput
+  });
+
+  // Canvas click handler for end screen buttons
+  canvas.addEventListener('click', (e) => {
+    if (gameState !== 'ended') return;
+
+    const { x, y } = screenToLogical(e.clientX, e.clientY);
+
+    if (gameResult) {
+      // Correct answer: check both buttons
+      if (pointInRect(x, y, restartButton)) {
+        gameState = 'playing';
+        gameResult = null;
+        gameExplanation = '';
+        confettiParticles = [];
+        initGame();
+        return;
+      }
+      if (pointInRect(x, y, nextButton)) {
+        // Notify parent to go to next question
+        if (window.parent && window.parent !== window) {
+          window.parent.postMessage({ type: 'quiz-next' }, '*');
+        }
+        return;
+      }
+    } else {
+      // Wrong answer: check centered restart button
+      const centeredRestart = { x: W / 2 - 75, y: H / 2 + 60, w: 150, h: 48 };
+      if (pointInRect(x, y, centeredRestart)) {
+        gameState = 'playing';
+        gameResult = null;
+        gameExplanation = '';
+        confettiParticles = [];
+        initGame();
+        return;
+      }
+    }
+  });
+
+  // Handle resize
+  window.addEventListener('resize', resizeCanvas);
+
+  // Initialize
+  resizeCanvas();
+  initGame();
+  requestAnimationFrame(gameLoop);
+  </script>
+</body>
+</html>

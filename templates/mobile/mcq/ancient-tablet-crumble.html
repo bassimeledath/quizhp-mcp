@@ -1,0 +1,1054 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <link href="https://fonts.googleapis.com/css2?family=Belanosima:wght@400;600;700&family=Nunito+Sans:wght@400;500;600;700&family=Nunito:wght@400;500;600&display=swap" rel="stylesheet">
+  <title>Ancient Tablet Crumble</title>
+  <!--
+  ╔══════════════════════════════════════════════════════════════════════════════╗
+  ║  GAME FACTORY TEMPLATE - MOBILE                                              ║
+  ║  Fills 100% of container, non-uniform scaling, touch input.                  ║
+  ║  Logical dimensions: 360×640 (use aspectRatio for proportional shapes)       ║
+  ╚══════════════════════════════════════════════════════════════════════════════╝
+  -->
+  <style>
+    /* ═══════════════════════════════════════════════════════════════════════════
+       BASE STYLES - Can be extended, not removed
+       ═══════════════════════════════════════════════════════════════════════════ */
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      touch-action: none; /* Prevent default touch behaviors */
+      -webkit-touch-callout: none;
+      -webkit-user-select: none;
+      user-select: none;
+    }
+    body {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      background: #1a1a2e;
+      font-family: 'Nunito Sans', system-ui, -apple-system, sans-serif;
+    }
+    #gameCanvas {
+      background: #16213e;
+      /* Canvas fills viewport via JS, these are fallbacks */
+      width: 100vw;
+      height: 100vh;
+    }
+  </style>
+</head>
+<body>
+  <!-- ═══════════════════════════════════════════════════════════════════════════
+       CANVAS - Sized dynamically to fill viewport
+       ═══════════════════════════════════════════════════════════════════════════ -->
+  <canvas id="gameCanvas"></canvas>
+
+  <script>
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 1: QUESTION PLACEHOLDER - DO NOT MODIFY FORMAT                    ║
+  // ║  Platform replaces this at runtime. Use these exact 60-char answers.       ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  const QUESTION = {
+    type: "mcq",
+    prompt: "Sample question text",
+    choices: [
+      { text: "This is sample answer A which is long enough to test text overflow", is_correct: true, explanation: "Why A is correct" },
+      { text: "This is sample answer B which is long enough to test text overflow", is_correct: false, explanation: "Why B is wrong" },
+      { text: "This is sample answer C which is long enough to test text overflow", is_correct: false, explanation: "Why C is wrong" },
+      { text: "This is sample answer D which is long enough to test text overflow", is_correct: false, explanation: "Why D is wrong" }
+    ],
+    isLastQuestion: false
+  };
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 2: ENGINE CORE (MOBILE) - DO NOT MODIFY                           ║
+  // ║  Non-uniform scaling (fills container), touch input, tap-to-restart.       ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  const canvas = document.getElementById('gameCanvas');
+  const ctx = canvas.getContext('2d');
+
+  // Logical dimensions (game code works in this coordinate space)
+  const W = 360, H = 640;
+
+  // Scaling state (computed on resize)
+  let scaleX = 1;
+  let scaleY = 1;
+  let aspectRatio = 1;  // scaleX/scaleY - use for proportional shapes
+
+  // Game state
+  let gameState = 'playing'; // 'playing' | 'ended'
+  let gameResult = null;     // true (correct) | false (wrong)
+  let gameExplanation = '';
+  let endScreenTime = 0;
+  let confettiParticles = [];
+
+  // End screen button bounds (logical coordinates)
+  const restartButton = { x: 20, y: H / 2 + 50, w: 155, h: 56 };
+  const nextButton = { x: 185, y: H / 2 + 50, w: 155, h: 56 };
+  // Centered restart button for wrong answers
+  const centeredRestartButton = { x: W / 2 - 100, y: H / 2 + 50, w: 200, h: 56 };
+
+  /** Draw a styled button with aspect-ratio aware text */
+  function drawMobileButton(rect, label, color, pulse) {
+    const textAdj = getTextScaleAdjustment();
+    const p = pulse ? 1 + Math.sin(endScreenTime * 4) * 0.03 : 1;
+
+    ctx.save();
+    ctx.translate(rect.x + rect.w / 2, rect.y + rect.h / 2);
+    ctx.scale(p, p);
+    ctx.translate(-(rect.x + rect.w / 2), -(rect.y + rect.h / 2));
+
+    // Button background
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.roundRect(rect.x, rect.y, rect.w, rect.h, 12);
+    ctx.fill();
+
+    // Button text (aspect-ratio aware)
+    ctx.save();
+    ctx.translate(rect.x + rect.w / 2, rect.y + rect.h / 2);
+    ctx.scale(textAdj / aspectRatio, textAdj);
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = 'bold 18px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, 0, 0);
+    ctx.restore();
+
+    ctx.restore();
+  }
+
+  /**
+   * Resize canvas to fill viewport completely (no letterboxing).
+   * Uses non-uniform scaling - game code works in 360×640 logical space.
+   * Use aspectRatio to draw proportionally correct shapes.
+   */
+  function resizeCanvas() {
+    const dpr = window.devicePixelRatio || 1;
+
+    // Physical canvas size (actual pixels)
+    canvas.width = window.innerWidth * dpr;
+    canvas.height = window.innerHeight * dpr;
+
+    // CSS size (fills viewport)
+    canvas.style.width = window.innerWidth + 'px';
+    canvas.style.height = window.innerHeight + 'px';
+
+    // Non-uniform scaling to fill entire canvas
+    scaleX = canvas.width / W;
+    scaleY = canvas.height / H;
+
+    // Aspect ratio for proportional shape drawing
+    // >1 means container is wider than logical space
+    // <1 means container is taller than logical space
+    aspectRatio = scaleX / scaleY;
+
+    // Recalculate text sizing on resize (implement this in SECTION 3)
+    if (typeof recalculateTextSizing === 'function') {
+      recalculateTextSizing();
+    }
+  }
+
+  // === ASPECT-RATIO-AWARE TEXT WITH CLAMPED SCALING ===
+  // Text gets stretched by non-uniform scaling, so we compensate.
+  // Also clamp the effective scale to keep text legible at all sizes.
+  const TEXT_SCALE_MIN = 0.75;
+  const TEXT_SCALE_MAX = 1.4;
+
+  function getTextScaleAdjustment() {
+    const baseScale = window.innerHeight / H;
+    const clampedScale = Math.min(TEXT_SCALE_MAX, Math.max(TEXT_SCALE_MIN, baseScale));
+    return clampedScale / baseScale;
+  }
+
+  /**
+   * Draw text with aspect-ratio compensation and clamped scaling.
+   * Use this instead of raw ctx.fillText() to prevent text stretching.
+   * Default font is 16px (minimum for answer text). Use 18-20px for better readability.
+   */
+  function drawText(text, x, y, options = {}) {
+    const { font = "500 16px system-ui, sans-serif", color = '#F5F5F0', align = 'center', baseline = 'middle' } = options;
+    ctx.save();
+    ctx.translate(x, y);
+    const adj = getTextScaleAdjustment();
+    ctx.scale(adj / aspectRatio, adj);
+    ctx.font = font;
+    ctx.fillStyle = color;
+    ctx.textAlign = align;
+    ctx.textBaseline = baseline;
+    ctx.fillText(text, 0, 0);
+    ctx.restore();
+  }
+
+  /**
+   * Convert screen coordinates to logical coordinates.
+   * Use this in handleTouch to get positions in 360×640 space.
+   */
+  function screenToLogical(screenX, screenY) {
+    const dpr = window.devicePixelRatio || 1;
+    const rect = canvas.getBoundingClientRect();
+    const canvasX = (screenX - rect.left) * dpr;
+    const canvasY = (screenY - rect.top) * dpr;
+    return {
+      x: canvasX / scaleX,
+      y: canvasY / scaleY
+    };
+  }
+
+  /**
+   * Check if a point is inside a rectangle (logical coordinates).
+   */
+  function pointInRect(px, py, rect) {
+    return px >= rect.x && px <= rect.x + rect.w &&
+           py >= rect.y && py <= rect.y + rect.h;
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // TEXT UTILITIES - Dynamic wrapping and font sizing
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  /**
+   * Wrap text to fit within a maximum width (in logical coordinates).
+   * Accounts for canvas transforms applied by drawText().
+   */
+  function wrapText(text, maxWidth, font, maxLines = 3) {
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.font = font;
+    const adj = getTextScaleAdjustment();
+    const maxRawWidth = maxWidth * aspectRatio / adj;
+    const words = text.split(' ');
+    const lines = [];
+    let currentLine = '';
+    words.forEach(word => {
+      const testLine = currentLine ? currentLine + ' ' + word : word;
+      if (ctx.measureText(testLine).width > maxRawWidth && currentLine) {
+        lines.push(currentLine);
+        currentLine = word;
+      } else {
+        currentLine = testLine;
+      }
+    });
+    if (currentLine) lines.push(currentLine);
+    ctx.restore();
+    return lines.slice(0, maxLines);
+  }
+
+  /**
+   * Find the optimal font size to fit content in available space.
+   */
+  function findOptimalFontSize(options) {
+    const {
+      texts,
+      maxWidth,
+      availableHeight,
+      minFont = 12,
+      maxFont = 18,
+      itemPadding = 4,
+      fontFamily = "'Nunito Sans', sans-serif"
+    } = options;
+
+    let bestFontSize = minFont;
+    let bestWrappedTexts = [];
+
+    for (let fontSize = maxFont; fontSize >= minFont; fontSize -= 0.5) {
+      const font = `${fontSize}px ${fontFamily}`;
+      const lineHeight = fontSize + 2;
+
+      let totalHeight = 0;
+      const wrappedTexts = [];
+
+      for (const text of texts) {
+        const lines = wrapText(text, maxWidth, font);
+        wrappedTexts.push(lines);
+        totalHeight += itemPadding + lines.length * lineHeight;
+      }
+
+      if (totalHeight <= availableHeight) {
+        bestFontSize = fontSize;
+        bestWrappedTexts = wrappedTexts;
+        break;
+      }
+
+      bestWrappedTexts = wrappedTexts;
+    }
+
+    return { fontSize: bestFontSize, wrappedTexts: bestWrappedTexts };
+  }
+
+  const engine = {
+    /** Call this to end the game. DO NOT draw your own end screen. */
+    end(isCorrect, explanation) {
+      if (gameState === 'ended') return;
+      gameState = 'ended';
+      gameResult = isCorrect;
+      gameExplanation = explanation || '';
+      endScreenTime = 0;
+
+      // Spawn confetti for correct answers
+      if (isCorrect) {
+        for (let i = 0; i < 50; i++) {
+          confettiParticles.push({
+            x: W / 2,
+            y: H / 2,
+            vx: (Math.random() - 0.5) * 400,
+            vy: -Math.random() * 300 - 80,
+            size: 4 + Math.random() * 6,
+            color: ['#FFD700', '#FF6B6B', '#4ECDC4', '#95E1D3', '#F38181'][Math.floor(Math.random() * 5)],
+            rotation: Math.random() * Math.PI * 2,
+            rotationSpeed: (Math.random() - 0.5) * 10
+          });
+        }
+      }
+
+      // Notify parent frame
+      if (window.parent && window.parent !== window) {
+        window.parent.postMessage({
+          type: 'quiz-end',
+          isCorrect: isCorrect,
+          explanation: explanation || ''
+        }, '*');
+      }
+    }
+  };
+
+  /** STANDARD END SCREEN (MOBILE) - DO NOT MODIFY */
+  function drawEndScreen(dt) {
+    endScreenTime += dt;
+
+    // Update confetti
+    confettiParticles = confettiParticles.filter(p => {
+      p.vy += 600 * dt; // gravity
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.rotation += p.rotationSpeed * dt;
+      p.vx *= 0.99;
+      return p.y < H + 50;
+    });
+
+    // Dark overlay
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
+    ctx.fillRect(0, 0, W, H);
+
+    // Draw confetti
+    confettiParticles.forEach(p => {
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rotation);
+      ctx.fillStyle = p.color;
+      ctx.fillRect(-p.size / 2, -p.size / 4, p.size, p.size / 2);
+      ctx.restore();
+    });
+
+    // Result emoji (aspect-ratio aware)
+    const textAdj = getTextScaleAdjustment();
+    ctx.save();
+    ctx.translate(W / 2, H / 2 - 80);
+    ctx.scale(textAdj / aspectRatio, textAdj);
+    ctx.font = '64px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(gameResult ? '🎉' : '😢', 0, 0);
+    ctx.restore();
+
+    // Result text (aspect-ratio aware)
+    ctx.save();
+    ctx.translate(W / 2, H / 2 - 10);
+    ctx.scale(textAdj / aspectRatio, textAdj);
+    ctx.fillStyle = gameResult ? '#4ADE80' : '#F87171';
+    ctx.font = 'bold 32px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(gameResult ? 'Correct!' : 'Wrong!', 0, 0);
+    ctx.restore();
+
+    // Buttons
+    if (gameResult) {
+      // Correct: show both Restart and Next/Finish
+      drawMobileButton(restartButton, 'Restart', '#E87A3E', true);
+      const nextLabel = QUESTION.isLastQuestion ? 'Finish' : 'Next';
+      drawMobileButton(nextButton, nextLabel, '#4ECDC4', true);
+    } else {
+      // Wrong: show only centered Restart button
+      drawMobileButton(centeredRestartButton, 'Restart', '#E87A3E', true);
+    }
+  }
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 3: YOUR GAME CODE - IMPLEMENT THESE FUNCTIONS                     ║
+  // ║  Ancient Tablet Crumble - Tap stone tablets to crumble and select answer   ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+
+  // === COLORS ===
+  const COLORS = {
+    bgPrimary: '#2B2520',
+    bgSky: '#4A3728',
+    ruinWall: '#5C4A3A',
+    ruinDark: '#3D3029',
+    tabletBase: '#8B7D6B',
+    tabletLight: '#A09080',
+    tabletDark: '#6B5D4D',
+    tabletEdge: '#5A4C3C',
+    textInscription: '#D4C8B8',
+    orange: '#E87A3E',
+    amber: '#F5A742',
+    cyan: '#4ECDC4',
+    success: '#6BBF59',
+    error: '#E85D4A',
+    textPrimary: '#F5F5F0',
+    dustColor: '#C4B8A0',
+    groundColor: '#3A2E24',
+    groundLight: '#4D3E32',
+  };
+
+  // === GAME STATE ===
+  let tablets = [];
+  let dustParticles = [];
+  let crumblingTablet = null;
+  let crumbleTime = 0;
+  let crumbleDuration = 0.6;
+  let selectedChoice = null;
+  let entranceTime = 0;
+  let entranceDuration = 0.8;
+  let gameTime = 0;
+
+  // Audio context for sounds
+  let audioCtx = null;
+  function getAudioCtx() {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    return audioCtx;
+  }
+
+  function playClickSound() {
+    try {
+      const ctx = getAudioCtx();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.frequency.setValueAtTime(220, ctx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(80, ctx.currentTime + 0.15);
+      gain.gain.setValueAtTime(0.15, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.2);
+      osc.type = 'triangle';
+      osc.start(ctx.currentTime);
+      osc.stop(ctx.currentTime + 0.2);
+    } catch(e) {}
+  }
+
+  function playCrumbleSound() {
+    try {
+      const ctx = getAudioCtx();
+      // Deep rumble
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.frequency.setValueAtTime(60, ctx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(30, ctx.currentTime + 0.5);
+      gain.gain.setValueAtTime(0.2, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.5);
+      osc.type = 'sawtooth';
+      osc.start(ctx.currentTime);
+      osc.stop(ctx.currentTime + 0.5);
+
+      // Noise burst for cracking
+      const bufferSize = ctx.sampleRate * 0.3;
+      const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+      const data = buffer.getChannelData(0);
+      for (let i = 0; i < bufferSize; i++) {
+        data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / bufferSize, 2);
+      }
+      const noise = ctx.createBufferSource();
+      const noiseGain = ctx.createGain();
+      noise.buffer = buffer;
+      noise.connect(noiseGain);
+      noiseGain.connect(ctx.destination);
+      noiseGain.gain.setValueAtTime(0.12, ctx.currentTime);
+      noiseGain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);
+      noise.start(ctx.currentTime);
+    } catch(e) {}
+  }
+
+  function playCorrectSound() {
+    try {
+      const ctx = getAudioCtx();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.frequency.setValueAtTime(440, ctx.currentTime);
+      osc.frequency.setValueAtTime(554, ctx.currentTime + 0.1);
+      osc.frequency.setValueAtTime(659, ctx.currentTime + 0.2);
+      gain.gain.setValueAtTime(0.15, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.4);
+      osc.type = 'sine';
+      osc.start(ctx.currentTime);
+      osc.stop(ctx.currentTime + 0.4);
+    } catch(e) {}
+  }
+
+  function playWrongSound() {
+    try {
+      const ctx = getAudioCtx();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.frequency.setValueAtTime(300, ctx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(150, ctx.currentTime + 0.3);
+      gain.gain.setValueAtTime(0.15, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.35);
+      osc.type = 'square';
+      osc.start(ctx.currentTime);
+      osc.stop(ctx.currentTime + 0.35);
+    } catch(e) {}
+  }
+
+  // Crumble fragment state
+  let crumbleFragments = [];
+
+  function spawnCrumbleFragments(tablet) {
+    crumbleFragments = [];
+    const numFragments = 18;
+    for (let i = 0; i < numFragments; i++) {
+      const fx = tablet.x + Math.random() * tablet.w;
+      const fy = tablet.y + Math.random() * tablet.h;
+      crumbleFragments.push({
+        x: fx,
+        y: fy,
+        vx: (Math.random() - 0.5) * 120,
+        vy: -Math.random() * 60 + 20,
+        size: 4 + Math.random() * 10,
+        rotation: Math.random() * Math.PI * 2,
+        rotationSpeed: (Math.random() - 0.5) * 6,
+        alpha: 1,
+        color: Math.random() > 0.5 ? COLORS.tabletBase : COLORS.tabletDark,
+      });
+    }
+  }
+
+  function spawnDust(tablet) {
+    for (let i = 0; i < 25; i++) {
+      dustParticles.push({
+        x: tablet.x + Math.random() * tablet.w,
+        y: tablet.y + tablet.h * 0.5 + Math.random() * tablet.h * 0.5,
+        vx: (Math.random() - 0.5) * 60,
+        vy: -Math.random() * 40 - 10,
+        size: 2 + Math.random() * 5,
+        alpha: 0.6 + Math.random() * 0.4,
+        life: 0,
+        maxLife: 0.5 + Math.random() * 0.8,
+      });
+    }
+  }
+
+  function recalculateTextSizing() {
+    if (!tablets || tablets.length === 0) return;
+
+    const textMaxWidth = tablets[0].w - 24;
+    const availableHeight = tablets.length * (tablets[0].h - 8);
+
+    const { fontSize, wrappedTexts } = findOptimalFontSize({
+      texts: QUESTION.choices.map(c => c.text),
+      maxWidth: textMaxWidth,
+      availableHeight: availableHeight,
+      minFont: 14,
+      maxFont: 18,
+      itemPadding: 4,
+      fontFamily: "'Nunito', sans-serif"
+    });
+
+    tablets.forEach((tab, i) => {
+      tab.wrappedText = wrappedTexts[i];
+      tab.fontSize = fontSize;
+    });
+  }
+
+  function initGame() {
+    gameTime = 0;
+    entranceTime = 0;
+    crumblingTablet = null;
+    crumbleTime = 0;
+    selectedChoice = null;
+    dustParticles = [];
+    crumbleFragments = [];
+
+    const tabletW = 320;
+    const tabletH = 100;
+    const gap = 16;
+    const totalH = QUESTION.choices.length * tabletH + (QUESTION.choices.length - 1) * gap;
+    const startY = (H - totalH) / 2 + 20;
+    const startX = (W - tabletW) / 2;
+
+    tablets = QUESTION.choices.map((choice, i) => ({
+      x: startX,
+      y: startY + i * (tabletH + gap),
+      w: tabletW,
+      h: tabletH,
+      choice: choice,
+      scale: 0,
+      alpha: 0,
+      offsetX: 0,
+      shakeTime: 0,
+      cracked: false,
+      crumbled: false,
+      wrappedText: [choice.text],
+      fontSize: 16,
+      breatheOffset: Math.random() * Math.PI * 2,
+    }));
+
+    recalculateTextSizing();
+  }
+
+  function updateGame(dt) {
+    if (gameState !== 'playing') return;
+
+    gameTime += dt;
+    entranceTime += dt;
+
+    // Entrance animation
+    tablets.forEach((tab, i) => {
+      const delay = i * 0.12;
+      const t = Math.max(0, Math.min(1, (entranceTime - delay) / 0.4));
+      // Spring easing
+      const spring = 1 + Math.sin(t * Math.PI * 2) * 0.15 * (1 - t);
+      tab.scale = t * spring;
+      tab.alpha = Math.min(1, t * 1.5);
+    });
+
+    // Shake animation for wrong non-selected tablets
+    tablets.forEach(tab => {
+      if (tab.shakeTime > 0) {
+        tab.shakeTime -= dt;
+        const decay = tab.shakeTime / 0.4;
+        tab.offsetX = Math.sin(tab.shakeTime * Math.PI * 20) * 6 * decay;
+        if (tab.shakeTime <= 0) {
+          tab.offsetX = 0;
+          tab.shakeTime = 0;
+        }
+      }
+    });
+
+    // Crumble animation
+    if (crumblingTablet !== null) {
+      crumbleTime += dt;
+
+      const tab = tablets[crumblingTablet];
+      const progress = Math.min(1, crumbleTime / crumbleDuration);
+
+      // Add cracks progressively
+      if (progress > 0.1) tab.cracked = true;
+
+      // Crumble fragments
+      crumbleFragments.forEach(f => {
+        f.vy += 300 * dt;
+        f.x += f.vx * dt;
+        f.y += f.vy * dt;
+        f.rotation += f.rotationSpeed * dt;
+        f.alpha = Math.max(0, 1 - progress * 1.2);
+      });
+
+      // Dust particles
+      dustParticles.forEach(p => {
+        p.life += dt;
+        p.x += p.vx * dt;
+        p.vy -= 20 * dt;
+        p.y += p.vy * dt;
+        p.alpha = Math.max(0, (1 - p.life / p.maxLife) * 0.7);
+        p.size *= 1 + dt * 0.5;
+      });
+      dustParticles = dustParticles.filter(p => p.life < p.maxLife);
+
+      if (progress > 0.4) {
+        tab.crumbled = true;
+      }
+
+      // End the game after crumble completes
+      if (progress >= 1) {
+        const choice = tab.choice;
+        if (choice.is_correct) {
+          playCorrectSound();
+        } else {
+          playWrongSound();
+        }
+        engine.end(choice.is_correct, choice.explanation);
+      }
+    }
+  }
+
+  function drawGame() {
+    // Draw background - ancient ruin scene
+    // Sky gradient
+    const skyGrad = ctx.createLinearGradient(0, 0, 0, H);
+    skyGrad.addColorStop(0, '#2A1F18');
+    skyGrad.addColorStop(0.4, '#3D2E22');
+    skyGrad.addColorStop(1, '#1C1510');
+    ctx.fillStyle = skyGrad;
+    ctx.fillRect(0, 0, W, H);
+
+    // Draw subtle ruin pillars in background
+    drawRuinBackground();
+
+    // Draw ground
+    ctx.fillStyle = COLORS.groundColor;
+    ctx.fillRect(0, H - 50, W, 50);
+    // Ground texture line
+    ctx.fillStyle = COLORS.groundLight;
+    ctx.fillRect(0, H - 50, W, 2);
+
+    // Draw scattered stones on ground
+    for (let i = 0; i < 8; i++) {
+      const sx = 30 + i * 45;
+      const sy = H - 35 + Math.sin(i * 2.3) * 10;
+      const sw = 8 + Math.sin(i * 1.7) * 4;
+      ctx.fillStyle = COLORS.ruinDark;
+      ctx.beginPath();
+      ctx.ellipse(sx, sy, sw, sw * 0.5 * aspectRatio, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Draw tablets
+    tablets.forEach((tab, i) => {
+      if (tab.crumbled) return;
+
+      ctx.save();
+      const centerX = tab.x + tab.w / 2 + tab.offsetX;
+      const centerY = tab.y + tab.h / 2;
+
+      ctx.translate(centerX, centerY);
+      ctx.scale(tab.scale, tab.scale);
+      ctx.translate(-centerX, -centerY);
+
+      ctx.globalAlpha = tab.alpha;
+
+      drawTablet(tab, i);
+
+      ctx.globalAlpha = 1;
+      ctx.restore();
+    });
+
+    // Draw crumble fragments
+    crumbleFragments.forEach(f => {
+      if (f.alpha <= 0) return;
+      ctx.save();
+      ctx.globalAlpha = f.alpha;
+      ctx.translate(f.x, f.y);
+      ctx.rotate(f.rotation);
+      ctx.fillStyle = f.color;
+      ctx.fillRect(-f.size / 2, -f.size / 2, f.size, f.size * 0.7);
+      ctx.restore();
+    });
+
+    // Draw dust particles
+    dustParticles.forEach(p => {
+      if (p.alpha <= 0) return;
+      ctx.save();
+      ctx.globalAlpha = p.alpha;
+      ctx.fillStyle = COLORS.dustColor;
+      ctx.beginPath();
+      ctx.ellipse(p.x, p.y, p.size, p.size * aspectRatio, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    });
+  }
+
+  function drawRuinBackground() {
+    // Left pillar
+    ctx.fillStyle = COLORS.ruinWall;
+    ctx.globalAlpha = 0.3;
+    ctx.fillRect(10, 60, 30, H - 110);
+
+    // Right pillar
+    ctx.fillRect(W - 40, 80, 30, H - 130);
+
+    // Top lintel (broken)
+    ctx.fillRect(10, 60, 160, 18);
+    ctx.fillRect(W - 170, 80, 170, 18);
+
+    // Small rubble details
+    ctx.fillStyle = COLORS.ruinDark;
+    ctx.fillRect(160, 68, 12, 10);
+    ctx.fillRect(W - 175, 88, 8, 10);
+
+    ctx.globalAlpha = 1;
+  }
+
+  function drawTablet(tab, index) {
+    const x = tab.x + tab.offsetX;
+    const y = tab.y;
+    const w = tab.w;
+    const h = tab.h;
+
+    // Breathing wobble
+    const breathe = Math.sin(gameTime * 1.2 + tab.breatheOffset) * 0.5;
+
+    // Tablet shadow
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
+    ctx.beginPath();
+    ctx.roundRect(x + 3, y + 4 + breathe, w, h, 6);
+    ctx.fill();
+
+    // Tablet body gradient
+    const tabGrad = ctx.createLinearGradient(x, y, x, y + h);
+    tabGrad.addColorStop(0, COLORS.tabletLight);
+    tabGrad.addColorStop(0.5, COLORS.tabletBase);
+    tabGrad.addColorStop(1, COLORS.tabletDark);
+    ctx.fillStyle = tabGrad;
+    ctx.beginPath();
+    ctx.roundRect(x, y + breathe, w, h, 6);
+    ctx.fill();
+
+    // Stone texture - horizontal lines
+    ctx.strokeStyle = 'rgba(0, 0, 0, 0.08)';
+    ctx.lineWidth = 0.5;
+    for (let ly = y + 8 + breathe; ly < y + h - 4 + breathe; ly += 6) {
+      ctx.beginPath();
+      ctx.moveTo(x + 4, ly + Math.sin(ly * 0.5) * 1);
+      ctx.lineTo(x + w - 4, ly + Math.cos(ly * 0.3) * 1);
+      ctx.stroke();
+    }
+
+    // Edge highlight (top)
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.12)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(x + 6, y + 1 + breathe);
+    ctx.lineTo(x + w - 6, y + 1 + breathe);
+    ctx.stroke();
+
+    // Edge shadow (bottom)
+    ctx.strokeStyle = 'rgba(0, 0, 0, 0.15)';
+    ctx.beginPath();
+    ctx.moveTo(x + 6, y + h - 1 + breathe);
+    ctx.lineTo(x + w - 6, y + h - 1 + breathe);
+    ctx.stroke();
+
+    // Draw cracks if cracking
+    if (tab.cracked && crumblingTablet === index) {
+      drawCracks(x, y + breathe, w, h);
+    }
+
+    // Weathered edge chips
+    ctx.fillStyle = COLORS.bgSky;
+    ctx.globalAlpha = 0.4;
+    // Top-left chip
+    ctx.beginPath();
+    ctx.moveTo(x, y + breathe);
+    ctx.lineTo(x + 5, y + breathe);
+    ctx.lineTo(x, y + 4 + breathe);
+    ctx.fill();
+    // Bottom-right chip
+    ctx.beginPath();
+    ctx.moveTo(x + w, y + h + breathe);
+    ctx.lineTo(x + w - 6, y + h + breathe);
+    ctx.lineTo(x + w, y + h - 5 + breathe);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+
+    // Inscription text
+    const lines = tab.wrappedText || [tab.choice.text];
+    const fontSize = tab.fontSize || 16;
+    const lineHeight = fontSize + 3;
+    const totalTextH = lines.length * lineHeight;
+    const textStartY = y + (h - totalTextH) / 2 + lineHeight / 2 + breathe;
+
+    lines.forEach((line, li) => {
+      drawText(line, x + w / 2, textStartY + li * lineHeight, {
+        font: `500 ${fontSize}px 'Nunito', sans-serif`,
+        color: COLORS.textInscription,
+        align: 'center',
+        baseline: 'middle'
+      });
+    });
+
+    // Subtle letter label in corner
+    const labels = ['A', 'B', 'C', 'D'];
+    drawText(labels[index], x + 16, y + 14 + breathe, {
+      font: "600 14px 'Nunito Sans', sans-serif",
+      color: 'rgba(212, 200, 184, 0.5)',
+      align: 'center',
+      baseline: 'middle'
+    });
+  }
+
+  function drawCracks(x, y, w, h) {
+    const progress = Math.min(1, crumbleTime / crumbleDuration);
+    ctx.strokeStyle = 'rgba(28, 21, 16, 0.7)';
+    ctx.lineWidth = 1.5;
+    ctx.globalAlpha = progress;
+
+    // Main diagonal crack
+    ctx.beginPath();
+    ctx.moveTo(x + w * 0.3, y);
+    ctx.lineTo(x + w * 0.35, y + h * 0.3);
+    ctx.lineTo(x + w * 0.5, y + h * 0.5);
+    ctx.lineTo(x + w * 0.45, y + h * 0.8);
+    ctx.lineTo(x + w * 0.55, y + h);
+    ctx.stroke();
+
+    // Secondary crack
+    if (progress > 0.3) {
+      ctx.beginPath();
+      ctx.moveTo(x + w * 0.6, y);
+      ctx.lineTo(x + w * 0.55, y + h * 0.4);
+      ctx.lineTo(x + w * 0.7, y + h * 0.7);
+      ctx.stroke();
+    }
+
+    // Tertiary crack
+    if (progress > 0.5) {
+      ctx.beginPath();
+      ctx.moveTo(x + w * 0.15, y + h * 0.3);
+      ctx.lineTo(x + w * 0.35, y + h * 0.5);
+      ctx.stroke();
+    }
+
+    ctx.globalAlpha = 1;
+  }
+
+  function handleTouch(e, type) {
+    if (gameState !== 'playing') return;
+    if (crumblingTablet !== null) return; // Already crumbling
+
+    if (type === 'start') {
+      const touch = e.touches[0] || e.changedTouches[0];
+      const { x, y } = screenToLogical(touch.clientX, touch.clientY);
+
+      tablets.forEach((tab, i) => {
+        if (tab.crumbled) return;
+        const breathe = Math.sin(gameTime * 1.2 + tab.breatheOffset) * 0.5;
+        const hitRect = { x: tab.x, y: tab.y + breathe, w: tab.w, h: tab.h };
+        if (pointInRect(x, y, hitRect)) {
+          playClickSound();
+          playCrumbleSound();
+          crumblingTablet = i;
+          crumbleTime = 0;
+          selectedChoice = tab.choice;
+          spawnCrumbleFragments(tab);
+          spawnDust(tab);
+
+          // Shake the other tablets slightly
+          tablets.forEach((otherTab, j) => {
+            if (j !== i) {
+              otherTab.shakeTime = 0.3;
+            }
+          });
+        }
+      });
+    }
+  }
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 4: GAME LOOP - DO NOT MODIFY                                      ║
+  // ║  Standard loop with responsive scaling and touch handling.                 ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  let lastTime = performance.now();
+
+  function gameLoop(now) {
+    const dt = Math.min((now - lastTime) / 1000, 0.05); // Cap at 50ms
+    lastTime = now;
+
+    // Apply transform for logical coordinate system (non-uniform scaling)
+    ctx.setTransform(scaleX, 0, 0, scaleY, 0, 0);
+
+    if (gameState === 'playing') {
+      updateGame(dt);
+      drawGame();
+    } else {
+      drawGame(); // Draw game state behind overlay
+      drawEndScreen(dt);
+    }
+
+    // Reset transform for next frame
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+    requestAnimationFrame(gameLoop);
+  }
+
+  // Touch handlers
+  function onTouchStart(e) {
+    e.preventDefault();
+    if (gameState === 'ended') {
+      const touch = e.touches[0];
+      const { x, y } = screenToLogical(touch.clientX, touch.clientY);
+
+      if (gameResult) {
+        // Correct answer: check both buttons
+        if (pointInRect(x, y, restartButton)) {
+          gameState = 'playing';
+          gameResult = null;
+          gameExplanation = '';
+          confettiParticles = [];
+          initGame();
+          return;
+        }
+        if (pointInRect(x, y, nextButton)) {
+          // Notify parent to go to next question
+          if (window.parent && window.parent !== window) {
+            window.parent.postMessage({ type: 'quiz-next' }, '*');
+          }
+          return;
+        }
+      } else {
+        // Wrong answer: check centered restart button
+        if (pointInRect(x, y, centeredRestartButton)) {
+          gameState = 'playing';
+          gameResult = null;
+          gameExplanation = '';
+          confettiParticles = [];
+          initGame();
+          return;
+        }
+      }
+    }
+    handleTouch(e, 'start');
+  }
+
+  function onTouchMove(e) {
+    e.preventDefault();
+    handleTouch(e, 'move');
+  }
+
+  function onTouchEnd(e) {
+    e.preventDefault();
+    handleTouch(e, 'end');
+  }
+
+  canvas.addEventListener('touchstart', onTouchStart, { passive: false });
+  canvas.addEventListener('touchmove', onTouchMove, { passive: false });
+  canvas.addEventListener('touchend', onTouchEnd, { passive: false });
+
+  // Also support mouse for testing in browser
+  canvas.addEventListener('mousedown', (e) => {
+    const fakeTouch = { touches: [{ clientX: e.clientX, clientY: e.clientY }], changedTouches: [{ clientX: e.clientX, clientY: e.clientY }] };
+    onTouchStart(fakeTouch);
+  });
+
+  canvas.addEventListener('mouseup', (e) => {
+    const fakeTouch = { touches: [], changedTouches: [{ clientX: e.clientX, clientY: e.clientY }] };
+    onTouchEnd(fakeTouch);
+  });
+
+  // Handle resize
+  window.addEventListener('resize', resizeCanvas);
+  window.addEventListener('orientationchange', () => {
+    setTimeout(resizeCanvas, 100); // Delay for orientation change to complete
+  });
+
+  // Prevent pull-to-refresh and overscroll
+  document.body.addEventListener('touchmove', (e) => e.preventDefault(), { passive: false });
+
+  // Initialize
+  resizeCanvas();
+  initGame();
+  requestAnimationFrame(gameLoop);
+  </script>
+</body>
+</html>

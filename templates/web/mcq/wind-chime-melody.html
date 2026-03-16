@@ -1,0 +1,981 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Wind Chime Melody</title>
+  <link href="https://fonts.googleapis.com/css2?family=Belanosima:wght@400;600;700&family=Nunito+Sans:wght@400;500;600;700&family=Nunito:wght@400;500;600&display=swap" rel="stylesheet">
+  <!--
+  +══════════════════════════════════════════════════════════════════════════════+
+  |  GAME FACTORY TEMPLATE                                                        |
+  |  This template enforces critical invariants. Follow the section markers.      |
+  +══════════════════════════════════════════════════════════════════════════════+
+  -->
+  <style>
+    /* ═══════════════════════════════════════════════════════════════════════════
+       BASE STYLES - Can be extended, not removed
+       ═══════════════════════════════════════════════════════════════════════════ */
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+    }
+    body {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      background: #1a1a2e;
+      font-family: 'Nunito Sans', system-ui, -apple-system, sans-serif;
+    }
+    #gameCanvas {
+      background: #16213e;
+      border-radius: 8px;
+      display: block;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+  <!-- ═══════════════════════════════════════════════════════════════════════════
+       CANVAS - Sized dynamically to fill available space
+       ═══════════════════════════════════════════════════════════════════════════ -->
+  <canvas id="gameCanvas"></canvas>
+
+  <script>
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 1: QUESTION PLACEHOLDER - DO NOT MODIFY FORMAT                    ║
+  // ║  Platform replaces this at runtime. Use these exact 60-char answers.       ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  const QUESTION = {
+    type: "mcq",
+    prompt: "Sample question text",
+    choices: [
+      { text: "This is sample answer A which is long enough to test text overflow", is_correct: true, explanation: "Why A is correct" },
+      { text: "This is sample answer B which is long enough to test text overflow", is_correct: false, explanation: "Why B is wrong" },
+      { text: "This is sample answer C which is long enough to test text overflow", is_correct: false, explanation: "Why C is wrong" },
+      { text: "This is sample answer D which is long enough to test text overflow", is_correct: false, explanation: "Why D is wrong" }
+    ],
+    isLastQuestion: false
+  };
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 2: ENGINE CORE - DO NOT MODIFY                                    ║
+  // ║  Standard engine interface and end screen. This is sacred.                 ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  const canvas = document.getElementById('gameCanvas');
+  const ctx = canvas.getContext('2d');
+
+  // Logical dimensions (game code works in this coordinate space)
+  const W = 720, H = 540;
+
+  // Scaling state (computed on resize)
+  let scale = 1;
+  let dpr = 1;
+
+  let gameState = 'playing'; // 'playing' | 'ended'
+  let gameResult = null;     // true (correct) | false (wrong)
+  let gameExplanation = '';
+  let endScreenTime = 0;
+  let confettiParticles = [];
+
+  // End screen button bounds (logical coordinates)
+  const restartButton = { x: W / 2 - 170, y: H / 2 + 60, w: 150, h: 48 };
+  const nextButton = { x: W / 2 + 20, y: H / 2 + 60, w: 150, h: 48 };
+
+  /** Check if point is inside rectangle */
+  function pointInRect(px, py, rect) {
+    return px >= rect.x && px <= rect.x + rect.w &&
+           py >= rect.y && py <= rect.y + rect.h;
+  }
+
+  /** Draw a styled button */
+  function drawButton(rect, label, color, pulse) {
+    const p = pulse ? 1 + Math.sin(endScreenTime * 4) * 0.03 : 1;
+    ctx.save();
+    ctx.translate(rect.x + rect.w / 2, rect.y + rect.h / 2);
+    ctx.scale(p, p);
+    ctx.translate(-(rect.x + rect.w / 2), -(rect.y + rect.h / 2));
+
+    // Button background
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.roundRect(rect.x, rect.y, rect.w, rect.h, 12);
+    ctx.fill();
+
+    // Button text
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = "bold 18px 'Nunito Sans', sans-serif";
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, rect.x + rect.w / 2, rect.y + rect.h / 2);
+
+    ctx.restore();
+  }
+
+  /**
+   * Resize canvas to fill available space with proper DPR scaling.
+   * Maintains logical coordinate system (720x540).
+   */
+  function resizeCanvas() {
+    dpr = window.devicePixelRatio || 1;
+
+    // Get available space
+    const availW = window.innerWidth;
+    const availH = window.innerHeight;
+
+    // Calculate scale to fit logical space (720x540) in available space
+    const scaleX = availW / W;
+    const scaleY = availH / H;
+    scale = Math.min(scaleX, scaleY);
+
+    // Physical canvas buffer (DPR-scaled for crisp rendering)
+    canvas.width = W * scale * dpr;
+    canvas.height = H * scale * dpr;
+
+    // CSS display size
+    canvas.style.width = (W * scale) + 'px';
+    canvas.style.height = (H * scale) + 'px';
+  }
+
+  /**
+   * Convert screen coordinates to logical coordinates.
+   * Use this for mouse/click events to get positions in 720x540 space.
+   */
+  function screenToLogical(screenX, screenY) {
+    const rect = canvas.getBoundingClientRect();
+    return {
+      x: (screenX - rect.left) * (W / rect.width),
+      y: (screenY - rect.top) * (H / rect.height)
+    };
+  }
+
+  const engine = {
+    /** Call this to end the game. DO NOT draw your own end screen. */
+    end(isCorrect, explanation) {
+      if (gameState === 'ended') return;
+      gameState = 'ended';
+      gameResult = isCorrect;
+      gameExplanation = explanation || '';
+      endScreenTime = 0;
+
+      // Spawn confetti for correct answers
+      if (isCorrect) {
+        for (let i = 0; i < 50; i++) {
+          confettiParticles.push({
+            x: W / 2,
+            y: H / 2,
+            vx: (Math.random() - 0.5) * 600,
+            vy: -Math.random() * 400 - 100,
+            size: 4 + Math.random() * 6,
+            color: ['#FFD700', '#FF6B6B', '#4ECDC4', '#95E1D3', '#F38181'][Math.floor(Math.random() * 5)],
+            rotation: Math.random() * Math.PI * 2,
+            rotationSpeed: (Math.random() - 0.5) * 10
+          });
+        }
+      }
+
+      // Notify parent frame
+      if (window.parent && window.parent !== window) {
+        window.parent.postMessage({
+          type: 'quiz-end',
+          isCorrect: isCorrect,
+          explanation: explanation || ''
+        }, '*');
+      }
+    }
+  };
+
+  /** STANDARD END SCREEN - DO NOT MODIFY */
+  function drawEndScreen(dt) {
+    endScreenTime += dt;
+
+    // Update confetti
+    confettiParticles = confettiParticles.filter(p => {
+      p.vy += 800 * dt; // gravity
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.rotation += p.rotationSpeed * dt;
+      p.vx *= 0.99;
+      return p.y < H + 50;
+    });
+
+    // Dark overlay
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
+    ctx.fillRect(0, 0, W, H);
+
+    // Draw confetti
+    confettiParticles.forEach(p => {
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rotation);
+      ctx.fillStyle = p.color;
+      ctx.fillRect(-p.size / 2, -p.size / 4, p.size, p.size / 2);
+      ctx.restore();
+    });
+
+    // Result emoji
+    ctx.font = '72px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(gameResult ? '🎉' : '😢', W / 2, H / 2 - 50);
+
+    // Result text
+    ctx.fillStyle = gameResult ? '#4ADE80' : '#F87171';
+    ctx.font = "bold 36px 'Nunito Sans', sans-serif";
+    ctx.fillText(gameResult ? 'Correct!' : 'Wrong!', W / 2, H / 2 + 20);
+
+    // Buttons
+    if (gameResult) {
+      // Correct: show both Restart and Next/Finish
+      drawButton(restartButton, 'Restart', '#E87A3E', true);
+      const nextLabel = QUESTION.isLastQuestion ? 'Finish' : 'Next';
+      drawButton(nextButton, nextLabel, '#4ECDC4', true);
+    } else {
+      // Wrong: show only centered Restart button
+      const centeredRestart = { x: W / 2 - 75, y: H / 2 + 60, w: 150, h: 48 };
+      drawButton(centeredRestart, 'Restart', '#E87A3E', true);
+    }
+  }
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 3: YOUR GAME CODE - IMPLEMENT THESE FUNCTIONS                     ║
+  // ║  This is where your game logic goes. See requirements below.               ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+
+  // === COLORS ===
+  const COLORS = {
+    bgPrimary: '#FAFAF7',
+    bgSurface: '#FFFFFF',
+    bgSurfaceSecondary: '#F5F5F0',
+    textPrimary: '#2B2B28',
+    textSecondary: '#5A5A54',
+    textTertiary: '#8C8C84',
+    orange: '#E87A3E',
+    orangeHover: '#D66B31',
+    amber: '#F5A742',
+    cyan: '#4ECDC4',
+    cyanHover: '#45B8B0',
+    success: '#6BBF59',
+    error: '#E85D4A',
+    borderSubtle: '#E6E6E0',
+    borderStrong: '#D4D4CC',
+    peach: '#FFB89D'
+  };
+
+  // === AUDIO ===
+  const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+  function playChimeSound(freq, duration) {
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    const filter = audioCtx.createBiquadFilter();
+    osc.type = 'sine';
+    osc.frequency.value = freq;
+    filter.type = 'highpass';
+    filter.frequency.value = 200;
+    gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration);
+    osc.connect(filter);
+    filter.connect(gain);
+    gain.connect(audioCtx.destination);
+    osc.start();
+    osc.stop(audioCtx.currentTime + duration);
+  }
+
+  function playCorrectSound() {
+    playChimeSound(523, 0.3);
+    setTimeout(() => playChimeSound(659, 0.3), 100);
+    setTimeout(() => playChimeSound(784, 0.5), 200);
+  }
+
+  function playWrongSound() {
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = 'sawtooth';
+    osc.frequency.value = 150;
+    gain.gain.setValueAtTime(0.15, audioCtx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.4);
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    osc.start();
+    osc.stop(audioCtx.currentTime + 0.4);
+  }
+
+  function playWindSound() {
+    const bufferSize = audioCtx.sampleRate * 0.5;
+    const buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < bufferSize; i++) {
+      data[i] = (Math.random() * 2 - 1) * 0.1;
+    }
+    const source = audioCtx.createBufferSource();
+    source.buffer = buffer;
+    const filter = audioCtx.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.frequency.value = 400;
+    const gain = audioCtx.createGain();
+    gain.gain.setValueAtTime(0.08, audioCtx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.5);
+    source.connect(filter);
+    filter.connect(gain);
+    gain.connect(audioCtx.destination);
+    source.start();
+  }
+
+  // === GAME STATE ===
+  let chimes = [];
+  let branch = {};
+  let wind = { active: false, startTime: 0, strength: 0, targetChime: -1, released: false };
+  let gameTime = 0;
+  let hoveredChime = -1;
+  let mousePos = { x: 0, y: 0 };
+  let mouseDown = false;
+  let windParticles = [];
+  let selectionMade = false;
+  let selectedChimeIndex = -1;
+  let selectionFeedbackTime = 0;
+  let entranceProgress = 0;
+
+  // Chime frequencies (pentatonic scale)
+  const CHIME_FREQS = [523, 587, 659, 784];
+
+  function wrapText(text, maxWidth, font) {
+    ctx.font = font;
+    const words = text.split(' ');
+    const lines = [];
+    let currentLine = '';
+
+    for (const word of words) {
+      const testLine = currentLine ? currentLine + ' ' + word : word;
+      if (ctx.measureText(testLine).width > maxWidth) {
+        if (currentLine) lines.push(currentLine);
+        currentLine = word;
+      } else {
+        currentLine = testLine;
+      }
+    }
+    if (currentLine) lines.push(currentLine);
+    return lines;
+  }
+
+  function initGame() {
+    gameTime = 0;
+    hoveredChime = -1;
+    mouseDown = false;
+    selectionMade = false;
+    selectedChimeIndex = -1;
+    selectionFeedbackTime = 0;
+    entranceProgress = 0;
+    windParticles = [];
+    wind = { active: false, startTime: 0, strength: 0, targetChime: -1, released: false };
+
+    // Branch across the top
+    branch = {
+      x1: 80, y1: 55,
+      x2: 640, y2: 45,
+      thickness: 8
+    };
+
+    // 4 chimes hanging from the branch
+    const chimeSpacing = (branch.x2 - branch.x1 - 80) / 3;
+    chimes = QUESTION.choices.map((choice, i) => {
+      const bx = branch.x1 + 40 + i * chimeSpacing;
+      const by = 55 + (i % 2 === 0 ? 0 : -5);
+      return {
+        choice: choice,
+        index: i,
+        anchorX: bx,
+        anchorY: by,
+        // Chime tube
+        tubeLength: 90 + i * 15,
+        tubeWidth: 12 + i * 2,
+        // String
+        stringLength: 30 + (i % 2) * 10,
+        // Swing
+        angle: 0,
+        angularVel: 0,
+        // Vibration
+        vibration: 0,
+        vibrationDecay: 0.97,
+        // Answer label
+        labelY: 0,
+        // Entrance animation
+        scale: 0,
+        alpha: 0,
+        // Hover
+        hovered: false,
+        // Colors for each chime
+        color: [COLORS.cyan, COLORS.amber, COLORS.orange, COLORS.peach][i],
+        highlightColor: ['#7DE8E0', '#F8C06A', '#F09A6A', '#FFD0BC'][i]
+      };
+    });
+  }
+
+  function updateGame(dt) {
+    if (gameState !== 'playing') return;
+
+    gameTime += dt;
+
+    // Entrance animation
+    if (entranceProgress < 1) {
+      entranceProgress = Math.min(1, entranceProgress + dt * 2);
+      chimes.forEach((c, i) => {
+        const stagger = i * 0.12;
+        const t = Math.max(0, Math.min(1, (entranceProgress - stagger) / 0.5));
+        const spring = 1 + Math.sin(t * Math.PI * 2) * 0.2 * (1 - t);
+        c.scale = t * spring;
+        c.alpha = Math.min(1, t * 2);
+      });
+    }
+
+    // Natural ambient swaying
+    chimes.forEach((c, i) => {
+      const naturalForce = Math.sin(gameTime * 0.5 + i * 1.2) * 0.003;
+      c.angularVel += naturalForce;
+    });
+
+    // Wind force when mouse is held
+    if (wind.active && !wind.released) {
+      wind.strength = Math.min(1, (gameTime - wind.startTime) * 0.8);
+
+      // Apply wind force to all chimes, strongest on closest to mouse
+      chimes.forEach((c, i) => {
+        const dist = Math.abs(mousePos.x - c.anchorX);
+        const influence = Math.max(0, 1 - dist / 300);
+        const force = wind.strength * influence * 0.08;
+        c.angularVel += force * dt * 60;
+        c.vibration = Math.max(c.vibration, wind.strength * influence * 0.5);
+      });
+
+      // Spawn wind particles
+      if (Math.random() < wind.strength * 3) {
+        windParticles.push({
+          x: 0,
+          y: mousePos.y + (Math.random() - 0.5) * 100,
+          vx: 200 + Math.random() * 300 * wind.strength,
+          vy: (Math.random() - 0.5) * 40,
+          alpha: 0.4 + Math.random() * 0.3,
+          size: 2 + Math.random() * 4
+        });
+      }
+    }
+
+    // After release: chimes vibrate freely, find the most vibrating one
+    if (wind.released && !selectionMade) {
+      // Chimes vibrate and slowly decay
+      let maxVib = 0;
+      let maxVibIndex = -1;
+      chimes.forEach((c, i) => {
+        if (Math.abs(c.vibration) > maxVib) {
+          maxVib = Math.abs(c.vibration);
+          maxVibIndex = i;
+        }
+      });
+      wind.targetChime = maxVibIndex;
+    }
+
+    // Physics for each chime
+    chimes.forEach((c) => {
+      // Pendulum physics
+      const gravity = -0.015;
+      c.angularVel += gravity * Math.sin(c.angle);
+      c.angularVel *= 0.995; // Damping
+      c.angle += c.angularVel * dt * 60;
+      c.angle = Math.max(-0.4, Math.min(0.4, c.angle));
+
+      // Vibration decay
+      c.vibration *= c.vibrationDecay;
+      if (c.vibration < 0.01) c.vibration = 0;
+    });
+
+    // Update wind particles
+    windParticles = windParticles.filter(p => {
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.alpha -= dt * 0.8;
+      return p.alpha > 0 && p.x < W;
+    });
+
+    // Selection feedback animation
+    if (selectionMade) {
+      selectionFeedbackTime += dt;
+      if (selectionFeedbackTime > 0.6) {
+        const choice = chimes[selectedChimeIndex].choice;
+        if (choice.is_correct) {
+          playCorrectSound();
+        } else {
+          playWrongSound();
+        }
+        engine.end(choice.is_correct, choice.explanation);
+      }
+    }
+  }
+
+  function drawGame() {
+    // Sky gradient background
+    const skyGrad = ctx.createLinearGradient(0, 0, 0, H);
+    skyGrad.addColorStop(0, '#E8F4FD');
+    skyGrad.addColorStop(0.5, COLORS.bgPrimary);
+    skyGrad.addColorStop(1, '#F0EDE8');
+    ctx.fillStyle = skyGrad;
+    ctx.fillRect(0, 0, W, H);
+
+    // Subtle background clouds
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+    drawCloud(100, 80, 40);
+    drawCloud(500, 120, 30);
+    drawCloud(620, 60, 25);
+
+    // Draw branch
+    drawBranch();
+
+    // Draw wind particles
+    windParticles.forEach(p => {
+      ctx.globalAlpha = p.alpha;
+      ctx.fillStyle = COLORS.cyan;
+      ctx.beginPath();
+      ctx.ellipse(p.x, p.y, p.size * 2, p.size * 0.5, 0, 0, Math.PI * 2);
+      ctx.fill();
+    });
+    ctx.globalAlpha = 1;
+
+    // Draw strings and chimes
+    chimes.forEach((c, i) => {
+      if (c.alpha <= 0) return;
+      ctx.globalAlpha = c.alpha;
+
+      ctx.save();
+      ctx.translate(c.anchorX, c.anchorY);
+
+      // Swing rotation from anchor
+      const totalAngle = c.angle + Math.sin(gameTime * 8 + i) * c.vibration * 0.15;
+      ctx.rotate(totalAngle);
+
+      // String
+      ctx.strokeStyle = COLORS.textTertiary;
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      ctx.lineTo(0, c.stringLength);
+      ctx.stroke();
+
+      // Chime tube
+      const tubeY = c.stringLength;
+      const tubeX = -c.tubeWidth / 2;
+
+      // Vibration visual effect
+      const vibOffset = Math.sin(gameTime * 20 + i * 3) * c.vibration * 3;
+
+      // Glow when vibrating
+      if (c.vibration > 0.1) {
+        ctx.shadowColor = c.color;
+        ctx.shadowBlur = c.vibration * 20;
+      }
+
+      // Tube gradient
+      const tubeGrad = ctx.createLinearGradient(tubeX + vibOffset, tubeY, tubeX + c.tubeWidth + vibOffset, tubeY);
+      tubeGrad.addColorStop(0, c.color);
+      tubeGrad.addColorStop(0.5, c.highlightColor);
+      tubeGrad.addColorStop(1, c.color);
+
+      // Main tube body
+      ctx.fillStyle = tubeGrad;
+      ctx.beginPath();
+      ctx.roundRect(tubeX + vibOffset, tubeY, c.tubeWidth, c.tubeLength, 4);
+      ctx.fill();
+
+      // Tube highlight stripe
+      ctx.fillStyle = 'rgba(255,255,255,0.3)';
+      ctx.beginPath();
+      ctx.roundRect(tubeX + vibOffset + 2, tubeY + 4, 3, c.tubeLength - 8, 2);
+      ctx.fill();
+
+      ctx.shadowColor = 'transparent';
+      ctx.shadowBlur = 0;
+
+      // Small clapper at bottom
+      ctx.fillStyle = COLORS.textSecondary;
+      ctx.beginPath();
+      ctx.arc(vibOffset, tubeY + c.tubeLength + 8, 4, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.restore();
+
+      // Label letter (A, B, C, D) on top of the tube
+      ctx.save();
+      const labelX = c.anchorX + Math.sin(c.angle) * (c.stringLength + 20);
+      const labelY = c.anchorY + Math.cos(c.angle) * (c.stringLength + 20);
+      ctx.font = "700 18px 'Nunito Sans', sans-serif";
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = COLORS.textPrimary;
+      ctx.fillText(String.fromCharCode(65 + i), labelX, labelY);
+      ctx.restore();
+
+      ctx.globalAlpha = 1;
+    });
+
+    // Draw wind strength indicator when holding
+    if (wind.active && !wind.released && !selectionMade) {
+      drawWindIndicator();
+    }
+
+    // Draw target indicator after release
+    if (wind.released && !selectionMade && wind.targetChime >= 0) {
+      const tc = chimes[wind.targetChime];
+      ctx.save();
+      ctx.globalAlpha = 0.5 + Math.sin(gameTime * 6) * 0.3;
+      ctx.strokeStyle = COLORS.orange;
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      const indicX = tc.anchorX;
+      const indicY = tc.anchorY + tc.stringLength + tc.tubeLength / 2;
+      ctx.arc(indicX, indicY, tc.tubeWidth + 12, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    // Draw answer labels at bottom
+    drawAnswerLabels();
+
+    // Selection feedback
+    if (selectionMade && selectedChimeIndex >= 0) {
+      const sc = chimes[selectedChimeIndex];
+      const pulse = 1 + Math.sin(selectionFeedbackTime * 12) * 0.1;
+      ctx.save();
+      ctx.globalAlpha = 0.6;
+      ctx.strokeStyle = COLORS.orange;
+      ctx.lineWidth = 4 * pulse;
+      ctx.beginPath();
+      ctx.arc(sc.anchorX, sc.anchorY + sc.stringLength + sc.tubeLength / 2, sc.tubeWidth + 18, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    }
+  }
+
+  function drawCloud(cx, cy, size) {
+    ctx.beginPath();
+    ctx.arc(cx, cy, size, 0, Math.PI * 2);
+    ctx.arc(cx + size * 0.8, cy - size * 0.2, size * 0.7, 0, Math.PI * 2);
+    ctx.arc(cx + size * 1.4, cy, size * 0.6, 0, Math.PI * 2);
+    ctx.arc(cx - size * 0.6, cy + size * 0.1, size * 0.5, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  function drawBranch() {
+    ctx.save();
+    // Main branch
+    ctx.strokeStyle = '#8B6914';
+    ctx.lineWidth = branch.thickness;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(branch.x1, branch.y1);
+    ctx.quadraticCurveTo(W / 2, branch.y1 - 15, branch.x2, branch.y2);
+    ctx.stroke();
+
+    // Branch texture
+    ctx.strokeStyle = '#A07D1A';
+    ctx.lineWidth = branch.thickness - 3;
+    ctx.beginPath();
+    ctx.moveTo(branch.x1 + 10, branch.y1);
+    ctx.quadraticCurveTo(W / 2, branch.y1 - 13, branch.x2 - 10, branch.y2);
+    ctx.stroke();
+
+    // Small leaves on branch
+    const leafColors = ['#6BBF59', '#7DCC6C', '#5AAF4A'];
+    for (let i = 0; i < 6; i++) {
+      const t = 0.1 + (i / 6) * 0.8;
+      const lx = branch.x1 + t * (branch.x2 - branch.x1);
+      const ly = branch.y1 + t * (branch.y2 - branch.y1) - 10 + Math.sin(gameTime * 0.8 + i) * 2;
+      ctx.fillStyle = leafColors[i % leafColors.length];
+      ctx.beginPath();
+      ctx.ellipse(lx, ly - 8, 8, 4, -0.5 + Math.sin(gameTime + i) * 0.1, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  function drawWindIndicator() {
+    const barX = 30;
+    const barY = H - 80;
+    const barW = 120;
+    const barH = 16;
+
+    ctx.fillStyle = COLORS.borderSubtle;
+    ctx.beginPath();
+    ctx.roundRect(barX, barY, barW, barH, 8);
+    ctx.fill();
+
+    const fillW = barW * wind.strength;
+    const barGrad = ctx.createLinearGradient(barX, barY, barX + fillW, barY);
+    barGrad.addColorStop(0, COLORS.cyan);
+    barGrad.addColorStop(1, COLORS.orange);
+    ctx.fillStyle = barGrad;
+    ctx.beginPath();
+    ctx.roundRect(barX, barY, fillW, barH, 8);
+    ctx.fill();
+
+    ctx.font = "500 14px 'Nunito Sans', sans-serif";
+    ctx.fillStyle = COLORS.textSecondary;
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'bottom';
+    ctx.fillText('Wind', barX, barY - 6);
+  }
+
+  function drawAnswerLabels() {
+    const labelAreaY = H - 210;
+    const labelW = 480;
+    const labelH = 40;
+    const gap = 5;
+    const startX = (W - labelW) / 2;
+    const startY = labelAreaY;
+    const answerFont = "400 16px 'Nunito', sans-serif";
+
+    chimes.forEach((c, i) => {
+      const y = startY + i * (labelH + gap);
+      const isHovered = hoveredChime === i;
+      const isSelected = selectedChimeIndex === i;
+
+      // Background
+      ctx.fillStyle = isSelected ? '#FFF4ED' : (isHovered ? '#E8F9F8' : COLORS.bgSurface);
+      ctx.strokeStyle = isSelected ? COLORS.orange : (isHovered ? COLORS.cyan : COLORS.borderSubtle);
+      ctx.lineWidth = isSelected ? 2.5 : (isHovered ? 2 : 1.5);
+      ctx.beginPath();
+      ctx.roundRect(startX, y, labelW, labelH, 8);
+      ctx.fill();
+      ctx.stroke();
+
+      // Letter badge
+      const badgeX = startX + 8;
+      const badgeY = y + (labelH - 22) / 2;
+      ctx.fillStyle = c.color;
+      ctx.beginPath();
+      ctx.roundRect(badgeX, badgeY, 22, 22, 6);
+      ctx.fill();
+
+      ctx.font = "700 14px 'Nunito Sans', sans-serif";
+      ctx.fillStyle = '#FFFFFF';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(String.fromCharCode(65 + i), badgeX + 11, badgeY + 11);
+
+      // Answer text (wrap if needed)
+      ctx.font = answerFont;
+      ctx.fillStyle = COLORS.textPrimary;
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
+      const textX = startX + 38;
+      const maxTextW = labelW - 48;
+      const lines = wrapText(c.choice.text, maxTextW, answerFont);
+
+      if (lines.length === 1) {
+        ctx.fillText(lines[0], textX, y + labelH / 2);
+      } else {
+        const lineH = 16;
+        const totalH = lines.length * lineH;
+        const topY = y + (labelH - totalH) / 2 + lineH / 2;
+        lines.forEach((line, li) => {
+          ctx.fillText(line, textX, topY + li * lineH);
+        });
+      }
+
+      // Store bounds for hit testing
+      c.labelBounds = { x: startX, y: y, w: labelW, h: labelH };
+    });
+  }
+
+  // === INPUT HANDLING ===
+
+  function handleInput(e) {
+    if (gameState !== 'playing') return;
+    // No keyboard needed for this game
+  }
+
+  // Mouse handlers
+  canvas.addEventListener('mousedown', (e) => {
+    if (gameState !== 'playing' || selectionMade) return;
+
+    // Resume audio context on first interaction
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+
+    const { x, y } = screenToLogical(e.clientX, e.clientY);
+    mousePos = { x, y };
+    mouseDown = true;
+
+    // Check if clicking on an answer label directly
+    for (let i = 0; i < chimes.length; i++) {
+      const b = chimes[i].labelBounds;
+      if (b && pointInRect(x, y, b)) {
+        selectChime(i);
+        return;
+      }
+    }
+
+    // Start wind
+    wind.active = true;
+    wind.startTime = gameTime;
+    wind.strength = 0;
+    wind.released = false;
+    playWindSound();
+  });
+
+  canvas.addEventListener('mousemove', (e) => {
+    if (gameState !== 'playing') return;
+    const { x, y } = screenToLogical(e.clientX, e.clientY);
+    mousePos = { x, y };
+
+    // Check hover over answer labels
+    hoveredChime = -1;
+    for (let i = 0; i < chimes.length; i++) {
+      const b = chimes[i].labelBounds;
+      if (b && pointInRect(x, y, b)) {
+        hoveredChime = i;
+        break;
+      }
+    }
+  });
+
+  canvas.addEventListener('mouseup', (e) => {
+    if (gameState !== 'playing' || selectionMade) return;
+    const { x, y } = screenToLogical(e.clientX, e.clientY);
+    mouseDown = false;
+
+    if (wind.active && !wind.released) {
+      wind.released = true;
+
+      // Give chimes a burst of vibration based on wind strength
+      chimes.forEach((c, i) => {
+        const dist = Math.abs(mousePos.x - c.anchorX);
+        const influence = Math.max(0, 1 - dist / 300);
+        c.vibration += wind.strength * influence * 2;
+        c.angularVel += wind.strength * influence * 0.1;
+
+        // Play chime sound proportional to vibration
+        if (influence > 0.2) {
+          setTimeout(() => {
+            playChimeSound(CHIME_FREQS[i], 0.5 + influence * 0.5);
+          }, i * 60);
+        }
+      });
+
+      // Auto-select the most vibrating chime after a delay
+      setTimeout(() => {
+        if (!selectionMade && gameState === 'playing') {
+          let maxVib = 0;
+          let maxIdx = 0;
+          chimes.forEach((c, i) => {
+            if (c.vibration > maxVib) {
+              maxVib = c.vibration;
+              maxIdx = i;
+            }
+          });
+          selectChime(maxIdx);
+        }
+      }, 800);
+    }
+  });
+
+  function selectChime(index) {
+    if (selectionMade) return;
+    selectionMade = true;
+    selectedChimeIndex = index;
+    selectionFeedbackTime = 0;
+
+    // Boost vibration on selected chime
+    chimes[index].vibration = 2;
+    playChimeSound(CHIME_FREQS[index], 1);
+  }
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 4: GAME LOOP - DO NOT MODIFY                                      ║
+  // ║  Standard loop with responsive scaling and DPR support.                    ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  let lastTime = performance.now();
+
+  function gameLoop(now) {
+    const dt = Math.min((now - lastTime) / 1000, 0.05); // Cap at 50ms
+    lastTime = now;
+
+    // Apply transform for logical coordinate system
+    ctx.setTransform(scale * dpr, 0, 0, scale * dpr, 0, 0);
+
+    if (gameState === 'playing') {
+      updateGame(dt);
+      drawGame();
+    } else {
+      drawGame(); // Draw game state behind overlay
+      drawEndScreen(dt);
+    }
+
+    // Reset transform for next frame
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+    requestAnimationFrame(gameLoop);
+  }
+
+  // Input handlers
+  document.addEventListener('keydown', (e) => {
+    if (gameState === 'ended' && (e.code === 'KeyR')) {
+      // Restart game
+      gameState = 'playing';
+      gameResult = null;
+      gameExplanation = '';
+      confettiParticles = [];
+      initGame();
+      return;
+    }
+    handleInput(e);
+  });
+
+  document.addEventListener('keyup', (e) => {
+    // Optional: handle key release in your handleInput
+  });
+
+  // Canvas click handler for end screen buttons
+  canvas.addEventListener('click', (e) => {
+    if (gameState !== 'ended') return;
+
+    const { x, y } = screenToLogical(e.clientX, e.clientY);
+
+    if (gameResult) {
+      // Correct answer: check both buttons
+      if (pointInRect(x, y, restartButton)) {
+        gameState = 'playing';
+        gameResult = null;
+        gameExplanation = '';
+        confettiParticles = [];
+        initGame();
+        return;
+      }
+      if (pointInRect(x, y, nextButton)) {
+        // Notify parent to go to next question
+        if (window.parent && window.parent !== window) {
+          window.parent.postMessage({ type: 'quiz-next' }, '*');
+        }
+        return;
+      }
+    } else {
+      // Wrong answer: check centered restart button
+      const centeredRestart = { x: W / 2 - 75, y: H / 2 + 60, w: 150, h: 48 };
+      if (pointInRect(x, y, centeredRestart)) {
+        gameState = 'playing';
+        gameResult = null;
+        gameExplanation = '';
+        confettiParticles = [];
+        initGame();
+        return;
+      }
+    }
+  });
+
+  // Handle resize
+  window.addEventListener('resize', resizeCanvas);
+
+  // Initialize
+  resizeCanvas();
+  initGame();
+  requestAnimationFrame(gameLoop);
+  </script>
+</body>
+</html>

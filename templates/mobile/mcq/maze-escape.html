@@ -1,0 +1,1368 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <title>Maze Escape</title>
+  <link href="https://fonts.googleapis.com/css2?family=Belanosima:wght@400;600;700&family=Nunito+Sans:wght@400;500;600;700&family=Nunito:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      touch-action: none;
+      -webkit-touch-callout: none;
+      -webkit-user-select: none;
+      user-select: none;
+    }
+    body {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      background: #1C1C1A;
+      font-family: 'Nunito Sans', system-ui, -apple-system, sans-serif;
+    }
+    #gameCanvas {
+      background: #2A2A27;
+      width: 100vw;
+      height: 100vh;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="gameCanvas"></canvas>
+
+  <script>
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 1: QUESTION PLACEHOLDER - DO NOT MODIFY FORMAT                    ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  const QUESTION = {
+    type: "mcq",
+    prompt: "Sample question text",
+    choices: [
+      { text: "This is sample answer A which is long enough to test text overflow", is_correct: true, explanation: "Why A is correct" },
+      { text: "This is sample answer B which is long enough to test text overflow", is_correct: false, explanation: "Why B is wrong" },
+      { text: "This is sample answer C which is long enough to test text overflow", is_correct: false, explanation: "Why C is wrong" },
+      { text: "This is sample answer D which is long enough to test text overflow", is_correct: false, explanation: "Why D is wrong" }
+    ],
+    isLastQuestion: false
+  };
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 2: ENGINE CORE (MOBILE) - DO NOT MODIFY                           ║
+  // ║  Non-uniform scaling (fills container), touch input, tap-to-restart.       ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  const canvas = document.getElementById('gameCanvas');
+  const ctx = canvas.getContext('2d');
+
+  // Logical dimensions (game code works in this coordinate space)
+  const W = 360, H = 640;
+
+  // Scaling state (computed on resize)
+  let scaleX = 1;
+  let scaleY = 1;
+  let aspectRatio = 1;  // scaleX/scaleY - use for proportional shapes
+
+  // Game state
+  let gameState = 'playing'; // 'playing' | 'ended'
+  let gameResult = null;     // true (correct) | false (wrong)
+  let gameExplanation = '';
+  let endScreenTime = 0;
+  let confettiParticles = [];
+
+  // End screen button bounds (logical coordinates)
+  const restartButton = { x: 20, y: H / 2 + 50, w: 155, h: 56 };
+  const nextButton = { x: 185, y: H / 2 + 50, w: 155, h: 56 };
+  // Centered restart button for wrong answers
+  const centeredRestartButton = { x: W / 2 - 100, y: H / 2 + 50, w: 200, h: 56 };
+
+  /** Draw a styled button with aspect-ratio aware text */
+  function drawMobileButton(rect, label, color, pulse) {
+    const textAdj = getTextScaleAdjustment();
+    const p = pulse ? 1 + Math.sin(endScreenTime * 4) * 0.03 : 1;
+
+    ctx.save();
+    ctx.translate(rect.x + rect.w / 2, rect.y + rect.h / 2);
+    ctx.scale(p, p);
+    ctx.translate(-(rect.x + rect.w / 2), -(rect.y + rect.h / 2));
+
+    // Button background
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.roundRect(rect.x, rect.y, rect.w, rect.h, 12);
+    ctx.fill();
+
+    // Button text (aspect-ratio aware)
+    ctx.save();
+    ctx.translate(rect.x + rect.w / 2, rect.y + rect.h / 2);
+    ctx.scale(textAdj / aspectRatio, textAdj);
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = 'bold 18px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, 0, 0);
+    ctx.restore();
+
+    ctx.restore();
+  }
+
+  /**
+   * Resize canvas to fill viewport completely (no letterboxing).
+   * Uses non-uniform scaling - game code works in 360×640 logical space.
+   * Use aspectRatio to draw proportionally correct shapes.
+   */
+  function resizeCanvas() {
+    const dpr = window.devicePixelRatio || 1;
+
+    // Physical canvas size (actual pixels)
+    canvas.width = window.innerWidth * dpr;
+    canvas.height = window.innerHeight * dpr;
+
+    // CSS size (fills viewport)
+    canvas.style.width = window.innerWidth + 'px';
+    canvas.style.height = window.innerHeight + 'px';
+
+    // Non-uniform scaling to fill entire canvas
+    scaleX = canvas.width / W;
+    scaleY = canvas.height / H;
+
+    // Aspect ratio for proportional shape drawing
+    // >1 means container is wider than logical space
+    // <1 means container is taller than logical space
+    aspectRatio = scaleX / scaleY;
+
+    // Recalculate text sizing on resize (implement this in SECTION 3)
+    if (typeof recalculateTextSizing === 'function') {
+      recalculateTextSizing();
+    }
+  }
+
+  // === ASPECT-RATIO-AWARE TEXT WITH CLAMPED SCALING ===
+  // Text gets stretched by non-uniform scaling, so we compensate.
+  // Also clamp the effective scale to keep text legible at all sizes.
+  const TEXT_SCALE_MIN = 0.75;
+  const TEXT_SCALE_MAX = 1.4;
+
+  function getTextScaleAdjustment() {
+    const baseScale = window.innerHeight / H;
+    const clampedScale = Math.min(TEXT_SCALE_MAX, Math.max(TEXT_SCALE_MIN, baseScale));
+    return clampedScale / baseScale;
+  }
+
+  /**
+   * Draw text with aspect-ratio compensation and clamped scaling.
+   * Use this instead of raw ctx.fillText() to prevent text stretching.
+   * Default font is 16px (minimum for answer text). Use 18-20px for better readability.
+   */
+  function drawText(text, x, y, options = {}) {
+    const { font = "500 16px system-ui, sans-serif", color = '#F5F5F0', align = 'center', baseline = 'middle' } = options;
+    ctx.save();
+    ctx.translate(x, y);
+    const adj = getTextScaleAdjustment();
+    ctx.scale(adj / aspectRatio, adj);
+    ctx.font = font;
+    ctx.fillStyle = color;
+    ctx.textAlign = align;
+    ctx.textBaseline = baseline;
+    ctx.fillText(text, 0, 0);
+    ctx.restore();
+  }
+
+  /**
+   * Convert screen coordinates to logical coordinates.
+   * Use this in handleTouch to get positions in 360×640 space.
+   */
+  function screenToLogical(screenX, screenY) {
+    const dpr = window.devicePixelRatio || 1;
+    const rect = canvas.getBoundingClientRect();
+    const canvasX = (screenX - rect.left) * dpr;
+    const canvasY = (screenY - rect.top) * dpr;
+    return {
+      x: canvasX / scaleX,
+      y: canvasY / scaleY
+    };
+  }
+
+  /**
+   * Check if a point is inside a rectangle (logical coordinates).
+   */
+  function pointInRect(px, py, rect) {
+    return px >= rect.x && px <= rect.x + rect.w &&
+           py >= rect.y && py <= rect.y + rect.h;
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // TEXT UTILITIES - Dynamic wrapping and font sizing
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  /**
+   * Wrap text to fit within a maximum width (in logical coordinates).
+   * Accounts for canvas transforms applied by drawText().
+   *
+   * @param {string} text - The text to wrap
+   * @param {number} maxWidth - Maximum width in logical coordinates
+   * @param {string} font - CSS font string (e.g., "16px 'Nunito', sans-serif")
+   * @param {number} maxLines - Maximum number of lines (default 3)
+   * @returns {string[]} Array of text lines
+   */
+  function wrapText(text, maxWidth, font, maxLines = 3) {
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.font = font;
+    const adj = getTextScaleAdjustment();
+    const maxRawWidth = maxWidth * aspectRatio / adj;
+    const words = text.split(' ');
+    const lines = [];
+    let currentLine = '';
+    words.forEach(word => {
+      const testLine = currentLine ? currentLine + ' ' + word : word;
+      if (ctx.measureText(testLine).width > maxRawWidth && currentLine) {
+        lines.push(currentLine);
+        currentLine = word;
+      } else {
+        currentLine = testLine;
+      }
+    });
+    if (currentLine) lines.push(currentLine);
+    ctx.restore();
+    return lines.slice(0, maxLines);
+  }
+
+  /**
+   * Find the optimal font size to fit content in available space.
+   * Tries font sizes from max to min until content fits.
+   *
+   * @param {Object} options
+   * @param {string[]} options.texts - Array of text strings to fit
+   * @param {number} options.maxWidth - Maximum width for text wrapping
+   * @param {number} options.availableHeight - Total height available for all texts
+   * @param {number} options.minFont - Minimum font size (default 12)
+   * @param {number} options.maxFont - Maximum font size (default 18)
+   * @param {number} options.itemPadding - Vertical padding per text item (default 4)
+   * @param {string} options.fontFamily - Font family (default "'Nunito Sans', sans-serif")
+   * @returns {{ fontSize: number, wrappedTexts: string[][] }} Optimal font size and pre-wrapped texts
+   */
+  function findOptimalFontSize(options) {
+    const {
+      texts,
+      maxWidth,
+      availableHeight,
+      minFont = 12,
+      maxFont = 18,
+      itemPadding = 4,
+      fontFamily = "'Nunito Sans', sans-serif"
+    } = options;
+
+    let bestFontSize = minFont;
+    let bestWrappedTexts = [];
+
+    for (let fontSize = maxFont; fontSize >= minFont; fontSize -= 0.5) {
+      const font = `${fontSize}px ${fontFamily}`;
+      const lineHeight = fontSize + 2;
+
+      let totalHeight = 0;
+      const wrappedTexts = [];
+
+      for (const text of texts) {
+        const lines = wrapText(text, maxWidth, font);
+        wrappedTexts.push(lines);
+        totalHeight += itemPadding + lines.length * lineHeight;
+      }
+
+      if (totalHeight <= availableHeight) {
+        bestFontSize = fontSize;
+        bestWrappedTexts = wrappedTexts;
+        break;
+      }
+
+      bestWrappedTexts = wrappedTexts;
+    }
+
+    return { fontSize: bestFontSize, wrappedTexts: bestWrappedTexts };
+  }
+
+  const engine = {
+    /** Call this to end the game. DO NOT draw your own end screen. */
+    end(isCorrect, explanation) {
+      if (gameState === 'ended') return;
+      gameState = 'ended';
+      gameResult = isCorrect;
+      gameExplanation = explanation || '';
+      endScreenTime = 0;
+
+      // Spawn confetti for correct answers
+      if (isCorrect) {
+        for (let i = 0; i < 50; i++) {
+          confettiParticles.push({
+            x: W / 2,
+            y: H / 2,
+            vx: (Math.random() - 0.5) * 400,
+            vy: -Math.random() * 300 - 80,
+            size: 4 + Math.random() * 6,
+            color: ['#FFD700', '#FF6B6B', '#4ECDC4', '#95E1D3', '#F38181'][Math.floor(Math.random() * 5)],
+            rotation: Math.random() * Math.PI * 2,
+            rotationSpeed: (Math.random() - 0.5) * 10
+          });
+        }
+      }
+
+      // Notify parent frame
+      if (window.parent && window.parent !== window) {
+        window.parent.postMessage({
+          type: 'quiz-end',
+          isCorrect: isCorrect,
+          explanation: explanation || ''
+        }, '*');
+      }
+    }
+  };
+
+  /** STANDARD END SCREEN (MOBILE) - DO NOT MODIFY */
+  function drawEndScreen(dt) {
+    endScreenTime += dt;
+
+    // Update confetti
+    confettiParticles = confettiParticles.filter(p => {
+      p.vy += 600 * dt; // gravity
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.rotation += p.rotationSpeed * dt;
+      p.vx *= 0.99;
+      return p.y < H + 50;
+    });
+
+    // Dark overlay
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
+    ctx.fillRect(0, 0, W, H);
+
+    // Draw confetti
+    confettiParticles.forEach(p => {
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rotation);
+      ctx.fillStyle = p.color;
+      ctx.fillRect(-p.size / 2, -p.size / 4, p.size, p.size / 2);
+      ctx.restore();
+    });
+
+    // Result emoji (aspect-ratio aware)
+    const textAdj = getTextScaleAdjustment();
+    ctx.save();
+    ctx.translate(W / 2, H / 2 - 80);
+    ctx.scale(textAdj / aspectRatio, textAdj);
+    ctx.font = '64px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(gameResult ? '🎉' : '😢', 0, 0);
+    ctx.restore();
+
+    // Result text (aspect-ratio aware)
+    ctx.save();
+    ctx.translate(W / 2, H / 2 - 10);
+    ctx.scale(textAdj / aspectRatio, textAdj);
+    ctx.fillStyle = gameResult ? '#4ADE80' : '#F87171';
+    ctx.font = 'bold 32px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(gameResult ? 'Correct!' : 'Wrong!', 0, 0);
+    ctx.restore();
+
+    // Buttons
+    if (gameResult) {
+      // Correct: show both Restart and Next/Finish
+      drawMobileButton(restartButton, 'Restart', '#E87A3E', true);
+      const nextLabel = QUESTION.isLastQuestion ? 'Finish' : 'Next';
+      drawMobileButton(nextButton, nextLabel, '#4ECDC4', true);
+    } else {
+      // Wrong: show only centered Restart button
+      drawMobileButton(centeredRestartButton, 'Restart', '#E87A3E', true);
+    }
+  }
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 3: YOUR GAME CODE - MAZE ESCAPE                                   ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+
+  // Custom wrapped text helper for this game (preserves original behavior)
+  function drawWrappedText(text, x, y, maxWidth, lineHeight, options = {}) {
+    const { font = "500 16px system-ui, sans-serif", color = '#F5F5F0', align = 'center', baseline = 'middle' } = options;
+    ctx.save();
+    ctx.translate(x, y);
+    const adj = getTextScaleAdjustment();
+    ctx.scale(adj / aspectRatio, adj);
+    ctx.font = font;
+    ctx.fillStyle = color;
+    ctx.textAlign = align;
+    ctx.textBaseline = baseline;
+
+    const words = text.split(' ');
+    let line = '';
+    let lines = [];
+
+    for (let i = 0; i < words.length; i++) {
+      const testLine = line + words[i] + ' ';
+      const metrics = ctx.measureText(testLine);
+      if (metrics.width > maxWidth && i > 0) {
+        lines.push(line.trim());
+        line = words[i] + ' ';
+      } else {
+        line = testLine;
+      }
+    }
+    lines.push(line.trim());
+
+    const totalHeight = lines.length * lineHeight;
+    const startY = -totalHeight / 2 + lineHeight / 2;
+
+    lines.forEach((l, i) => {
+      ctx.fillText(l, 0, startY + i * lineHeight);
+    });
+
+    ctx.restore();
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // QUIZHP COLOR PALETTE
+  // ─────────────────────────────────────────────────────────────────────────────
+  const COLORS = {
+    bgPrimary: '#1C1C1A',
+    bgSurface: '#2A2A27',
+    bgSurfaceSecondary: '#363633',
+    textPrimary: '#F5F5F0',
+    textSecondary: '#C2C2B8',
+    orange: '#E87A3E',
+    orangeHover: '#D66B31',
+    amber: '#F5A742',
+    cyan: '#4ECDC4',
+    success: '#6BBF59',
+    error: '#E85D4A',
+    borderSubtle: '#424240',
+    borderStrong: '#5A5A56'
+  };
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // REDUCED MOTION CHECK
+  // ─────────────────────────────────────────────────────────────────────────────
+  const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // WEB AUDIO API - SOUND EFFECTS
+  // ─────────────────────────────────────────────────────────────────────────────
+  let audioCtx = null;
+  function getAudioContext() {
+    if (!audioCtx) {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    return audioCtx;
+  }
+
+  function playSound(type) {
+    if (prefersReducedMotion) return;
+    try {
+      const ctx = getAudioContext();
+      if (ctx.state === 'suspended') ctx.resume();
+
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+
+      if (type === 'correct') {
+        // Cheerful ascending ding
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(523, ctx.currentTime);
+        osc.frequency.setValueAtTime(659, ctx.currentTime + 0.1);
+        osc.frequency.setValueAtTime(784, ctx.currentTime + 0.2);
+        gain.gain.setValueAtTime(0.25, ctx.currentTime);
+        gain.gain.exponentialDecayTo ? gain.gain.exponentialDecayTo(0.01, ctx.currentTime + 0.4) : gain.gain.setValueAtTime(0.01, ctx.currentTime + 0.4);
+        osc.start();
+        osc.stop(ctx.currentTime + 0.4);
+      } else if (type === 'wrong') {
+        // Sympathetic low buzz
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(180, ctx.currentTime);
+        osc.frequency.setValueAtTime(140, ctx.currentTime + 0.15);
+        gain.gain.setValueAtTime(0.2, ctx.currentTime);
+        gain.gain.setValueAtTime(0.01, ctx.currentTime + 0.25);
+        osc.start();
+        osc.stop(ctx.currentTime + 0.25);
+      } else if (type === 'collision') {
+        // Soft thud
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(120, ctx.currentTime);
+        osc.frequency.setValueAtTime(60, ctx.currentTime + 0.05);
+        gain.gain.setValueAtTime(0.15, ctx.currentTime);
+        gain.gain.setValueAtTime(0.01, ctx.currentTime + 0.08);
+        osc.start();
+        osc.stop(ctx.currentTime + 0.08);
+      } else if (type === 'drag') {
+        // Subtle whoosh
+        const noise = ctx.createOscillator();
+        noise.type = 'sine';
+        noise.frequency.setValueAtTime(400 + Math.random() * 200, ctx.currentTime);
+        const noiseGain = ctx.createGain();
+        noise.connect(noiseGain);
+        noiseGain.connect(ctx.destination);
+        noiseGain.gain.setValueAtTime(0.03, ctx.currentTime);
+        noiseGain.gain.setValueAtTime(0.01, ctx.currentTime + 0.05);
+        noise.start();
+        noise.stop(ctx.currentTime + 0.05);
+      } else if (type === 'exit') {
+        // Tunnel whoosh
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(300, ctx.currentTime);
+        osc.frequency.setValueAtTime(600, ctx.currentTime + 0.15);
+        gain.gain.setValueAtTime(0.2, ctx.currentTime);
+        gain.gain.setValueAtTime(0.01, ctx.currentTime + 0.2);
+        osc.start();
+        osc.stop(ctx.currentTime + 0.2);
+      }
+    } catch (e) {
+      // Audio not supported
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // PARTICLE SYSTEM
+  // ─────────────────────────────────────────────────────────────────────────────
+  let dragTrailParticles = [];
+  let feedbackParticles = [];
+
+  function spawnDragParticle(x, y) {
+    if (prefersReducedMotion) return;
+    if (Math.random() > 0.3) return; // Only spawn sometimes
+    dragTrailParticles.push({
+      x, y,
+      vx: (Math.random() - 0.5) * 30,
+      vy: (Math.random() - 0.5) * 30,
+      size: Math.random() * 4 + 2,
+      color: COLORS.orange,
+      alpha: 0.7,
+      life: 0.4
+    });
+  }
+
+  function spawnCorrectParticles(x, y) {
+    if (prefersReducedMotion) return;
+    const colors = [COLORS.orange, COLORS.amber, COLORS.cyan, COLORS.success];
+    for (let i = 0; i < 40; i++) {
+      feedbackParticles.push({
+        x, y,
+        vx: (Math.random() - 0.5) * 500,
+        vy: -Math.random() * 400 - 100,
+        size: Math.random() * 10 + 4,
+        color: colors[Math.floor(Math.random() * colors.length)],
+        alpha: 1,
+        life: 1.5,
+        gravity: 600,
+        rotation: Math.random() * Math.PI * 2,
+        rotationSpeed: (Math.random() - 0.5) * 12
+      });
+    }
+  }
+
+  function spawnWrongParticles(x, y) {
+    if (prefersReducedMotion) return;
+    for (let i = 0; i < 20; i++) {
+      const angle = (i / 20) * Math.PI * 2;
+      feedbackParticles.push({
+        x, y,
+        vx: Math.cos(angle) * 150,
+        vy: Math.sin(angle) * 150,
+        size: 6,
+        color: COLORS.error,
+        alpha: 0.8,
+        life: 0.6,
+        gravity: 0,
+        rotation: 0,
+        rotationSpeed: 0
+      });
+    }
+  }
+
+  function spawnCollisionParticles(x, y) {
+    if (prefersReducedMotion) return;
+    for (let i = 0; i < 5; i++) {
+      dragTrailParticles.push({
+        x, y,
+        vx: (Math.random() - 0.5) * 100,
+        vy: (Math.random() - 0.5) * 100,
+        size: Math.random() * 3 + 2,
+        color: COLORS.borderStrong,
+        alpha: 0.6,
+        life: 0.3
+      });
+    }
+  }
+
+  function updateParticles(particles, dt) {
+    return particles.filter(p => {
+      p.life -= dt;
+      if (p.life <= 0) return false;
+
+      if (p.gravity) p.vy += p.gravity * dt;
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      if (p.rotationSpeed) p.rotation += p.rotationSpeed * dt;
+      p.alpha = Math.min(p.alpha, p.life * 2);
+
+      return true;
+    });
+  }
+
+  function drawParticles(particles) {
+    particles.forEach(p => {
+      ctx.save();
+      ctx.globalAlpha = p.alpha;
+      ctx.translate(p.x, p.y);
+      if (p.rotation) ctx.rotate(p.rotation);
+      ctx.fillStyle = p.color;
+      ctx.fillRect(-p.size / 2, -p.size / 4, p.size, p.size / 2);
+      ctx.restore();
+    });
+    ctx.globalAlpha = 1;
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // ANIMATION SYSTEM
+  // ─────────────────────────────────────────────────────────────────────────────
+  let entranceProgress = 0;
+  let ballScale = 0;
+  let wallsAlpha = 0;
+  let exitsAlpha = 0;
+  let feedbackAnimating = false;
+  let feedbackType = null;
+  let feedbackProgress = 0;
+  let selectedExit = null;
+  let lastCollisionTime = 0;
+
+  function animateEntrance(dt) {
+    if (prefersReducedMotion) {
+      entranceProgress = 1;
+      ballScale = 1;
+      wallsAlpha = 1;
+      exitsAlpha = 1;
+      return;
+    }
+
+    entranceProgress += dt * 2;
+
+    // Walls fade in first (0 - 0.3)
+    if (entranceProgress < 0.3) {
+      wallsAlpha = entranceProgress / 0.3;
+    } else {
+      wallsAlpha = 1;
+    }
+
+    // Exits fade in (0.2 - 0.5)
+    if (entranceProgress > 0.2) {
+      exitsAlpha = Math.min(1, (entranceProgress - 0.2) / 0.3);
+    }
+
+    // Ball bounces in (0.4 - 0.7)
+    if (entranceProgress > 0.4) {
+      const t = Math.min(1, (entranceProgress - 0.4) / 0.3);
+      const spring = 1 + Math.sin(t * Math.PI * 2) * 0.3 * (1 - t);
+      ballScale = t * spring;
+      if (ballScale > 1) ballScale = 1 + (ballScale - 1) * 0.5;
+    }
+
+    if (entranceProgress >= 1) {
+      ballScale = 1;
+    }
+  }
+
+  function animateFeedback(dt) {
+    if (!feedbackAnimating) return;
+
+    feedbackProgress += dt;
+
+    if (feedbackType === 'correct') {
+      // Celebrate animation for ball
+      const t = Math.min(feedbackProgress / 0.5, 1);
+      ballScale = 1 + 0.4 * Math.sin(t * Math.PI);
+
+      if (feedbackProgress >= 0.5) {
+        feedbackAnimating = false;
+        engine.end(selectedExit.choice.is_correct, selectedExit.choice.explanation);
+      }
+    } else if (feedbackType === 'wrong') {
+      // Shake animation
+      const t = Math.min(feedbackProgress / 0.4, 1);
+      const decay = 1 - t;
+      ball.shakeOffset = Math.sin(t * Math.PI * 10) * 10 * decay;
+
+      if (feedbackProgress >= 0.4) {
+        ball.shakeOffset = 0;
+        feedbackAnimating = false;
+        engine.end(selectedExit.choice.is_correct, selectedExit.choice.explanation);
+      }
+    }
+  }
+
+  // Game state
+  let ball = { x: 0, y: 0, vx: 0, vy: 0, radius: 16, shakeOffset: 0 };
+  let exits = [];
+  let walls = [];
+
+  // Tilt controls
+  let tiltX = 0;  // gamma: left/right tilt (-90 to 90)
+  let tiltY = 0;  // beta: forward/back tilt (-180 to 180)
+  let baselineTiltX = 0;  // Calibrated "flat" position
+  let baselineTiltY = 0;
+  let isCalibrating = true;  // First reading sets the baseline
+  let motionPermissionGranted = false;
+  const TILT_SENSITIVITY = 800;  // How strongly tilt affects acceleration
+  const FRICTION = 0.92;         // Velocity dampening per frame
+  const MAX_VELOCITY = 400;      // Cap velocity
+
+  // Layout: Answer panels at top and bottom, maze in the middle
+  const ANSWER_PANEL_HEIGHT = 140;  // Height for answer text panels
+  const MAZE_TOP = ANSWER_PANEL_HEIGHT;
+  const MAZE_BOTTOM = H - ANSWER_PANEL_HEIGHT;
+  const MAZE_HEIGHT = MAZE_BOTTOM - MAZE_TOP;  // 360px for maze
+
+  // Exit tunnel dimensions
+  const EXIT_TUNNEL_WIDTH = 70;
+
+  function initGame() {
+    // Ball starts at center of maze area
+    ball = {
+      x: W / 2,
+      y: MAZE_TOP + MAZE_HEIGHT / 2,
+      vx: 0,
+      vy: 0,
+      radius: 16,
+      shakeOffset: 0
+    };
+    tiltX = 0;
+    tiltY = 0;
+    isCalibrating = true;  // Recalibrate on restart
+
+    // Reset animation states
+    entranceProgress = 0;
+    ballScale = 0;
+    wallsAlpha = 0;
+    exitsAlpha = 0;
+    feedbackAnimating = false;
+    feedbackType = null;
+    feedbackProgress = 0;
+    selectedExit = null;
+    dragTrailParticles = [];
+    feedbackParticles = [];
+
+    // Define 4 exit zones - 2 at top panel, 2 at bottom panel
+    // Each panel has 2 answers side by side
+    const panelWidth = W / 2;
+
+    exits = [
+      { // Top-left: Answer A
+        x: 0,
+        y: 0,
+        w: panelWidth,
+        h: ANSWER_PANEL_HEIGHT,
+        tunnelX: panelWidth / 2 - EXIT_TUNNEL_WIDTH / 2,
+        choice: QUESTION.choices[0],
+        label: 'A',
+        color: COLORS.orange,
+        direction: 'top-left'
+      },
+      { // Top-right: Answer B
+        x: panelWidth,
+        y: 0,
+        w: panelWidth,
+        h: ANSWER_PANEL_HEIGHT,
+        tunnelX: panelWidth + panelWidth / 2 - EXIT_TUNNEL_WIDTH / 2,
+        choice: QUESTION.choices[1],
+        label: 'B',
+        color: COLORS.cyan,
+        direction: 'top-right'
+      },
+      { // Bottom-left: Answer C
+        x: 0,
+        y: MAZE_BOTTOM,
+        w: panelWidth,
+        h: ANSWER_PANEL_HEIGHT,
+        tunnelX: panelWidth / 2 - EXIT_TUNNEL_WIDTH / 2,
+        choice: QUESTION.choices[2],
+        label: 'C',
+        color: COLORS.amber,
+        direction: 'bottom-left'
+      },
+      { // Bottom-right: Answer D
+        x: panelWidth,
+        y: MAZE_BOTTOM,
+        w: panelWidth,
+        h: ANSWER_PANEL_HEIGHT,
+        tunnelX: panelWidth + panelWidth / 2 - EXIT_TUNNEL_WIDTH / 2,
+        choice: QUESTION.choices[3],
+        label: 'D',
+        color: '#9B7ED9',
+        direction: 'bottom-right'
+      }
+    ];
+
+    // Create maze walls
+    const wallThickness = 10;
+    const tunnelTop1 = exits[0].tunnelX;
+    const tunnelTop2 = exits[1].tunnelX;
+    const tunnelBot1 = exits[2].tunnelX;
+    const tunnelBot2 = exits[3].tunnelX;
+
+    walls = [
+      // Top border with 2 tunnel openings
+      { x: 0, y: MAZE_TOP, w: tunnelTop1, h: wallThickness },
+      { x: tunnelTop1 + EXIT_TUNNEL_WIDTH, y: MAZE_TOP, w: tunnelTop2 - tunnelTop1 - EXIT_TUNNEL_WIDTH, h: wallThickness },
+      { x: tunnelTop2 + EXIT_TUNNEL_WIDTH, y: MAZE_TOP, w: W - tunnelTop2 - EXIT_TUNNEL_WIDTH, h: wallThickness },
+
+      // Bottom border with 2 tunnel openings
+      { x: 0, y: MAZE_BOTTOM - wallThickness, w: tunnelBot1, h: wallThickness },
+      { x: tunnelBot1 + EXIT_TUNNEL_WIDTH, y: MAZE_BOTTOM - wallThickness, w: tunnelBot2 - tunnelBot1 - EXIT_TUNNEL_WIDTH, h: wallThickness },
+      { x: tunnelBot2 + EXIT_TUNNEL_WIDTH, y: MAZE_BOTTOM - wallThickness, w: W - tunnelBot2 - EXIT_TUNNEL_WIDTH, h: wallThickness },
+
+      // Left and right borders
+      { x: 0, y: MAZE_TOP, w: wallThickness, h: MAZE_HEIGHT },
+      { x: W - wallThickness, y: MAZE_TOP, w: wallThickness, h: MAZE_HEIGHT },
+
+      // Inner maze obstacles - simple cross pattern
+      // Horizontal bar left
+      { x: 30, y: MAZE_TOP + MAZE_HEIGHT / 2 - wallThickness / 2, w: 80, h: wallThickness },
+      // Horizontal bar right
+      { x: W - 110, y: MAZE_TOP + MAZE_HEIGHT / 2 - wallThickness / 2, w: 80, h: wallThickness },
+
+      // Vertical obstacle top-center
+      { x: W / 2 - wallThickness / 2, y: MAZE_TOP + 30, w: wallThickness, h: 70 },
+      // Vertical obstacle bottom-center
+      { x: W / 2 - wallThickness / 2, y: MAZE_BOTTOM - 100, w: wallThickness, h: 70 },
+
+      // Small corner blocks
+      { x: 50, y: MAZE_TOP + 50, w: 40, h: 40 },
+      { x: W - 90, y: MAZE_TOP + 50, w: 40, h: 40 },
+      { x: 50, y: MAZE_BOTTOM - 90, w: 40, h: 40 },
+      { x: W - 90, y: MAZE_BOTTOM - 90, w: 40, h: 40 }
+    ];
+  }
+
+  function circleRectCollision(cx, cy, r, rect) {
+    const closestX = Math.max(rect.x, Math.min(cx, rect.x + rect.w));
+    const closestY = Math.max(rect.y, Math.min(cy, rect.y + rect.h));
+    const dx = cx - closestX;
+    const dy = cy - closestY;
+    return (dx * dx + dy * dy) < (r * r);
+  }
+
+  function resolveCollision(cx, cy, r, rect) {
+    const closestX = Math.max(rect.x, Math.min(cx, rect.x + rect.w));
+    const closestY = Math.max(rect.y, Math.min(cy, rect.y + rect.h));
+    const dx = cx - closestX;
+    const dy = cy - closestY;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+
+    if (dist < r && dist > 0) {
+      const overlap = r - dist;
+      const nx = dx / dist;
+      const ny = dy / dist;
+      return {
+        x: cx + nx * overlap,
+        y: cy + ny * overlap
+      };
+    }
+    return { x: cx, y: cy };
+  }
+
+  function updateGame(dt) {
+    if (gameState !== 'playing') return;
+
+    // Run entrance animation
+    if (entranceProgress < 1) {
+      animateEntrance(dt);
+    }
+
+    // Update particles
+    dragTrailParticles = updateParticles(dragTrailParticles, dt);
+    feedbackParticles = updateParticles(feedbackParticles, dt);
+
+    // Run feedback animation (blocks exit checks)
+    if (feedbackAnimating) {
+      animateFeedback(dt);
+      return;
+    }
+
+    // Skip physics if waiting for permission or during entrance
+    if (!motionPermissionGranted || entranceProgress < 1) return;
+
+    // Apply tilt-based acceleration (gamma = left/right, beta = forward/back)
+    // Clamp tilt values to reasonable range
+    const clampedTiltX = Math.max(-45, Math.min(45, tiltX));
+    const clampedTiltY = Math.max(-45, Math.min(45, tiltY));
+
+    // Convert tilt to acceleration (normalized -1 to 1, then scaled)
+    const ax = (clampedTiltX / 45) * TILT_SENSITIVITY;
+    const ay = (clampedTiltY / 45) * TILT_SENSITIVITY;
+
+    // Update velocity with acceleration
+    ball.vx += ax * dt;
+    ball.vy += ay * dt;
+
+    // Apply friction
+    ball.vx *= FRICTION;
+    ball.vy *= FRICTION;
+
+    // Clamp velocity
+    ball.vx = Math.max(-MAX_VELOCITY, Math.min(MAX_VELOCITY, ball.vx));
+    ball.vy = Math.max(-MAX_VELOCITY, Math.min(MAX_VELOCITY, ball.vy));
+
+    // Calculate new position
+    let newX = ball.x + ball.vx * dt;
+    let newY = ball.y + ball.vy * dt;
+
+    // Resolve collisions with walls
+    walls.forEach(wall => {
+      if (circleRectCollision(newX, newY, ball.radius, wall)) {
+        const resolved = resolveCollision(newX, newY, ball.radius, wall);
+
+        // Bounce off walls (reverse velocity component)
+        const closestX = Math.max(wall.x, Math.min(ball.x, wall.x + wall.w));
+        const closestY = Math.max(wall.y, Math.min(ball.y, wall.y + wall.h));
+        const dx = newX - closestX;
+        const dy = newY - closestY;
+
+        if (Math.abs(dx) > Math.abs(dy)) {
+          ball.vx *= -0.5;  // Bounce with energy loss
+        } else {
+          ball.vy *= -0.5;
+        }
+
+        // Collision particles and sound (throttled)
+        const now = performance.now();
+        if (now - lastCollisionTime > 100) {
+          spawnCollisionParticles(closestX, closestY);
+          playSound('collision');
+          lastCollisionTime = now;
+        }
+
+        newX = resolved.x;
+        newY = resolved.y;
+      }
+    });
+
+    // Keep ball within screen bounds (but allow exit through tunnels)
+    newX = Math.max(ball.radius, Math.min(W - ball.radius, newX));
+    newY = Math.max(ball.radius, Math.min(H - ball.radius, newY));
+
+    // Spawn motion particles when moving fast enough
+    const speed = Math.sqrt(ball.vx * ball.vx + ball.vy * ball.vy);
+    if (speed > 50) {
+      spawnDragParticle(ball.x, ball.y);
+    }
+
+    ball.x = newX;
+    ball.y = newY;
+
+    // Check if ball exited through a tunnel into an answer panel
+    exits.forEach(exit => {
+      const isTop = exit.y === 0;
+      const inTunnelX = ball.x >= exit.tunnelX && ball.x <= exit.tunnelX + EXIT_TUNNEL_WIDTH;
+
+      if (isTop) {
+        // Ball exited through top tunnel
+        if (ball.y < MAZE_TOP && inTunnelX) {
+          triggerFeedback(exit);
+        }
+      } else {
+        // Ball exited through bottom tunnel
+        if (ball.y > MAZE_BOTTOM && inTunnelX) {
+          triggerFeedback(exit);
+        }
+      }
+    });
+  }
+
+  function triggerFeedback(exit) {
+    if (feedbackAnimating) return;
+
+    selectedExit = exit;
+    feedbackAnimating = true;
+    feedbackProgress = 0;
+
+    // Stop ball movement
+    ball.vx = 0;
+    ball.vy = 0;
+
+    playSound('exit');
+
+    if (exit.choice.is_correct) {
+      feedbackType = 'correct';
+      playSound('correct');
+      spawnCorrectParticles(ball.x, ball.y);
+    } else {
+      feedbackType = 'wrong';
+      playSound('wrong');
+      spawnWrongParticles(ball.x, ball.y);
+    }
+  }
+
+  function drawGame() {
+    // Background
+    ctx.fillStyle = COLORS.bgPrimary;
+    ctx.fillRect(0, 0, W, H);
+
+    // Draw maze area background
+    ctx.fillStyle = COLORS.bgSurface;
+    ctx.fillRect(0, MAZE_TOP, W, MAZE_HEIGHT);
+
+    // Draw exit zones (answer panels) with entrance animation
+    ctx.globalAlpha = exitsAlpha;
+    exits.forEach(exit => {
+      // Panel background with color tint
+      ctx.fillStyle = exit.color;
+      ctx.globalAlpha = exitsAlpha * 0.15;
+      ctx.fillRect(exit.x, exit.y, exit.w, exit.h);
+      ctx.globalAlpha = exitsAlpha;
+
+      // Panel border
+      ctx.strokeStyle = exit.color;
+      ctx.lineWidth = 2;
+      ctx.strokeRect(exit.x + 1, exit.y + 1, exit.w - 2, exit.h - 2);
+
+      // Draw tunnel opening indicator (arrow pointing to tunnel)
+      const tunnelCenterX = exit.tunnelX + EXIT_TUNNEL_WIDTH / 2;
+      const isTop = exit.y === 0;
+
+      // Tunnel highlight on maze border
+      ctx.fillStyle = exit.color;
+      ctx.globalAlpha = exitsAlpha * 0.4;
+      if (isTop) {
+        ctx.fillRect(exit.tunnelX, MAZE_TOP, EXIT_TUNNEL_WIDTH, 10);
+      } else {
+        ctx.fillRect(exit.tunnelX, MAZE_BOTTOM - 10, EXIT_TUNNEL_WIDTH, 10);
+      }
+      ctx.globalAlpha = exitsAlpha;
+
+      // Answer label circle
+      const labelX = exit.x + exit.w / 2;
+      const labelY = isTop ? 28 : exit.y + exit.h - 28;
+
+      ctx.fillStyle = exit.color;
+      ctx.beginPath();
+      ctx.ellipse(labelX, labelY, 18, 18 * aspectRatio, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      drawText(exit.label, labelX, labelY, {
+        font: "bold 20px 'Nunito Sans', sans-serif",
+        color: '#FFFFFF'
+      });
+
+      // Draw answer text (wrapped) - 16px minimum, centered in remaining space
+      const textY = isTop ? 80 : exit.y + 50;
+      const maxTextWidth = exit.w - 20;
+
+      drawWrappedText(exit.choice.text, labelX, textY, maxTextWidth, 20, {
+        font: "500 16px 'Nunito', sans-serif",
+        color: COLORS.textPrimary
+      });
+    });
+    ctx.globalAlpha = 1;
+
+    // Draw walls with entrance animation
+    ctx.globalAlpha = wallsAlpha;
+    ctx.fillStyle = COLORS.borderSubtle;
+    walls.forEach(wall => {
+      ctx.beginPath();
+      ctx.roundRect(wall.x, wall.y, wall.w, wall.h, 3);
+      ctx.fill();
+    });
+
+    // Wall top highlight
+    ctx.fillStyle = COLORS.borderStrong;
+    walls.forEach(wall => {
+      ctx.fillRect(wall.x, wall.y, wall.w, 2);
+    });
+    ctx.globalAlpha = 1;
+
+    // Draw drag trail particles (behind ball)
+    drawParticles(dragTrailParticles);
+
+    // Draw ball with aspect ratio compensation and animations
+    const drawX = ball.x + (ball.shakeOffset || 0);
+    ctx.save();
+    ctx.translate(drawX, ball.y);
+    ctx.scale(ballScale, ballScale * aspectRatio);
+
+    // Ball shadow
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
+    ctx.beginPath();
+    ctx.arc(3, 3, ball.radius, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Ball gradient with QuizHP orange
+    const gradient = ctx.createRadialGradient(-4, -4, 0, 0, 0, ball.radius);
+    gradient.addColorStop(0, '#FFB89D');
+    gradient.addColorStop(0.7, COLORS.orange);
+    gradient.addColorStop(1, COLORS.orangeHover);
+    ctx.fillStyle = gradient;
+    ctx.beginPath();
+    ctx.arc(0, 0, ball.radius, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Ball highlight
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
+    ctx.beginPath();
+    ctx.arc(-4, -4, ball.radius * 0.35, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.restore();
+
+    // Draw feedback particles (on top of everything)
+    drawParticles(feedbackParticles);
+
+    // Draw permission prompt overlay if needed
+    if (!motionPermissionGranted && entranceProgress >= 1 && !feedbackAnimating) {
+      // Semi-transparent overlay
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+      ctx.fillRect(0, 0, W, H);
+
+      // Permission prompt box
+      const boxW = 300;
+      const boxH = 200;
+      const boxX = (W - boxW) / 2;
+      const boxY = (H - boxH) / 2;
+
+      ctx.fillStyle = COLORS.bgSurface;
+      ctx.beginPath();
+      ctx.roundRect(boxX, boxY, boxW, boxH, 16);
+      ctx.fill();
+
+      ctx.strokeStyle = COLORS.orange;
+      ctx.lineWidth = 2;
+      ctx.stroke();
+
+      // Tilt icon
+      drawText('📱', W / 2, boxY + 45, {
+        font: '40px sans-serif',
+        color: COLORS.textPrimary
+      });
+
+      // Title
+      drawText('Tilt to Play!', W / 2, boxY + 90, {
+        font: "bold 20px 'Nunito Sans', sans-serif",
+        color: COLORS.textPrimary
+      });
+
+      // Description
+      drawText('This game uses motion sensors.', W / 2, boxY + 120, {
+        font: "14px 'Nunito', sans-serif",
+        color: COLORS.textSecondary
+      });
+
+      // Button
+      const btnW = 200;
+      const btnH = 48;
+      const btnX = (W - btnW) / 2;
+      const btnY = boxY + boxH - 65;
+
+      ctx.fillStyle = COLORS.orange;
+      ctx.beginPath();
+      ctx.roundRect(btnX, btnY, btnW, btnH, 10);
+      ctx.fill();
+
+      drawText('Tap to Enable', W / 2, btnY + btnH / 2, {
+        font: "bold 16px 'Nunito Sans', sans-serif",
+        color: '#FFFFFF'
+      });
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // DEVICE MOTION HANDLING
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  function handleDeviceOrientation(event) {
+    // gamma: left-to-right tilt in degrees (-90 to 90)
+    // beta: front-to-back tilt in degrees (-180 to 180)
+    const rawGamma = event.gamma || 0;
+    const rawBeta = event.beta || 0;
+
+    // On first reading, capture current position as "flat" baseline
+    if (isCalibrating) {
+      baselineTiltX = rawGamma;
+      baselineTiltY = rawBeta;
+      isCalibrating = false;
+    }
+
+    // Subtract baseline so current holding position is neutral
+    tiltX = rawGamma - baselineTiltX;
+    tiltY = rawBeta - baselineTiltY;
+  }
+
+  async function requestMotionPermission() {
+    // Check if DeviceOrientationEvent exists and needs permission (iOS 13+)
+    if (typeof DeviceOrientationEvent !== 'undefined' &&
+        typeof DeviceOrientationEvent.requestPermission === 'function') {
+      try {
+        const permission = await DeviceOrientationEvent.requestPermission();
+        if (permission === 'granted') {
+          window.addEventListener('deviceorientation', handleDeviceOrientation);
+          motionPermissionGranted = true;
+          playSound('drag');
+        }
+      } catch (error) {
+        console.error('Motion permission error:', error);
+        // Fall back to granted (for testing in browser)
+        motionPermissionGranted = true;
+      }
+    } else {
+      // Non-iOS or older browsers - just add listener
+      window.addEventListener('deviceorientation', handleDeviceOrientation);
+      motionPermissionGranted = true;
+      playSound('drag');
+    }
+  }
+
+  function handleTouch(e, type) {
+    if (gameState !== 'playing') return;
+    if (feedbackAnimating) return;
+    if (entranceProgress < 0.7) return;
+
+    if (type === 'start' && !motionPermissionGranted) {
+      // User tapped - request motion permission
+      requestMotionPermission();
+    }
+  }
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 4: GAME LOOP - DO NOT MODIFY                                      ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  let lastTime = performance.now();
+
+  function gameLoop(now) {
+    const dt = Math.min((now - lastTime) / 1000, 0.05);
+    lastTime = now;
+
+    ctx.setTransform(scaleX, 0, 0, scaleY, 0, 0);
+
+    if (gameState === 'playing') {
+      updateGame(dt);
+      drawGame();
+    } else {
+      drawGame();
+      drawEndScreen(dt);
+    }
+
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+    requestAnimationFrame(gameLoop);
+  }
+
+  function onTouchStart(e) {
+    e.preventDefault();
+    if (gameState === 'ended') {
+      const touch = e.touches[0];
+      const { x, y } = screenToLogical(touch.clientX, touch.clientY);
+
+      if (gameResult) {
+        // Correct answer: check both buttons
+        if (pointInRect(x, y, restartButton)) {
+          gameState = 'playing';
+          gameResult = null;
+          gameExplanation = '';
+          confettiParticles = [];
+          initGame();
+          return;
+        }
+        if (pointInRect(x, y, nextButton)) {
+          // Notify parent to go to next question
+          if (window.parent && window.parent !== window) {
+            window.parent.postMessage({ type: 'quiz-next' }, '*');
+          }
+          return;
+        }
+      } else {
+        // Wrong answer: check centered restart button
+        if (pointInRect(x, y, centeredRestartButton)) {
+          gameState = 'playing';
+          gameResult = null;
+          gameExplanation = '';
+          confettiParticles = [];
+          initGame();
+          return;
+        }
+      }
+    }
+    handleTouch(e, 'start');
+  }
+
+  function onTouchMove(e) {
+    e.preventDefault();
+    handleTouch(e, 'move');
+  }
+
+  function onTouchEnd(e) {
+    e.preventDefault();
+    handleTouch(e, 'end');
+  }
+
+  canvas.addEventListener('touchstart', onTouchStart, { passive: false });
+  canvas.addEventListener('touchmove', onTouchMove, { passive: false });
+  canvas.addEventListener('touchend', onTouchEnd, { passive: false });
+
+  // Mouse support for testing
+  let mouseDown = false;
+  canvas.addEventListener('mousedown', (e) => {
+    mouseDown = true;
+    const fakeTouch = { touches: [{ clientX: e.clientX, clientY: e.clientY }], changedTouches: [{ clientX: e.clientX, clientY: e.clientY }] };
+    onTouchStart(fakeTouch);
+  });
+
+  canvas.addEventListener('mousemove', (e) => {
+    if (mouseDown) {
+      const fakeTouch = { touches: [{ clientX: e.clientX, clientY: e.clientY }], changedTouches: [{ clientX: e.clientX, clientY: e.clientY }] };
+      handleTouch(fakeTouch, 'move');
+    }
+  });
+
+  canvas.addEventListener('mouseup', (e) => {
+    mouseDown = false;
+    const fakeTouch = { touches: [], changedTouches: [{ clientX: e.clientX, clientY: e.clientY }] };
+    onTouchEnd(fakeTouch);
+  });
+
+  // Cursor change handler for end screen buttons
+  canvas.addEventListener('mousemove', (e) => {
+    if (gameState !== 'ended') {
+      canvas.style.cursor = 'default';
+      return;
+    }
+    const { x, y } = screenToLogical(e.clientX, e.clientY);
+    if (gameResult) {
+      if (pointInRect(x, y, restartButton) || pointInRect(x, y, nextButton)) {
+        canvas.style.cursor = 'pointer';
+        return;
+      }
+    } else {
+      if (pointInRect(x, y, centeredRestartButton)) {
+        canvas.style.cursor = 'pointer';
+        return;
+      }
+    }
+    canvas.style.cursor = 'default';
+  });
+
+
+
+  window.addEventListener('resize', resizeCanvas);
+  window.addEventListener('orientationchange', () => {
+    setTimeout(resizeCanvas, 100);
+  });
+
+  document.body.addEventListener('touchmove', (e) => e.preventDefault(), { passive: false });
+
+  resizeCanvas();
+  initGame();
+  requestAnimationFrame(gameLoop);
+  </script>
+</body>
+</html>

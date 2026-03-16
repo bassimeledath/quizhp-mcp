@@ -1,0 +1,954 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Pizza Builder</title>
+  <link href="https://fonts.googleapis.com/css2?family=Belanosima:wght@400;600;700&family=Nunito+Sans:wght@400;500;600;700&family=Nunito:wght@400;500;600&display=swap" rel="stylesheet">
+  <!--
+  ╔══════════════════════════════════════════════════════════════════════════════╗
+  ║  GAME FACTORY TEMPLATE                                                        ║
+  ║  This template enforces critical invariants. Follow the section markers.      ║
+  ╚══════════════════════════════════════════════════════════════════════════════╝
+  -->
+  <style>
+    /* ═══════════════════════════════════════════════════════════════════════════
+       BASE STYLES - Can be extended, not removed
+       ═══════════════════════════════════════════════════════════════════════════ */
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+    }
+    body {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      background: #1C1C1A;
+      font-family: 'Nunito Sans', system-ui, -apple-system, sans-serif;
+    }
+    #gameCanvas {
+      background: #2A2A27;
+      border-radius: 12px;
+      display: block;
+    }
+  </style>
+</head>
+<body>
+  <!-- ═══════════════════════════════════════════════════════════════════════════
+       CANVAS - Sized dynamically to fill available space
+       ═══════════════════════════════════════════════════════════════════════════ -->
+  <canvas id="gameCanvas"></canvas>
+
+  <script>
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 1: QUESTION PLACEHOLDER - DO NOT MODIFY FORMAT                    ║
+  // ║  Platform replaces this at runtime. Use these exact 60-char answers.       ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  const QUESTION = {
+    type: "mcq",
+    prompt: "Sample question text",
+    choices: [
+      { text: "This is sample answer A which is long enough to test text overflow", is_correct: true, explanation: "Why A is correct" },
+      { text: "This is sample answer B which is long enough to test text overflow", is_correct: false, explanation: "Why B is wrong" },
+      { text: "This is sample answer C which is long enough to test text overflow", is_correct: false, explanation: "Why C is wrong" },
+      { text: "This is sample answer D which is long enough to test text overflow", is_correct: false, explanation: "Why D is wrong" }
+    ],
+    isLastQuestion: false
+  };
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 2: ENGINE CORE - DO NOT MODIFY                                    ║
+  // ║  Standard engine interface and end screen. This is sacred.                 ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  const canvas = document.getElementById('gameCanvas');
+  const ctx = canvas.getContext('2d');
+
+  // Logical dimensions (game code works in this coordinate space)
+  const W = 720, H = 540;
+
+  // Scaling state (computed on resize)
+  let scale = 1;
+  let dpr = 1;
+
+  let gameState = 'playing'; // 'playing' | 'ended'
+  let gameResult = null;     // true (correct) | false (wrong)
+  let gameExplanation = '';
+  let endScreenTime = 0;
+  let confettiParticles = [];
+
+  // End screen button bounds (logical coordinates)
+  const restartButton = { x: W / 2 - 170, y: H / 2 + 60, w: 150, h: 48 };
+  const nextButton = { x: W / 2 + 20, y: H / 2 + 60, w: 150, h: 48 };
+
+  /** Check if point is inside rectangle */
+  function pointInRect(px, py, rect) {
+    return px >= rect.x && px <= rect.x + rect.w &&
+           py >= rect.y && py <= rect.y + rect.h;
+  }
+
+  /** Draw a styled button */
+  function drawButton(rect, label, color, pulse) {
+    const p = pulse ? 1 + Math.sin(endScreenTime * 4) * 0.03 : 1;
+    ctx.save();
+    ctx.translate(rect.x + rect.w / 2, rect.y + rect.h / 2);
+    ctx.scale(p, p);
+    ctx.translate(-(rect.x + rect.w / 2), -(rect.y + rect.h / 2));
+
+    // Button background
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.roundRect(rect.x, rect.y, rect.w, rect.h, 12);
+    ctx.fill();
+
+    // Button text
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = 'bold 18px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, rect.x + rect.w / 2, rect.y + rect.h / 2);
+
+    ctx.restore();
+  }
+
+  /**
+   * Resize canvas to fill available space with proper DPR scaling.
+   * Maintains logical coordinate system (720×540).
+   */
+  function resizeCanvas() {
+    dpr = window.devicePixelRatio || 1;
+
+    // Get available space
+    const availW = window.innerWidth;
+    const availH = window.innerHeight;
+
+    // Calculate scale to fit logical space (720×540) in available space
+    const scaleX = availW / W;
+    const scaleY = availH / H;
+    scale = Math.min(scaleX, scaleY);
+
+    // Physical canvas buffer (DPR-scaled for crisp rendering)
+    canvas.width = W * scale * dpr;
+    canvas.height = H * scale * dpr;
+
+    // CSS display size
+    canvas.style.width = (W * scale) + 'px';
+    canvas.style.height = (H * scale) + 'px';
+  }
+
+  /**
+   * Convert screen coordinates to logical coordinates.
+   * Use this for mouse/click events to get positions in 720×540 space.
+   */
+  function screenToLogical(screenX, screenY) {
+    const rect = canvas.getBoundingClientRect();
+    return {
+      x: (screenX - rect.left) * (W / rect.width),
+      y: (screenY - rect.top) * (H / rect.height)
+    };
+  }
+
+  const engine = {
+    /** Call this to end the game. DO NOT draw your own end screen. */
+    end(isCorrect, explanation) {
+      if (gameState === 'ended') return;
+      gameState = 'ended';
+      gameResult = isCorrect;
+      gameExplanation = explanation || '';
+      endScreenTime = 0;
+
+      // Spawn confetti for correct answers
+      if (isCorrect) {
+        for (let i = 0; i < 50; i++) {
+          confettiParticles.push({
+            x: W / 2,
+            y: H / 2,
+            vx: (Math.random() - 0.5) * 600,
+            vy: -Math.random() * 400 - 100,
+            size: 4 + Math.random() * 6,
+            color: ['#FFD700', '#FF6B6B', '#4ECDC4', '#95E1D3', '#F38181'][Math.floor(Math.random() * 5)],
+            rotation: Math.random() * Math.PI * 2,
+            rotationSpeed: (Math.random() - 0.5) * 10
+          });
+        }
+      }
+
+      // Notify parent frame
+      if (window.parent && window.parent !== window) {
+        window.parent.postMessage({
+          type: 'quiz-end',
+          isCorrect: isCorrect,
+          explanation: explanation || ''
+        }, '*');
+      }
+    }
+  };
+
+  /** STANDARD END SCREEN - DO NOT MODIFY */
+  function drawEndScreen(dt) {
+    endScreenTime += dt;
+
+    // Update confetti
+    confettiParticles = confettiParticles.filter(p => {
+      p.vy += 800 * dt; // gravity
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.rotation += p.rotationSpeed * dt;
+      p.vx *= 0.99;
+      return p.y < H + 50;
+    });
+
+    // Dark overlay
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
+    ctx.fillRect(0, 0, W, H);
+
+    // Draw confetti
+    confettiParticles.forEach(p => {
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rotation);
+      ctx.fillStyle = p.color;
+      ctx.fillRect(-p.size / 2, -p.size / 4, p.size, p.size / 2);
+      ctx.restore();
+    });
+
+    // Result emoji
+    ctx.font = '72px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(gameResult ? '🎉' : '😢', W / 2, H / 2 - 50);
+
+    // Result text
+    ctx.fillStyle = gameResult ? '#4ADE80' : '#F87171';
+    ctx.font = 'bold 36px system-ui, sans-serif';
+    ctx.fillText(gameResult ? 'Correct!' : 'Wrong!', W / 2, H / 2 + 20);
+
+    // Buttons
+    if (gameResult) {
+      // Correct: show both Restart and Next/Finish
+      drawButton(restartButton, 'Restart', '#E87A3E', true);
+      const nextLabel = QUESTION.isLastQuestion ? 'Finish' : 'Next';
+      drawButton(nextButton, nextLabel, '#4ECDC4', true);
+    } else {
+      // Wrong: show only centered Restart button
+      const centeredRestart = { x: W / 2 - 75, y: H / 2 + 60, w: 150, h: 48 };
+      drawButton(centeredRestart, 'Restart', '#E87A3E', true);
+    }
+  }
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 3: YOUR GAME CODE - IMPLEMENT THESE FUNCTIONS                     ║
+  // ║  Pizza Builder: Click a pizza slice to select your answer                  ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+
+  // Check for reduced motion preference
+  const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  // QuizHP Color Palette
+  const COLORS = {
+    bgPrimary: '#2A2A27',
+    orange: '#E87A3E',
+    orangeHover: '#D66B31',
+    amber: '#F5A742',
+    cyan: '#4ECDC4',
+    success: '#6BBF59',
+    error: '#E85D4A',
+    textPrimary: '#F5F5F0',
+    borderSubtle: '#424240'
+  };
+
+  // Audio Context for sound effects
+  let audioCtx = null;
+  function initAudio() {
+    if (!audioCtx) {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    if (audioCtx.state === 'suspended') {
+      audioCtx.resume();
+    }
+  }
+
+  function playSound(type) {
+    if (!audioCtx) return;
+    try {
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+
+      if (type === 'correct') {
+        osc.frequency.setValueAtTime(523, audioCtx.currentTime);
+        osc.frequency.setValueAtTime(659, audioCtx.currentTime + 0.1);
+        osc.frequency.setValueAtTime(784, audioCtx.currentTime + 0.2);
+        gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.4);
+        osc.start(); osc.stop(audioCtx.currentTime + 0.4);
+      } else if (type === 'wrong') {
+        osc.frequency.setValueAtTime(200, audioCtx.currentTime);
+        osc.frequency.setValueAtTime(150, audioCtx.currentTime + 0.1);
+        gain.gain.setValueAtTime(0.2, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.25);
+        osc.start(); osc.stop(audioCtx.currentTime + 0.25);
+      } else if (type === 'click') {
+        osc.frequency.setValueAtTime(600, audioCtx.currentTime);
+        osc.frequency.setValueAtTime(800, audioCtx.currentTime + 0.03);
+        gain.gain.setValueAtTime(0.15, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.08);
+        osc.start(); osc.stop(audioCtx.currentTime + 0.08);
+      } else if (type === 'hover') {
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(400, audioCtx.currentTime);
+        gain.gain.setValueAtTime(0.05, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.04);
+        osc.start(); osc.stop(audioCtx.currentTime + 0.04);
+      }
+    } catch (e) { /* Audio not supported */ }
+  }
+
+  // Game state
+  let pizzaX, pizzaY, pizzaRadius;
+  let slices = [];
+  let hoveredSlice = -1;
+  let selectedSlice = -1;
+  let feedbackTimer = 0;
+  let gameTime = 0;
+
+  // Animation state
+  let entranceProgress = 0;
+  let entranceComplete = false;
+  let pizzaScale = 0;
+  let pizzaRotation = -Math.PI / 2;
+  let sliceAnimations = [0, 0, 0, 0]; // Individual slice scale animations
+  let selectionPulse = 0;
+  let previousHoveredSlice = -1;
+
+  // Particle systems
+  let steamParticles = [];
+  let ingredientParticles = [];
+  let cheeseParticles = [];
+
+  // Slice configurations with toppings (QuizHP colors)
+  const sliceConfigs = [
+    { emoji: '🍕', angle: 0, baseColor: COLORS.error },         // Top-right (Pepperoni - red)
+    { emoji: '🍄', angle: Math.PI / 2, baseColor: '#9B7ED4' },   // Bottom-right (Mushroom - purple)
+    { emoji: '🫒', angle: Math.PI, baseColor: COLORS.success },  // Bottom-left (Olive - green)
+    { emoji: '🫑', angle: 3 * Math.PI / 2, baseColor: COLORS.cyan } // Top-left (Bell pepper - cyan)
+  ];
+
+  function initGame() {
+    // Pizza position and size
+    pizzaX = W / 2;
+    pizzaY = H / 2;
+    pizzaRadius = 200;
+
+    // Reset state
+    hoveredSlice = -1;
+    selectedSlice = -1;
+    feedbackTimer = 0;
+    gameTime = 0;
+
+    // Reset animation state
+    entranceProgress = 0;
+    entranceComplete = false;
+    pizzaScale = prefersReducedMotion ? 1 : 0;
+    pizzaRotation = prefersReducedMotion ? 0 : -Math.PI / 2;
+    sliceAnimations = [0, 0, 0, 0];
+    selectionPulse = 0;
+    previousHoveredSlice = -1;
+
+    // Clear particles
+    steamParticles = [];
+    ingredientParticles = [];
+    cheeseParticles = [];
+
+    // Create slices with answer choices
+    slices = sliceConfigs.map((config, i) => ({
+      ...config,
+      choice: QUESTION.choices[i],
+      toppingBounce: Math.random() * Math.PI * 2, // Random phase for topping animation
+      hoverScale: 1,
+      selectScale: 1
+    }));
+
+    // Initialize steam particles
+    if (!prefersReducedMotion) {
+      for (let i = 0; i < 8; i++) {
+        spawnSteamParticle();
+      }
+    }
+  }
+
+  // Spawn ambient steam particles
+  function spawnSteamParticle() {
+    const angle = Math.random() * Math.PI * 2;
+    const dist = Math.random() * pizzaRadius * 0.6;
+    steamParticles.push({
+      x: pizzaX + Math.cos(angle) * dist,
+      y: pizzaY + Math.sin(angle) * dist,
+      vx: (Math.random() - 0.5) * 20,
+      vy: -30 - Math.random() * 40,
+      size: 3 + Math.random() * 6,
+      alpha: 0.3 + Math.random() * 0.3,
+      life: 1
+    });
+  }
+
+  // Spawn ingredient particles on hover/click
+  function spawnIngredientParticles(sliceIndex, count = 5) {
+    const slice = slices[sliceIndex];
+    const midAngle = slice.angle + Math.PI / 4;
+    const dist = pizzaRadius * 0.5;
+    const x = pizzaX + Math.cos(midAngle) * dist;
+    const y = pizzaY + Math.sin(midAngle) * dist;
+
+    const emojis = ['🧀', '🍅', '🌿', '🧄'];
+
+    for (let i = 0; i < count; i++) {
+      ingredientParticles.push({
+        x: x + (Math.random() - 0.5) * 40,
+        y: y + (Math.random() - 0.5) * 40,
+        vx: (Math.random() - 0.5) * 100,
+        vy: -50 - Math.random() * 80,
+        emoji: emojis[Math.floor(Math.random() * emojis.length)],
+        size: 12 + Math.random() * 8,
+        rotation: Math.random() * Math.PI * 2,
+        rotationSpeed: (Math.random() - 0.5) * 5,
+        alpha: 1,
+        gravity: 200
+      });
+    }
+  }
+
+  // Spawn cheese stretching particles on selection
+  function spawnCheeseParticles(sliceIndex) {
+    const slice = slices[sliceIndex];
+    const midAngle = slice.angle + Math.PI / 4;
+    const dist = pizzaRadius * 0.5;
+    const x = pizzaX + Math.cos(midAngle) * dist;
+    const y = pizzaY + Math.sin(midAngle) * dist;
+
+    for (let i = 0; i < 12; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const speed = 80 + Math.random() * 120;
+      cheeseParticles.push({
+        x: x,
+        y: y,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed - 50,
+        size: 4 + Math.random() * 4,
+        alpha: 1,
+        color: COLORS.amber,
+        gravity: 300
+      });
+    }
+  }
+
+  function updateGame(dt) {
+    if (gameState !== 'playing') return;
+
+    gameTime += dt;
+
+    // Entrance animation
+    if (!entranceComplete && !prefersReducedMotion) {
+      entranceProgress += dt * 2; // Complete in 0.5 seconds
+
+      // Spring easing for scale
+      const t = Math.min(entranceProgress, 1);
+      const spring = 1 + Math.sin(t * Math.PI * 2) * 0.15 * (1 - t);
+      pizzaScale = t * spring;
+
+      // Rotation settles
+      pizzaRotation = (-Math.PI / 2) * (1 - t * t);
+
+      if (entranceProgress >= 1) {
+        entranceComplete = true;
+        pizzaScale = 1;
+        pizzaRotation = 0;
+      }
+    }
+
+    // Update slice hover animations
+    for (let i = 0; i < 4; i++) {
+      const targetScale = (hoveredSlice === i && selectedSlice < 0) ? 1.08 : 1;
+      slices[i].hoverScale += (targetScale - slices[i].hoverScale) * dt * 12;
+    }
+
+    // Update selection pulse animation
+    if (selectedSlice >= 0) {
+      selectionPulse += dt * 8;
+      const pulseScale = 1 + Math.sin(selectionPulse) * 0.05;
+      slices[selectedSlice].selectScale = pulseScale;
+
+      feedbackTimer += dt;
+      if (feedbackTimer >= 1.0) {
+        const choice = slices[selectedSlice].choice;
+        engine.end(choice.is_correct, choice.explanation);
+      }
+    }
+
+    // Update topping bounce
+    if (!prefersReducedMotion) {
+      for (let i = 0; i < slices.length; i++) {
+        slices[i].toppingBounce += dt * 3;
+      }
+    }
+
+    // Update steam particles
+    steamParticles = steamParticles.filter(p => {
+      p.y += p.vy * dt;
+      p.x += p.vx * dt;
+      p.alpha -= dt * 0.4;
+      p.size += dt * 2;
+      return p.alpha > 0;
+    });
+
+    // Spawn new steam particles periodically
+    if (!prefersReducedMotion && entranceComplete && Math.random() < dt * 2) {
+      spawnSteamParticle();
+    }
+
+    // Update ingredient particles
+    ingredientParticles = ingredientParticles.filter(p => {
+      p.vy += p.gravity * dt;
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.rotation += p.rotationSpeed * dt;
+      p.alpha -= dt * 1.5;
+      return p.alpha > 0 && p.y < H + 50;
+    });
+
+    // Update cheese particles
+    cheeseParticles = cheeseParticles.filter(p => {
+      p.vy += p.gravity * dt;
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.alpha -= dt * 2;
+      return p.alpha > 0 && p.y < H + 50;
+    });
+  }
+
+  function drawGame() {
+    // Draw background
+    ctx.fillStyle = COLORS.bgPrimary;
+    ctx.fillRect(0, 0, W, H);
+
+    // Draw steam particles (behind pizza)
+    steamParticles.forEach(p => {
+      ctx.globalAlpha = p.alpha * 0.5;
+      ctx.fillStyle = '#FFFFFF';
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+      ctx.fill();
+    });
+    ctx.globalAlpha = 1;
+
+    // Apply pizza entrance transform
+    ctx.save();
+    ctx.translate(pizzaX, pizzaY);
+    ctx.rotate(pizzaRotation);
+    ctx.scale(pizzaScale, pizzaScale);
+    ctx.translate(-pizzaX, -pizzaY);
+
+    // Draw glow effect when slice is hovered
+    if (hoveredSlice >= 0 && selectedSlice < 0) {
+      const slice = slices[hoveredSlice];
+      const midAngle = slice.angle + Math.PI / 4;
+      const glowX = pizzaX + Math.cos(midAngle) * (pizzaRadius * 0.4);
+      const glowY = pizzaY + Math.sin(midAngle) * (pizzaRadius * 0.4);
+
+      const gradient = ctx.createRadialGradient(glowX, glowY, 0, glowX, glowY, pizzaRadius * 0.8);
+      gradient.addColorStop(0, 'rgba(78, 205, 196, 0.3)');
+      gradient.addColorStop(1, 'rgba(78, 205, 196, 0)');
+      ctx.fillStyle = gradient;
+      ctx.fillRect(0, 0, W, H);
+    }
+
+    // Draw pizza base (golden crust circle) with warm color
+    ctx.fillStyle = COLORS.amber;
+    ctx.shadowColor = 'rgba(0, 0, 0, 0.3)';
+    ctx.shadowBlur = 20;
+    ctx.shadowOffsetY = 5;
+    ctx.beginPath();
+    ctx.arc(pizzaX, pizzaY, pizzaRadius + 12, 0, 2 * Math.PI);
+    ctx.fill();
+    ctx.shadowColor = 'transparent';
+    ctx.shadowBlur = 0;
+    ctx.shadowOffsetY = 0;
+
+    // Draw red sauce base
+    ctx.fillStyle = COLORS.orangeHover;
+    ctx.beginPath();
+    ctx.arc(pizzaX, pizzaY, pizzaRadius, 0, 2 * Math.PI);
+    ctx.fill();
+
+    // Draw each slice
+    for (let i = 0; i < 4; i++) {
+      const slice = slices[i];
+      const startAngle = slice.angle;
+      const endAngle = slice.angle + Math.PI / 2;
+      const midAngle = startAngle + Math.PI / 4;
+
+      // Calculate slice scale (hover + selection)
+      const totalScale = slice.hoverScale * slice.selectScale;
+
+      // Determine slice fill color
+      let sliceColor = slice.baseColor;
+      if (selectedSlice === i) {
+        // Show feedback color
+        sliceColor = slice.choice.is_correct ? COLORS.success : COLORS.error;
+      }
+
+      // Draw slice with scale transform
+      ctx.save();
+      const sliceCenterX = pizzaX + Math.cos(midAngle) * (pizzaRadius * 0.4);
+      const sliceCenterY = pizzaY + Math.sin(midAngle) * (pizzaRadius * 0.4);
+      ctx.translate(sliceCenterX, sliceCenterY);
+      ctx.scale(totalScale, totalScale);
+      ctx.translate(-sliceCenterX, -sliceCenterY);
+
+      // Draw slice segment
+      ctx.fillStyle = sliceColor;
+      ctx.beginPath();
+      ctx.moveTo(pizzaX, pizzaY);
+      ctx.arc(pizzaX, pizzaY, pizzaRadius, startAngle, endAngle);
+      ctx.closePath();
+      ctx.fill();
+
+      // Draw slice border
+      ctx.strokeStyle = COLORS.borderSubtle;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(pizzaX, pizzaY);
+      ctx.arc(pizzaX, pizzaY, pizzaRadius, startAngle, endAngle);
+      ctx.closePath();
+      ctx.stroke();
+
+      // Draw topping emoji with bounce animation
+      const emojiDist = pizzaRadius * 0.32;
+      const bounceOffset = prefersReducedMotion ? 0 : Math.sin(slice.toppingBounce) * 3;
+      const emojiX = pizzaX + Math.cos(midAngle) * emojiDist;
+      const emojiY = pizzaY + Math.sin(midAngle) * emojiDist + bounceOffset;
+      const emojiScale = 1 + (prefersReducedMotion ? 0 : Math.sin(slice.toppingBounce * 1.5) * 0.1);
+
+      ctx.save();
+      ctx.translate(emojiX, emojiY);
+      ctx.scale(emojiScale, emojiScale);
+      ctx.font = "36px 'Nunito Sans', sans-serif";
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(slice.emoji, 0, 0);
+      ctx.restore();
+
+      // Draw answer text with word wrapping
+      drawWrappedTextOnSlice(
+        slice.choice.text,
+        pizzaX,
+        pizzaY,
+        pizzaRadius * 0.68,
+        midAngle,
+        130,
+        14,
+        COLORS.textPrimary
+      );
+
+      ctx.restore();
+    }
+
+    // Draw center circle to hide slice lines
+    ctx.fillStyle = COLORS.orangeHover;
+    ctx.beginPath();
+    ctx.arc(pizzaX, pizzaY, 35, 0, 2 * Math.PI);
+    ctx.fill();
+
+    // Draw center decoration with pulse
+    const centerPulse = 1 + (prefersReducedMotion ? 0 : Math.sin(gameTime * 2) * 0.05);
+    ctx.save();
+    ctx.translate(pizzaX, pizzaY);
+    ctx.scale(centerPulse, centerPulse);
+    ctx.fillStyle = COLORS.amber;
+    ctx.beginPath();
+    ctx.arc(0, 0, 20, 0, 2 * Math.PI);
+    ctx.fill();
+    ctx.restore();
+
+    ctx.restore(); // Restore from pizza entrance transform
+
+    // Draw ingredient particles
+    ingredientParticles.forEach(p => {
+      ctx.save();
+      ctx.globalAlpha = p.alpha;
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rotation);
+      ctx.font = `${p.size}px sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(p.emoji, 0, 0);
+      ctx.restore();
+    });
+    ctx.globalAlpha = 1;
+
+    // Draw cheese particles
+    cheeseParticles.forEach(p => {
+      ctx.globalAlpha = p.alpha;
+      ctx.fillStyle = p.color;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+      ctx.fill();
+    });
+    ctx.globalAlpha = 1;
+  }
+
+  // Helper function to draw wrapped text in a slice
+  function drawWrappedTextOnSlice(text, cx, cy, dist, angle, maxWidth, fontSize, color) {
+    if (!text) return;
+
+    ctx.font = `500 ${fontSize}px 'Nunito', sans-serif`;
+    ctx.fillStyle = color;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+
+    // Word wrap
+    const words = text.split(/\s+/);
+    let line = '';
+    const lines = [];
+
+    for (const word of words) {
+      const testLine = line ? line + ' ' + word : word;
+      const width = ctx.measureText(testLine).width;
+      if (width > maxWidth && line) {
+        lines.push(line);
+        line = word;
+      } else {
+        line = testLine;
+      }
+    }
+    if (line) lines.push(line);
+
+    // Calculate text position
+    const textX = cx + Math.cos(angle) * dist;
+    const textY = cy + Math.sin(angle) * dist;
+
+    // Draw each line
+    const lineHeight = fontSize * 1.25;
+    const totalHeight = lines.length * lineHeight;
+    let yOffset = textY - totalHeight / 2 + lineHeight / 2;
+
+    // Draw text shadow for better readability
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+    for (const ln of lines) {
+      ctx.fillText(ln, textX + 1, yOffset + 1);
+      yOffset += lineHeight;
+    }
+
+    // Draw actual text
+    ctx.fillStyle = color;
+    yOffset = textY - totalHeight / 2 + lineHeight / 2;
+    for (const ln of lines) {
+      ctx.fillText(ln, textX, yOffset);
+      yOffset += lineHeight;
+    }
+  }
+
+  // Helper function to adjust color brightness
+  function adjustBrightness(hex, percent) {
+    const num = parseInt(hex.replace('#', ''), 16);
+    const r = Math.min(255, ((num >> 16) & 0xff) + percent);
+    const g = Math.min(255, ((num >> 8) & 0xff) + percent);
+    const b = Math.min(255, (num & 0xff) + percent);
+    return '#' + ((r << 16) | (g << 8) | b).toString(16).padStart(6, '0');
+  }
+
+  function handleInput(e) {
+    if (gameState !== 'playing') return;
+    // Keyboard input not used for this game (click-based)
+  }
+
+  // Mouse move handler for hover effect
+  canvas.addEventListener('mousemove', (ev) => {
+    if (gameState !== 'playing' || selectedSlice >= 0 || !entranceComplete) return;
+
+    const { x: mx, y: my } = screenToLogical(ev.clientX, ev.clientY);
+
+    // Check which slice is hovered
+    const dx = mx - pizzaX;
+    const dy = my - pizzaY;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+
+    if (dist <= pizzaRadius && dist > 35) {
+      // Calculate angle (0 to 2*PI)
+      let angle = Math.atan2(dy, dx);
+      if (angle < 0) angle += 2 * Math.PI;
+
+      // Determine which slice (0-3)
+      const sliceIndex = Math.floor(angle / (Math.PI / 2));
+
+      // Play hover sound when entering a new slice
+      if (sliceIndex !== previousHoveredSlice && sliceIndex !== hoveredSlice) {
+        initAudio();
+        playSound('hover');
+        // Spawn a few ingredient particles on hover
+        if (!prefersReducedMotion) {
+          spawnIngredientParticles(sliceIndex, 2);
+        }
+      }
+
+      previousHoveredSlice = hoveredSlice;
+      hoveredSlice = sliceIndex;
+      canvas.style.cursor = 'pointer';
+    } else {
+      previousHoveredSlice = hoveredSlice;
+      hoveredSlice = -1;
+      canvas.style.cursor = 'default';
+    }
+  });
+
+  // Mouse click handler for selection
+  canvas.addEventListener('click', (ev) => {
+    if (gameState !== 'playing' || selectedSlice >= 0 || !entranceComplete) return;
+
+    initAudio();
+
+    const { x: mx, y: my } = screenToLogical(ev.clientX, ev.clientY);
+
+    const dx = mx - pizzaX;
+    const dy = my - pizzaY;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+
+    if (dist <= pizzaRadius && dist > 35 && hoveredSlice >= 0) {
+      selectedSlice = hoveredSlice;
+      feedbackTimer = 0;
+      canvas.style.cursor = 'default';
+
+      // Play selection sound
+      playSound('click');
+
+      // Spawn cheese and ingredient particles
+      if (!prefersReducedMotion) {
+        spawnCheeseParticles(selectedSlice);
+        spawnIngredientParticles(selectedSlice, 8);
+      }
+
+      // Play correct/wrong sound after a short delay
+      setTimeout(() => {
+        const choice = slices[selectedSlice].choice;
+        playSound(choice.is_correct ? 'correct' : 'wrong');
+      }, 200);
+    }
+  });
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 4: GAME LOOP - DO NOT MODIFY                                      ║
+  // ║  Standard loop with responsive scaling and DPR support.                    ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  let lastTime = performance.now();
+
+  function gameLoop(now) {
+    const dt = Math.min((now - lastTime) / 1000, 0.05); // Cap at 50ms
+    lastTime = now;
+
+    // Apply transform for logical coordinate system
+    ctx.setTransform(scale * dpr, 0, 0, scale * dpr, 0, 0);
+
+    if (gameState === 'playing') {
+      updateGame(dt);
+      drawGame();
+    } else {
+      drawGame(); // Draw game state behind overlay
+      drawEndScreen(dt);
+    }
+
+    // Reset transform for next frame
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+    requestAnimationFrame(gameLoop);
+  }
+
+  // Input handlers
+  document.addEventListener('keydown', (e) => {
+    if (gameState === 'ended' && (e.code === 'KeyR')) {
+      // Restart game
+      gameState = 'playing';
+      gameResult = null;
+      gameExplanation = '';
+      confettiParticles = [];
+      initGame();
+      return;
+    }
+    handleInput(e);
+  });
+
+  document.addEventListener('keyup', (e) => {
+    // Optional: handle key release in your handleInput
+  });
+
+  // Canvas click handler for end screen buttons
+  canvas.addEventListener('click', (e) => {
+    if (gameState !== 'ended') return;
+
+    const { x, y } = screenToLogical(e.clientX, e.clientY);
+
+    if (gameResult) {
+      // Correct answer: check both buttons
+      if (pointInRect(x, y, restartButton)) {
+        gameState = 'playing';
+        gameResult = null;
+        gameExplanation = '';
+        confettiParticles = [];
+        initGame();
+        return;
+      }
+      if (pointInRect(x, y, nextButton)) {
+        // Notify parent to go to next question
+        if (window.parent && window.parent !== window) {
+          window.parent.postMessage({ type: 'quiz-next' }, '*');
+        }
+        return;
+      }
+    } else {
+      // Wrong answer: check centered restart button
+      const centeredRestart = { x: W / 2 - 75, y: H / 2 + 60, w: 150, h: 48 };
+      if (pointInRect(x, y, centeredRestart)) {
+        gameState = 'playing';
+        gameResult = null;
+        gameExplanation = '';
+        confettiParticles = [];
+        initGame();
+        return;
+      }
+    }
+  });
+
+
+  // Cursor change handler for end screen buttons
+  canvas.addEventListener('mousemove', (e) => {
+    if (gameState !== 'ended') {
+      canvas.style.cursor = 'default';
+      return;
+    }
+    const { x, y } = screenToLogical(e.clientX, e.clientY);
+    if (gameResult) {
+      if (pointInRect(x, y, restartButton) || pointInRect(x, y, nextButton)) {
+        canvas.style.cursor = 'pointer';
+        return;
+      }
+    } else {
+      const centeredRestart = { x: W / 2 - 75, y: H / 2 + 60, w: 150, h: 48 };
+      if (pointInRect(x, y, centeredRestart)) {
+        canvas.style.cursor = 'pointer';
+        return;
+      }
+    }
+    canvas.style.cursor = 'default';
+  });
+
+  // Handle resize
+  window.addEventListener('resize', resizeCanvas);
+
+  // Initialize
+  resizeCanvas();
+  initGame();
+  requestAnimationFrame(gameLoop);
+  </script>
+</body>
+</html>

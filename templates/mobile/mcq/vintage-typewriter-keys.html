@@ -1,0 +1,1000 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <link href="https://fonts.googleapis.com/css2?family=Belanosima:wght@400;600;700&family=Nunito+Sans:wght@400;500;600;700&family=Nunito:wght@400;500;600&display=swap" rel="stylesheet">
+  <title>Vintage Typewriter Keys</title>
+  <!--
+  ╔══════════════════════════════════════════════════════════════════════════════╗
+  ║  GAME FACTORY TEMPLATE - MOBILE                                              ║
+  ║  Fills 100% of container, non-uniform scaling, touch input.                  ║
+  ║  Logical dimensions: 360×640 (use aspectRatio for proportional shapes)       ║
+  ╚══════════════════════════════════════════════════════════════════════════════╝
+  -->
+  <style>
+    /* ═══════════════════════════════════════════════════════════════════════════
+       BASE STYLES - Can be extended, not removed
+       ═══════════════════════════════════════════════════════════════════════════ */
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      touch-action: none; /* Prevent default touch behaviors */
+      -webkit-touch-callout: none;
+      -webkit-user-select: none;
+      user-select: none;
+    }
+    body {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      background: #1a1a2e;
+      font-family: system-ui, -apple-system, sans-serif;
+    }
+    #gameCanvas {
+      background: #16213e;
+      /* Canvas fills viewport via JS, these are fallbacks */
+      width: 100vw;
+      height: 100vh;
+    }
+  </style>
+</head>
+<body>
+  <!-- ═══════════════════════════════════════════════════════════════════════════
+       CANVAS - Sized dynamically to fill viewport
+       ═══════════════════════════════════════════════════════════════════════════ -->
+  <canvas id="gameCanvas"></canvas>
+
+  <script>
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 1: QUESTION PLACEHOLDER - DO NOT MODIFY FORMAT                    ║
+  // ║  Platform replaces this at runtime. Use these exact 60-char answers.       ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  const QUESTION = {
+    type: "mcq",
+    prompt: "Sample question text",
+    choices: [
+      { text: "This is sample answer A which is long enough to test text overflow", is_correct: true, explanation: "Why A is correct" },
+      { text: "This is sample answer B which is long enough to test text overflow", is_correct: false, explanation: "Why B is wrong" },
+      { text: "This is sample answer C which is long enough to test text overflow", is_correct: false, explanation: "Why C is wrong" },
+      { text: "This is sample answer D which is long enough to test text overflow", is_correct: false, explanation: "Why D is wrong" }
+    ],
+    isLastQuestion: false
+  };
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 2: ENGINE CORE (MOBILE) - DO NOT MODIFY                           ║
+  // ║  Non-uniform scaling (fills container), touch input, tap-to-restart.       ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  const canvas = document.getElementById('gameCanvas');
+  const ctx = canvas.getContext('2d');
+
+  // Logical dimensions (game code works in this coordinate space)
+  const W = 360, H = 640;
+
+  // Scaling state (computed on resize)
+  let scaleX = 1;
+  let scaleY = 1;
+  let aspectRatio = 1;  // scaleX/scaleY - use for proportional shapes
+
+  // Game state
+  let gameState = 'playing'; // 'playing' | 'ended'
+  let gameResult = null;     // true (correct) | false (wrong)
+  let gameExplanation = '';
+  let endScreenTime = 0;
+  let confettiParticles = [];
+
+  // End screen button bounds (logical coordinates)
+  const restartButton = { x: 20, y: H / 2 + 50, w: 155, h: 56 };
+  const nextButton = { x: 185, y: H / 2 + 50, w: 155, h: 56 };
+  // Centered restart button for wrong answers
+  const centeredRestartButton = { x: W / 2 - 100, y: H / 2 + 50, w: 200, h: 56 };
+
+  /** Draw a styled button with aspect-ratio aware text */
+  function drawMobileButton(rect, label, color, pulse) {
+    const textAdj = getTextScaleAdjustment();
+    const p = pulse ? 1 + Math.sin(endScreenTime * 4) * 0.03 : 1;
+
+    ctx.save();
+    ctx.translate(rect.x + rect.w / 2, rect.y + rect.h / 2);
+    ctx.scale(p, p);
+    ctx.translate(-(rect.x + rect.w / 2), -(rect.y + rect.h / 2));
+
+    // Button background
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.roundRect(rect.x, rect.y, rect.w, rect.h, 12);
+    ctx.fill();
+
+    // Button text (aspect-ratio aware)
+    ctx.save();
+    ctx.translate(rect.x + rect.w / 2, rect.y + rect.h / 2);
+    ctx.scale(textAdj / aspectRatio, textAdj);
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = 'bold 18px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, 0, 0);
+    ctx.restore();
+
+    ctx.restore();
+  }
+
+  /**
+   * Resize canvas to fill viewport completely (no letterboxing).
+   * Uses non-uniform scaling - game code works in 360×640 logical space.
+   * Use aspectRatio to draw proportionally correct shapes.
+   */
+  function resizeCanvas() {
+    const dpr = window.devicePixelRatio || 1;
+
+    // Physical canvas size (actual pixels)
+    canvas.width = window.innerWidth * dpr;
+    canvas.height = window.innerHeight * dpr;
+
+    // CSS size (fills viewport)
+    canvas.style.width = window.innerWidth + 'px';
+    canvas.style.height = window.innerHeight + 'px';
+
+    // Non-uniform scaling to fill entire canvas
+    scaleX = canvas.width / W;
+    scaleY = canvas.height / H;
+
+    // Aspect ratio for proportional shape drawing
+    // >1 means container is wider than logical space
+    // <1 means container is taller than logical space
+    aspectRatio = scaleX / scaleY;
+
+    // Recalculate text sizing on resize (implement this in SECTION 3)
+    if (typeof recalculateTextSizing === 'function') {
+      recalculateTextSizing();
+    }
+  }
+
+  // === ASPECT-RATIO-AWARE TEXT WITH CLAMPED SCALING ===
+  // Text gets stretched by non-uniform scaling, so we compensate.
+  // Also clamp the effective scale to keep text legible at all sizes.
+  const TEXT_SCALE_MIN = 0.75;
+  const TEXT_SCALE_MAX = 1.4;
+
+  function getTextScaleAdjustment() {
+    const baseScale = window.innerHeight / H;
+    const clampedScale = Math.min(TEXT_SCALE_MAX, Math.max(TEXT_SCALE_MIN, baseScale));
+    return clampedScale / baseScale;
+  }
+
+  /**
+   * Draw text with aspect-ratio compensation and clamped scaling.
+   * Use this instead of raw ctx.fillText() to prevent text stretching.
+   * Default font is 16px (minimum for answer text). Use 18-20px for better readability.
+   */
+  function drawText(text, x, y, options = {}) {
+    const { font = "500 16px system-ui, sans-serif", color = '#F5F5F0', align = 'center', baseline = 'middle' } = options;
+    ctx.save();
+    ctx.translate(x, y);
+    const adj = getTextScaleAdjustment();
+    ctx.scale(adj / aspectRatio, adj);
+    ctx.font = font;
+    ctx.fillStyle = color;
+    ctx.textAlign = align;
+    ctx.textBaseline = baseline;
+    ctx.fillText(text, 0, 0);
+    ctx.restore();
+  }
+
+  /**
+   * Convert screen coordinates to logical coordinates.
+   * Use this in handleTouch to get positions in 360×640 space.
+   */
+  function screenToLogical(screenX, screenY) {
+    const dpr = window.devicePixelRatio || 1;
+    const rect = canvas.getBoundingClientRect();
+    const canvasX = (screenX - rect.left) * dpr;
+    const canvasY = (screenY - rect.top) * dpr;
+    return {
+      x: canvasX / scaleX,
+      y: canvasY / scaleY
+    };
+  }
+
+  /**
+   * Check if a point is inside a rectangle (logical coordinates).
+   */
+  function pointInRect(px, py, rect) {
+    return px >= rect.x && px <= rect.x + rect.w &&
+           py >= rect.y && py <= rect.y + rect.h;
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // TEXT UTILITIES - Dynamic wrapping and font sizing
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  /**
+   * Wrap text to fit within a maximum width (in logical coordinates).
+   * Accounts for canvas transforms applied by drawText().
+   */
+  function wrapText(text, maxWidth, font, maxLines = 3) {
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.font = font;
+    const adj = getTextScaleAdjustment();
+    const maxRawWidth = maxWidth * aspectRatio / adj;
+    const words = text.split(' ');
+    const lines = [];
+    let currentLine = '';
+    words.forEach(word => {
+      const testLine = currentLine ? currentLine + ' ' + word : word;
+      if (ctx.measureText(testLine).width > maxRawWidth && currentLine) {
+        lines.push(currentLine);
+        currentLine = word;
+      } else {
+        currentLine = testLine;
+      }
+    });
+    if (currentLine) lines.push(currentLine);
+    ctx.restore();
+    return lines.slice(0, maxLines);
+  }
+
+  /**
+   * Find the optimal font size to fit content in available space.
+   */
+  function findOptimalFontSize(options) {
+    const {
+      texts,
+      maxWidth,
+      availableHeight,
+      minFont = 12,
+      maxFont = 18,
+      itemPadding = 4,
+      fontFamily = "'Nunito Sans', sans-serif"
+    } = options;
+
+    let bestFontSize = minFont;
+    let bestWrappedTexts = [];
+
+    for (let fontSize = maxFont; fontSize >= minFont; fontSize -= 0.5) {
+      const font = `${fontSize}px ${fontFamily}`;
+      const lineHeight = fontSize + 2;
+
+      let totalHeight = 0;
+      const wrappedTexts = [];
+
+      for (const text of texts) {
+        const lines = wrapText(text, maxWidth, font);
+        wrappedTexts.push(lines);
+        totalHeight += itemPadding + lines.length * lineHeight;
+      }
+
+      if (totalHeight <= availableHeight) {
+        bestFontSize = fontSize;
+        bestWrappedTexts = wrappedTexts;
+        break;
+      }
+
+      bestWrappedTexts = wrappedTexts;
+    }
+
+    return { fontSize: bestFontSize, wrappedTexts: bestWrappedTexts };
+  }
+
+  const engine = {
+    /** Call this to end the game. DO NOT draw your own end screen. */
+    end(isCorrect, explanation) {
+      if (gameState === 'ended') return;
+      gameState = 'ended';
+      gameResult = isCorrect;
+      gameExplanation = explanation || '';
+      endScreenTime = 0;
+
+      // Spawn confetti for correct answers
+      if (isCorrect) {
+        for (let i = 0; i < 50; i++) {
+          confettiParticles.push({
+            x: W / 2,
+            y: H / 2,
+            vx: (Math.random() - 0.5) * 400,
+            vy: -Math.random() * 300 - 80,
+            size: 4 + Math.random() * 6,
+            color: ['#FFD700', '#FF6B6B', '#4ECDC4', '#95E1D3', '#F38181'][Math.floor(Math.random() * 5)],
+            rotation: Math.random() * Math.PI * 2,
+            rotationSpeed: (Math.random() - 0.5) * 10
+          });
+        }
+      }
+
+      // Notify parent frame
+      if (window.parent && window.parent !== window) {
+        window.parent.postMessage({
+          type: 'quiz-end',
+          isCorrect: isCorrect,
+          explanation: explanation || ''
+        }, '*');
+      }
+    }
+  };
+
+  /** STANDARD END SCREEN (MOBILE) - DO NOT MODIFY */
+  function drawEndScreen(dt) {
+    endScreenTime += dt;
+
+    // Update confetti
+    confettiParticles = confettiParticles.filter(p => {
+      p.vy += 600 * dt; // gravity
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.rotation += p.rotationSpeed * dt;
+      p.vx *= 0.99;
+      return p.y < H + 50;
+    });
+
+    // Dark overlay
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
+    ctx.fillRect(0, 0, W, H);
+
+    // Draw confetti
+    confettiParticles.forEach(p => {
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rotation);
+      ctx.fillStyle = p.color;
+      ctx.fillRect(-p.size / 2, -p.size / 4, p.size, p.size / 2);
+      ctx.restore();
+    });
+
+    // Result emoji (aspect-ratio aware)
+    const textAdj = getTextScaleAdjustment();
+    ctx.save();
+    ctx.translate(W / 2, H / 2 - 80);
+    ctx.scale(textAdj / aspectRatio, textAdj);
+    ctx.font = '64px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(gameResult ? '🎉' : '😢', 0, 0);
+    ctx.restore();
+
+    // Result text (aspect-ratio aware)
+    ctx.save();
+    ctx.translate(W / 2, H / 2 - 10);
+    ctx.scale(textAdj / aspectRatio, textAdj);
+    ctx.fillStyle = gameResult ? '#4ADE80' : '#F87171';
+    ctx.font = 'bold 32px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(gameResult ? 'Correct!' : 'Wrong!', 0, 0);
+    ctx.restore();
+
+    // Buttons
+    if (gameResult) {
+      // Correct: show both Restart and Next/Finish
+      drawMobileButton(restartButton, 'Restart', '#E87A3E', true);
+      const nextLabel = QUESTION.isLastQuestion ? 'Finish' : 'Next';
+      drawMobileButton(nextButton, nextLabel, '#4ECDC4', true);
+    } else {
+      // Wrong: show only centered Restart button
+      drawMobileButton(centeredRestartButton, 'Restart', '#E87A3E', true);
+    }
+  }
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 3: YOUR GAME CODE - IMPLEMENT THESE FUNCTIONS                     ║
+  // ║  Vintage Typewriter Keys - MCQ game with 4 circular typewriter keys       ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+
+  // === COLORS ===
+  const COLORS = {
+    bgPrimary: '#FAFAF7',
+    bgSurface: '#FFFFFF',
+    textPrimary: '#2B2B28',
+    textSecondary: '#5A5A54',
+    orange: '#E87A3E',
+    orangeHover: '#D66B31',
+    amber: '#F5A742',
+    cyan: '#4ECDC4',
+    success: '#6BBF59',
+    error: '#E85D4A',
+    borderSubtle: '#E6E6E0',
+    borderStrong: '#D4D4CC',
+    // Typewriter-specific
+    paperCream: '#F5F0E6',
+    inkDark: '#3A3632',
+    metalDark: '#4A4540',
+    metalMid: '#6B655C',
+    metalLight: '#8A8378',
+    keyRimDark: '#2E2A26',
+    keyFaceDark: '#3D3833',
+    keyFaceLight: '#5A5449',
+    keyHighlight: '#7A7368',
+  };
+
+  // === AUDIO ===
+  let audioCtx = null;
+  function getAudioCtx() {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    return audioCtx;
+  }
+
+  function playClickSound() {
+    try {
+      const ctx = getAudioCtx();
+      // Typewriter key clack sound
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      const noise = ctx.createOscillator();
+      const noiseGain = ctx.createGain();
+
+      osc.type = 'square';
+      osc.frequency.setValueAtTime(800, ctx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(200, ctx.currentTime + 0.05);
+      gain.gain.setValueAtTime(0.15, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.08);
+
+      noise.type = 'sawtooth';
+      noise.frequency.setValueAtTime(3000, ctx.currentTime);
+      noise.frequency.exponentialRampToValueAtTime(100, ctx.currentTime + 0.03);
+      noiseGain.gain.setValueAtTime(0.08, ctx.currentTime);
+      noiseGain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.05);
+
+      osc.connect(gain).connect(ctx.destination);
+      noise.connect(noiseGain).connect(ctx.destination);
+      osc.start(); osc.stop(ctx.currentTime + 0.1);
+      noise.start(); noise.stop(ctx.currentTime + 0.06);
+    } catch(e) {}
+  }
+
+  function playCorrectSound() {
+    try {
+      const ctx = getAudioCtx();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(523, ctx.currentTime);
+      osc.frequency.setValueAtTime(659, ctx.currentTime + 0.1);
+      osc.frequency.setValueAtTime(784, ctx.currentTime + 0.2);
+      gain.gain.setValueAtTime(0.2, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.4);
+      osc.connect(gain).connect(ctx.destination);
+      osc.start(); osc.stop(ctx.currentTime + 0.4);
+    } catch(e) {}
+  }
+
+  function playWrongSound() {
+    try {
+      const ctx = getAudioCtx();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(300, ctx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(150, ctx.currentTime + 0.3);
+      gain.gain.setValueAtTime(0.15, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);
+      osc.connect(gain).connect(ctx.destination);
+      osc.start(); osc.stop(ctx.currentTime + 0.3);
+    } catch(e) {}
+  }
+
+  // === GAME STATE ===
+  let keys = [];
+  let gameTime = 0;
+  let selectedKey = -1;
+  let selectionTime = 0;
+  let paperFeedOffset = 0;
+  let typedChars = [];
+  let particles = [];
+
+  // Key labels A-D
+  const keyLabels = ['A', 'B', 'C', 'D'];
+
+  // 2x2 grid layout for keys
+  const KEY_RADIUS = 52;
+  const GRID_GAP = 20;
+  const GRID_START_Y = 80;
+  const TEXT_AREA_HEIGHT = 340;
+  const KEY_AREA_TOP = GRID_START_Y + TEXT_AREA_HEIGHT;
+
+  function recalculateTextSizing() {
+    if (!keys || keys.length === 0) return;
+
+    const textAreaWidth = 140;
+    const { fontSize, wrappedTexts } = findOptimalFontSize({
+      texts: QUESTION.choices.map(c => c.text),
+      maxWidth: textAreaWidth,
+      availableHeight: 70,
+      minFont: 12,
+      maxFont: 16,
+      fontFamily: "'Nunito', sans-serif"
+    });
+
+    keys.forEach((key, i) => {
+      key.wrappedText = wrappedTexts[i];
+      key.fontSize = fontSize;
+    });
+  }
+
+  function initGame() {
+    gameTime = 0;
+    selectedKey = -1;
+    selectionTime = 0;
+    paperFeedOffset = 0;
+    typedChars = [];
+    particles = [];
+
+    // 2x2 grid of circular typewriter keys
+    const colSpacing = 160;
+    const rowSpacing = 140;
+    const gridCenterX = W / 2;
+    const gridTop = KEY_AREA_TOP + 20;
+
+    keys = QUESTION.choices.map((choice, i) => {
+      const col = i % 2;
+      const row = Math.floor(i / 2);
+      return {
+        x: gridCenterX - colSpacing / 2 + col * colSpacing,
+        y: gridTop + row * rowSpacing,
+        radius: KEY_RADIUS,
+        choice: choice,
+        label: keyLabels[i],
+        pressed: false,
+        pressDepth: 0,
+        scale: 0,
+        alpha: 0,
+        wobble: 0,
+        wrappedText: [choice.text],
+        fontSize: 14,
+        // Animation
+        entranceDelay: i * 80,
+        entranceTime: 0,
+      };
+    });
+
+    recalculateTextSizing();
+  }
+
+  function spawnKeyParticles(x, y, color) {
+    for (let i = 0; i < 12; i++) {
+      particles.push({
+        x: x,
+        y: y,
+        vx: (Math.random() - 0.5) * 200,
+        vy: (Math.random() - 0.5) * 200 - 60,
+        size: 2 + Math.random() * 4,
+        color: color,
+        alpha: 1,
+        life: 0.5 + Math.random() * 0.3,
+        age: 0,
+      });
+    }
+  }
+
+  function updateGame(dt) {
+    if (gameState !== 'playing') return;
+
+    gameTime += dt;
+
+    // Entrance animations
+    keys.forEach((key) => {
+      key.entranceTime += dt;
+      const t = Math.max(0, (key.entranceTime * 1000 - key.entranceDelay) / 350);
+      if (t < 1) {
+        const spring = 1 + Math.sin(t * Math.PI * 2) * 0.2 * (1 - t);
+        key.scale = Math.max(0.01, t * spring);
+        key.alpha = Math.min(1, t * 1.5);
+      } else {
+        key.scale = 1;
+        key.alpha = 1;
+      }
+    });
+
+    // Key press animation
+    keys.forEach((key) => {
+      if (key.pressed) {
+        key.pressDepth = Math.min(6, key.pressDepth + dt * 80);
+      } else {
+        key.pressDepth = Math.max(0, key.pressDepth - dt * 40);
+      }
+    });
+
+    // Selection feedback animation
+    if (selectedKey >= 0) {
+      selectionTime += dt;
+      const key = keys[selectedKey];
+
+      if (key.choice.is_correct) {
+        key.wobble = Math.sin(selectionTime * Math.PI * 6) * (1 - Math.min(1, selectionTime / 0.5)) * 0.1;
+      } else {
+        key.wobble = Math.sin(selectionTime * Math.PI * 10) * (1 - Math.min(1, selectionTime / 0.4)) * 8;
+      }
+
+      // Paper feed effect
+      paperFeedOffset += dt * 60;
+
+      if (selectionTime > 0.6) {
+        engine.end(key.choice.is_correct, key.choice.explanation);
+      }
+    }
+
+    // Update particles
+    particles.forEach(p => {
+      p.age += dt;
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.vy += 300 * dt;
+      p.alpha = Math.max(0, 1 - p.age / p.life);
+    });
+    particles = particles.filter(p => p.age < p.life);
+  }
+
+  function drawGame() {
+    // Background - warm paper/wood tone
+    ctx.fillStyle = COLORS.paperCream;
+    ctx.fillRect(0, 0, W, H);
+
+    // Typewriter body background (darker area behind keys)
+    const bodyTop = KEY_AREA_TOP - 20;
+    ctx.fillStyle = COLORS.inkDark;
+    ctx.beginPath();
+    ctx.roundRect(0, bodyTop, W, H - bodyTop + 20, 20);
+    ctx.fill();
+
+    // Subtle wood grain texture lines on typewriter body
+    ctx.strokeStyle = 'rgba(90, 84, 73, 0.15)';
+    ctx.lineWidth = 0.5;
+    for (let i = 0; i < 12; i++) {
+      const yPos = bodyTop + 20 + i * 22;
+      ctx.beginPath();
+      ctx.moveTo(10, yPos);
+      ctx.lineTo(W - 10, yPos);
+      ctx.stroke();
+    }
+
+    // Metal plate behind keys
+    const plateMargin = 15;
+    ctx.fillStyle = COLORS.metalDark;
+    ctx.beginPath();
+    ctx.roundRect(plateMargin, bodyTop + 10, W - plateMargin * 2, H - bodyTop - 10, 12);
+    ctx.fill();
+
+    // Metal plate inner bevel
+    ctx.strokeStyle = COLORS.metalLight;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.roundRect(plateMargin + 2, bodyTop + 12, W - plateMargin * 2 - 4, H - bodyTop - 14, 10);
+    ctx.stroke();
+
+    // Paper strip area at top
+    drawPaperStrip();
+
+    // Draw answer text areas (on the paper)
+    drawAnswerText();
+
+    // Draw the 4 typewriter keys
+    keys.forEach((key, i) => {
+      drawTypewriterKey(key, i);
+    });
+
+    // Draw particles
+    particles.forEach(p => {
+      ctx.globalAlpha = p.alpha;
+      ctx.fillStyle = p.color;
+      ctx.beginPath();
+      ctx.ellipse(p.x, p.y, p.size, p.size * aspectRatio, 0, 0, Math.PI * 2);
+      ctx.fill();
+    });
+    ctx.globalAlpha = 1;
+  }
+
+  function drawPaperStrip() {
+    const paperTop = 10;
+    const paperHeight = TEXT_AREA_HEIGHT + 60;
+    const paperLeft = 20;
+    const paperWidth = W - 40;
+
+    // Paper shadow
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.1)';
+    ctx.beginPath();
+    ctx.roundRect(paperLeft + 3, paperTop + 3, paperWidth, paperHeight, 4);
+    ctx.fill();
+
+    // Paper background
+    ctx.fillStyle = '#FFF8F0';
+    ctx.beginPath();
+    ctx.roundRect(paperLeft, paperTop, paperWidth, paperHeight, 4);
+    ctx.fill();
+
+    // Paper edge lines
+    ctx.strokeStyle = '#E8DDD0';
+    ctx.lineWidth = 0.5;
+    for (let y = paperTop + 28; y < paperTop + paperHeight - 5; y += 22) {
+      ctx.beginPath();
+      ctx.moveTo(paperLeft + 10, y);
+      ctx.lineTo(paperLeft + paperWidth - 10, y);
+      ctx.stroke();
+    }
+
+    // Paper border
+    ctx.strokeStyle = COLORS.borderStrong;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.roundRect(paperLeft, paperTop, paperWidth, paperHeight, 4);
+    ctx.stroke();
+
+    // Roller bar at top
+    const rollerY = paperTop - 3;
+    ctx.fillStyle = COLORS.metalMid;
+    ctx.fillRect(paperLeft - 5, rollerY, paperWidth + 10, 6);
+    ctx.fillStyle = COLORS.metalLight;
+    ctx.fillRect(paperLeft - 5, rollerY, paperWidth + 10, 2);
+  }
+
+  function drawAnswerText() {
+    const paperLeft = 30;
+    const startY = 35;
+    const lineSpacing = TEXT_AREA_HEIGHT / 4;
+
+    keys.forEach((key, i) => {
+      const areaY = startY + i * lineSpacing;
+      const lines = key.wrappedText || [key.choice.text];
+      const fontSize = key.fontSize || 14;
+      const lineHeight = fontSize + 3;
+
+      // Letter label (key label)
+      const labelColor = (selectedKey === i)
+        ? (key.choice.is_correct ? COLORS.success : COLORS.error)
+        : COLORS.orange;
+
+      drawText(key.label + '.', paperLeft + 8, areaY + lineSpacing / 2 - ((lines.length - 1) * lineHeight) / 2, {
+        font: `700 ${fontSize + 2}px 'Belanosima', sans-serif`,
+        color: labelColor,
+        align: 'left',
+        baseline: 'middle'
+      });
+
+      // Answer text lines
+      const textColor = (selectedKey === i)
+        ? (key.choice.is_correct ? COLORS.success : COLORS.error)
+        : COLORS.textPrimary;
+
+      lines.forEach((line, li) => {
+        const yOff = areaY + lineSpacing / 2 + (li - (lines.length - 1) / 2) * lineHeight;
+        drawText(line, paperLeft + 28, yOff, {
+          font: `500 ${fontSize}px 'Nunito', sans-serif`,
+          color: textColor,
+          align: 'left',
+          baseline: 'middle'
+        });
+      });
+
+      // Separator line
+      if (i < 3) {
+        ctx.strokeStyle = 'rgba(200, 190, 175, 0.4)';
+        ctx.lineWidth = 0.5;
+        ctx.beginPath();
+        ctx.moveTo(paperLeft, areaY + lineSpacing);
+        ctx.lineTo(W - 30, areaY + lineSpacing);
+        ctx.stroke();
+      }
+    });
+  }
+
+  function drawTypewriterKey(key, index) {
+    if (key.alpha <= 0 || key.scale < 0.05) return;
+
+    ctx.save();
+    ctx.globalAlpha = key.alpha;
+
+    const cx = key.x + (selectedKey === index ? key.wobble : 0);
+    const cy = key.y + key.pressDepth;
+    const r = Math.max(10, key.radius * key.scale);
+
+    // Key stem (connects to mechanism below)
+    ctx.fillStyle = COLORS.metalMid;
+    ctx.fillRect(cx - 4, cy + r * aspectRatio * 0.5, 8, 15);
+
+    // Key shadow
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.35)';
+    ctx.beginPath();
+    ctx.ellipse(cx + 2, cy + 3, r + 2, (r + 2) * aspectRatio, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Outer rim (dark metal ring)
+    ctx.fillStyle = COLORS.keyRimDark;
+    ctx.beginPath();
+    ctx.ellipse(cx, cy, r + 3, (r + 3) * aspectRatio, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Key face background
+    const isSelected = selectedKey === index;
+    let faceColor = COLORS.keyFaceDark;
+    if (isSelected) {
+      faceColor = key.choice.is_correct ? COLORS.success : COLORS.error;
+    }
+    ctx.fillStyle = faceColor;
+    ctx.beginPath();
+    ctx.ellipse(cx, cy, r, r * aspectRatio, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Inner ring (glass/metal inset)
+    ctx.strokeStyle = isSelected
+      ? 'rgba(255,255,255,0.4)'
+      : COLORS.keyHighlight;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.ellipse(cx, cy, r - 4, (r - 4) * aspectRatio, 0, 0, Math.PI * 2);
+    ctx.stroke();
+
+    // Highlight arc (top gloss)
+    if (!isSelected) {
+      ctx.strokeStyle = 'rgba(160, 155, 145, 0.3)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.ellipse(cx, cy, r - 8, (r - 8) * aspectRatio, 0, -Math.PI * 0.8, -Math.PI * 0.2);
+      ctx.stroke();
+    }
+
+    // Key letter label
+    const letterColor = isSelected ? '#FFFFFF' : '#E8E0D4';
+    drawText(key.label, cx, cy - 6, {
+      font: `700 28px 'Belanosima', sans-serif`,
+      color: letterColor,
+      align: 'center',
+      baseline: 'middle'
+    });
+
+    // Small subtitle under the letter
+    const subtitleColor = isSelected ? 'rgba(255,255,255,0.8)' : 'rgba(200,190,175,0.7)';
+    drawText('tap', cx, cy + 16, {
+      font: `500 14px 'Nunito Sans', sans-serif`,
+      color: subtitleColor,
+      align: 'center',
+      baseline: 'middle'
+    });
+
+    ctx.restore();
+  }
+
+  function handleTouch(e, type) {
+    if (gameState !== 'playing') return;
+    if (selectedKey >= 0) return; // Already selected
+
+    if (type === 'start') {
+      const touch = e.touches[0] || e.changedTouches[0];
+      const { x, y } = screenToLogical(touch.clientX, touch.clientY);
+
+      keys.forEach((key, i) => {
+        const dx = x - key.x;
+        const dy = (y - key.y) / aspectRatio;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+
+        if (dist <= key.radius + 5) {
+          key.pressed = true;
+          selectedKey = i;
+          selectionTime = 0;
+          playClickSound();
+
+          // Spawn particles
+          const pColor = key.choice.is_correct
+            ? COLORS.success
+            : COLORS.error;
+          spawnKeyParticles(key.x, key.y, pColor);
+
+          // Delayed feedback sound
+          setTimeout(() => {
+            if (key.choice.is_correct) playCorrectSound();
+            else playWrongSound();
+          }, 200);
+        }
+      });
+    }
+  }
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 4: GAME LOOP - DO NOT MODIFY                                      ║
+  // ║  Standard loop with responsive scaling and touch handling.                 ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  let lastTime = performance.now();
+
+  function gameLoop(now) {
+    const dt = Math.min((now - lastTime) / 1000, 0.05); // Cap at 50ms
+    lastTime = now;
+
+    // Apply transform for logical coordinate system (non-uniform scaling)
+    ctx.setTransform(scaleX, 0, 0, scaleY, 0, 0);
+
+    if (gameState === 'playing') {
+      updateGame(dt);
+      drawGame();
+    } else {
+      drawGame(); // Draw game state behind overlay
+      drawEndScreen(dt);
+    }
+
+    // Reset transform for next frame
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+    requestAnimationFrame(gameLoop);
+  }
+
+  // Touch handlers
+  function onTouchStart(e) {
+    e.preventDefault();
+    if (gameState === 'ended') {
+      const touch = e.touches[0];
+      const { x, y } = screenToLogical(touch.clientX, touch.clientY);
+
+      if (gameResult) {
+        // Correct answer: check both buttons
+        if (pointInRect(x, y, restartButton)) {
+          gameState = 'playing';
+          gameResult = null;
+          gameExplanation = '';
+          confettiParticles = [];
+          initGame();
+          return;
+        }
+        if (pointInRect(x, y, nextButton)) {
+          // Notify parent to go to next question
+          if (window.parent && window.parent !== window) {
+            window.parent.postMessage({ type: 'quiz-next' }, '*');
+          }
+          return;
+        }
+      } else {
+        // Wrong answer: check centered restart button
+        if (pointInRect(x, y, centeredRestartButton)) {
+          gameState = 'playing';
+          gameResult = null;
+          gameExplanation = '';
+          confettiParticles = [];
+          initGame();
+          return;
+        }
+      }
+    }
+    handleTouch(e, 'start');
+  }
+
+  function onTouchMove(e) {
+    e.preventDefault();
+    handleTouch(e, 'move');
+  }
+
+  function onTouchEnd(e) {
+    e.preventDefault();
+    handleTouch(e, 'end');
+  }
+
+  canvas.addEventListener('touchstart', onTouchStart, { passive: false });
+  canvas.addEventListener('touchmove', onTouchMove, { passive: false });
+  canvas.addEventListener('touchend', onTouchEnd, { passive: false });
+
+  // Also support mouse for testing in browser
+  canvas.addEventListener('mousedown', (e) => {
+    const fakeTouch = { touches: [{ clientX: e.clientX, clientY: e.clientY }], changedTouches: [{ clientX: e.clientX, clientY: e.clientY }] };
+    onTouchStart(fakeTouch);
+  });
+
+  canvas.addEventListener('mouseup', (e) => {
+    const fakeTouch = { touches: [], changedTouches: [{ clientX: e.clientX, clientY: e.clientY }] };
+    onTouchEnd(fakeTouch);
+  });
+
+  // Handle resize
+  window.addEventListener('resize', resizeCanvas);
+  window.addEventListener('orientationchange', () => {
+    setTimeout(resizeCanvas, 100); // Delay for orientation change to complete
+  });
+
+  // Prevent pull-to-refresh and overscroll
+  document.body.addEventListener('touchmove', (e) => e.preventDefault(), { passive: false });
+
+  // Initialize
+  resizeCanvas();
+  initGame();
+  requestAnimationFrame(gameLoop);
+  </script>
+</body>
+</html>

@@ -1,0 +1,1108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Selkie Seal Moonlight Sweep</title>
+  <link href="https://fonts.googleapis.com/css2?family=Belanosima:wght@400;600;700&family=Nunito+Sans:wght@400;500;600;700&family=Nunito:wght@400;500;600&display=swap" rel="stylesheet">
+  <!--
+  ╔══════════════════════════════════════════════════════════════════════════════╗
+  ║  GAME FACTORY TEMPLATE                                                        ║
+  ║  This template enforces critical invariants. Follow the section markers.      ║
+  ╚══════════════════════════════════════════════════════════════════════════════╝
+  -->
+  <style>
+    /* ═══════════════════════════════════════════════════════════════════════════
+       BASE STYLES - Can be extended, not removed
+       ═══════════════════════════════════════════════════════════════════════════ */
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+    }
+    body {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      background: #1a1a2e;
+      font-family: system-ui, -apple-system, sans-serif;
+    }
+    #gameCanvas {
+      background: #16213e;
+      border-radius: 8px;
+      display: block;
+    }
+  </style>
+</head>
+<body>
+  <!-- ═══════════════════════════════════════════════════════════════════════════
+       CANVAS - Sized dynamically to fill available space
+       ═══════════════════════════════════════════════════════════════════════════ -->
+  <canvas id="gameCanvas"></canvas>
+
+  <script>
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 1: QUESTION PLACEHOLDER - DO NOT MODIFY FORMAT                    ║
+  // ║  Platform replaces this at runtime. Use these exact 60-char answers.       ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  const QUESTION = {
+    type: "mcq",
+    prompt: "Sample question text",
+    choices: [
+      { text: "This is sample answer A which is long enough to test text overflow", is_correct: true, explanation: "Why A is correct" },
+      { text: "This is sample answer B which is long enough to test text overflow", is_correct: false, explanation: "Why B is wrong" },
+      { text: "This is sample answer C which is long enough to test text overflow", is_correct: false, explanation: "Why C is wrong" },
+      { text: "This is sample answer D which is long enough to test text overflow", is_correct: false, explanation: "Why D is wrong" }
+    ],
+    isLastQuestion: false
+  };
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 2: ENGINE CORE - DO NOT MODIFY                                    ║
+  // ║  Standard engine interface and end screen. This is sacred.                 ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  const canvas = document.getElementById('gameCanvas');
+  const ctx = canvas.getContext('2d');
+
+  // Logical dimensions (game code works in this coordinate space)
+  const W = 720, H = 540;
+
+  // Scaling state (computed on resize)
+  let scale = 1;
+  let dpr = 1;
+
+  let gameState = 'playing'; // 'playing' | 'ended'
+  let gameResult = null;     // true (correct) | false (wrong)
+  let gameExplanation = '';
+  let endScreenTime = 0;
+  let confettiParticles = [];
+
+  // End screen button bounds (logical coordinates)
+  const restartButton = { x: W / 2 - 170, y: H / 2 + 60, w: 150, h: 48 };
+  const nextButton = { x: W / 2 + 20, y: H / 2 + 60, w: 150, h: 48 };
+
+  /** Check if point is inside rectangle */
+  function pointInRect(px, py, rect) {
+    return px >= rect.x && px <= rect.x + rect.w &&
+           py >= rect.y && py <= rect.y + rect.h;
+  }
+
+  /** Draw a styled button */
+  function drawButton(rect, label, color, pulse) {
+    const p = pulse ? 1 + Math.sin(endScreenTime * 4) * 0.03 : 1;
+    ctx.save();
+    ctx.translate(rect.x + rect.w / 2, rect.y + rect.h / 2);
+    ctx.scale(p, p);
+    ctx.translate(-(rect.x + rect.w / 2), -(rect.y + rect.h / 2));
+
+    // Button background
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.roundRect(rect.x, rect.y, rect.w, rect.h, 12);
+    ctx.fill();
+
+    // Button text
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = 'bold 18px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, rect.x + rect.w / 2, rect.y + rect.h / 2);
+
+    ctx.restore();
+  }
+
+  /**
+   * Resize canvas to fill available space with proper DPR scaling.
+   * Maintains logical coordinate system (720×540).
+   */
+  function resizeCanvas() {
+    dpr = window.devicePixelRatio || 1;
+
+    // Get available space
+    const availW = window.innerWidth;
+    const availH = window.innerHeight;
+
+    // Calculate scale to fit logical space (720×540) in available space
+    const scaleX = availW / W;
+    const scaleY = availH / H;
+    scale = Math.min(scaleX, scaleY);
+
+    // Physical canvas buffer (DPR-scaled for crisp rendering)
+    canvas.width = W * scale * dpr;
+    canvas.height = H * scale * dpr;
+
+    // CSS display size
+    canvas.style.width = (W * scale) + 'px';
+    canvas.style.height = (H * scale) + 'px';
+  }
+
+  /**
+   * Convert screen coordinates to logical coordinates.
+   * Use this for mouse/click events to get positions in 720×540 space.
+   */
+  function screenToLogical(screenX, screenY) {
+    const rect = canvas.getBoundingClientRect();
+    return {
+      x: (screenX - rect.left) * (W / rect.width),
+      y: (screenY - rect.top) * (H / rect.height)
+    };
+  }
+
+  const engine = {
+    /** Call this to end the game. DO NOT draw your own end screen. */
+    end(isCorrect, explanation) {
+      if (gameState === 'ended') return;
+      gameState = 'ended';
+      gameResult = isCorrect;
+      gameExplanation = explanation || '';
+      endScreenTime = 0;
+
+      // Spawn confetti for correct answers
+      if (isCorrect) {
+        for (let i = 0; i < 50; i++) {
+          confettiParticles.push({
+            x: W / 2,
+            y: H / 2,
+            vx: (Math.random() - 0.5) * 600,
+            vy: -Math.random() * 400 - 100,
+            size: 4 + Math.random() * 6,
+            color: ['#FFD700', '#FF6B6B', '#4ECDC4', '#95E1D3', '#F38181'][Math.floor(Math.random() * 5)],
+            rotation: Math.random() * Math.PI * 2,
+            rotationSpeed: (Math.random() - 0.5) * 10
+          });
+        }
+      }
+
+      // Notify parent frame
+      if (window.parent && window.parent !== window) {
+        window.parent.postMessage({
+          type: 'quiz-end',
+          isCorrect: isCorrect,
+          explanation: explanation || ''
+        }, '*');
+      }
+    }
+  };
+
+  /** STANDARD END SCREEN - DO NOT MODIFY */
+  function drawEndScreen(dt) {
+    endScreenTime += dt;
+
+    // Update confetti
+    confettiParticles = confettiParticles.filter(p => {
+      p.vy += 800 * dt; // gravity
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.rotation += p.rotationSpeed * dt;
+      p.vx *= 0.99;
+      return p.y < H + 50;
+    });
+
+    // Dark overlay
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
+    ctx.fillRect(0, 0, W, H);
+
+    // Draw confetti
+    confettiParticles.forEach(p => {
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rotation);
+      ctx.fillStyle = p.color;
+      ctx.fillRect(-p.size / 2, -p.size / 4, p.size, p.size / 2);
+      ctx.restore();
+    });
+
+    // Result emoji
+    ctx.font = '72px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(gameResult ? '🎉' : '😢', W / 2, H / 2 - 50);
+
+    // Result text
+    ctx.fillStyle = gameResult ? '#4ADE80' : '#F87171';
+    ctx.font = 'bold 36px system-ui, sans-serif';
+    ctx.fillText(gameResult ? 'Correct!' : 'Wrong!', W / 2, H / 2 + 20);
+
+    // Buttons
+    if (gameResult) {
+      // Correct: show both Restart and Next/Finish
+      drawButton(restartButton, 'Restart', '#E87A3E', true);
+      const nextLabel = QUESTION.isLastQuestion ? 'Finish' : 'Next';
+      drawButton(nextButton, nextLabel, '#4ECDC4', true);
+    } else {
+      // Wrong: show only centered Restart button
+      const centeredRestart = { x: W / 2 - 75, y: H / 2 + 60, w: 150, h: 48 };
+      drawButton(centeredRestart, 'Restart', '#E87A3E', true);
+    }
+  }
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 3: YOUR GAME CODE - IMPLEMENT THESE FUNCTIONS                     ║
+  // ║  This is where your game logic goes. See requirements below.               ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+
+  // === COLORS ===
+  const COLORS = {
+    bgPrimary: '#FAFAF7',
+    bgSurface: '#FFFFFF',
+    textPrimary: '#2B2B28',
+    textSecondary: '#5A5A54',
+    orange: '#E87A3E',
+    orangeHover: '#D66B31',
+    amber: '#F5A742',
+    cyan: '#4ECDC4',
+    success: '#6BBF59',
+    error: '#E85D4A',
+    borderSubtle: '#E6E6E0',
+    borderStrong: '#D4D4CC'
+  };
+
+  // === SOUND EFFECTS (Web Audio API) ===
+  const AudioCtx = window.AudioContext || window.webkitAudioContext;
+  let audioCtx = null;
+
+  function getAudioCtx() {
+    if (!audioCtx) audioCtx = new AudioCtx();
+    return audioCtx;
+  }
+
+  function playSound(type) {
+    try {
+      const ac = getAudioCtx();
+      const osc = ac.createOscillator();
+      const gain = ac.createGain();
+      osc.connect(gain);
+      gain.connect(ac.destination);
+
+      if (type === 'stop') {
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(600, ac.currentTime);
+        osc.frequency.linearRampToValueAtTime(800, ac.currentTime + 0.1);
+        gain.gain.setValueAtTime(0.15, ac.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, ac.currentTime + 0.2);
+        osc.start(ac.currentTime);
+        osc.stop(ac.currentTime + 0.2);
+      } else if (type === 'correct') {
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(523, ac.currentTime);
+        osc.frequency.setValueAtTime(659, ac.currentTime + 0.1);
+        osc.frequency.setValueAtTime(784, ac.currentTime + 0.2);
+        gain.gain.setValueAtTime(0.2, ac.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, ac.currentTime + 0.4);
+        osc.start(ac.currentTime);
+        osc.stop(ac.currentTime + 0.4);
+      } else if (type === 'wrong') {
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(300, ac.currentTime);
+        osc.frequency.linearRampToValueAtTime(150, ac.currentTime + 0.3);
+        gain.gain.setValueAtTime(0.12, ac.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, ac.currentTime + 0.3);
+        osc.start(ac.currentTime);
+        osc.stop(ac.currentTime + 0.3);
+      } else if (type === 'sweep') {
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(220, ac.currentTime);
+        gain.gain.setValueAtTime(0.03, ac.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, ac.currentTime + 0.15);
+        osc.start(ac.currentTime);
+        osc.stop(ac.currentTime + 0.15);
+      }
+    } catch(e) {}
+  }
+
+  // === GAME STATE ===
+  const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  let beamAngle = 0;
+  let beamSpeed = 1.8; // radians per second
+  let beamStopped = false;
+  let selectedOutcrop = -1;
+  let answeredWrong = [false, false, false, false];
+  let gameTime = 0;
+  let feedbackTimer = 0;
+  let feedbackType = ''; // 'correct' or 'wrong'
+
+  // Outcrops positioned around the scene (4 rocky outcrops in a semicircle)
+  let outcrops = [];
+  let pearlParticles = [];
+  let waterParticles = [];
+  let mistParticles = [];
+  let entranceProgress = 0;
+
+  // Stars for background
+  let stars = [];
+
+  function initGame() {
+    beamAngle = 0;
+    beamSpeed = 1.8;
+    beamStopped = false;
+    selectedOutcrop = -1;
+    answeredWrong = [false, false, false, false];
+    gameTime = 0;
+    feedbackTimer = 0;
+    feedbackType = '';
+    pearlParticles = [];
+    waterParticles = [];
+    mistParticles = [];
+    entranceProgress = 0;
+
+    // Position 4 outcrops in a row along the bottom shore
+    const outcropY = 370;
+    const spacing = 160;
+    const startX = 90;
+    outcrops = QUESTION.choices.map((choice, i) => ({
+      x: startX + i * spacing,
+      y: outcropY,
+      choice: choice,
+      index: i,
+      scale: 0,
+      alpha: 0,
+      shakeX: 0,
+      pulseScale: 1,
+      label: String.fromCharCode(65 + i) // A, B, C, D
+    }));
+
+    // Generate stars
+    stars = [];
+    for (let i = 0; i < 60; i++) {
+      stars.push({
+        x: Math.random() * W,
+        y: Math.random() * 200,
+        size: Math.random() * 2 + 0.5,
+        twinkle: Math.random() * Math.PI * 2,
+        speed: Math.random() * 2 + 1
+      });
+    }
+
+    // Generate mist particles
+    for (let i = 0; i < 15; i++) {
+      mistParticles.push({
+        x: Math.random() * W,
+        y: 300 + Math.random() * 100,
+        size: 40 + Math.random() * 60,
+        alpha: 0.05 + Math.random() * 0.1,
+        speed: 10 + Math.random() * 20
+      });
+    }
+  }
+
+  function updateGame(dt) {
+    if (gameState !== 'playing') return;
+
+    gameTime += dt;
+
+    // Entrance animation
+    if (!prefersReducedMotion && entranceProgress < 1) {
+      entranceProgress = Math.min(1, entranceProgress + dt * 2);
+      outcrops.forEach((o, i) => {
+        const stagger = i * 0.12;
+        const t = Math.max(0, Math.min(1, (entranceProgress - stagger) / 0.5));
+        const spring = 1 + Math.sin(t * Math.PI * 2) * 0.2 * (1 - t);
+        o.scale = t * spring;
+        o.alpha = t;
+      });
+    } else if (prefersReducedMotion) {
+      outcrops.forEach(o => { o.scale = 1; o.alpha = 1; });
+      entranceProgress = 1;
+    }
+
+    // Update beam rotation if not stopped
+    if (!beamStopped) {
+      beamAngle += beamSpeed * dt;
+      if (beamAngle > Math.PI * 2) beamAngle -= Math.PI * 2;
+    }
+
+    // Handle feedback timer
+    if (feedbackTimer > 0) {
+      feedbackTimer -= dt;
+      if (feedbackTimer <= 0) {
+        if (feedbackType === 'correct') {
+          const choice = outcrops[selectedOutcrop].choice;
+          engine.end(true, choice.explanation);
+          return;
+        } else {
+          // Wrong: reset beam
+          beamStopped = false;
+          selectedOutcrop = -1;
+          feedbackType = '';
+        }
+      }
+    }
+
+    // Update outcrop shake animations
+    outcrops.forEach(o => {
+      if (o.shakeX !== 0) {
+        o.shakeX *= 0.9;
+        if (Math.abs(o.shakeX) < 0.5) o.shakeX = 0;
+      }
+      if (o.pulseScale !== 1) {
+        o.pulseScale += (1 - o.pulseScale) * 0.1;
+        if (Math.abs(o.pulseScale - 1) < 0.01) o.pulseScale = 1;
+      }
+    });
+
+    // Update mist
+    mistParticles.forEach(p => {
+      p.x += p.speed * dt;
+      if (p.x > W + p.size) p.x = -p.size;
+    });
+
+    // Update pearl shimmer particles
+    pearlParticles = pearlParticles.filter(p => {
+      p.y += p.vy * dt;
+      p.x += p.vx * dt;
+      p.alpha -= dt * 1.5;
+      p.size *= 0.98;
+      return p.alpha > 0;
+    });
+
+    // Update water ripple particles
+    waterParticles = waterParticles.filter(p => {
+      p.radius += p.speed * dt;
+      p.alpha -= dt * 0.8;
+      return p.alpha > 0;
+    });
+
+    // Spawn occasional water ripples
+    if (Math.random() < dt * 2) {
+      waterParticles.push({
+        x: Math.random() * W,
+        y: 420 + Math.random() * 120,
+        radius: 2,
+        speed: 15 + Math.random() * 10,
+        alpha: 0.3
+      });
+    }
+  }
+
+  function getOutcropUnderBeam() {
+    // Beam origin is the moon center
+    const moonX = W / 2;
+    const moonY = 80;
+    const beamLen = 500;
+
+    const beamEndX = moonX + Math.cos(beamAngle) * beamLen;
+    const beamEndY = moonY + Math.sin(beamAngle) * beamLen;
+
+    for (let i = 0; i < outcrops.length; i++) {
+      if (answeredWrong[i]) continue;
+      const o = outcrops[i];
+      const dx = o.x - moonX;
+      const dy = o.y - moonY;
+      const len = Math.sqrt(dx * dx + dy * dy);
+      // Direction from moon to outcrop
+      const ox = dx / len;
+      const oy = dy / len;
+      // Beam direction
+      const bx = Math.cos(beamAngle);
+      const by = Math.sin(beamAngle);
+      const dot = ox * bx + oy * by;
+      if (dot > 0.97) return i;
+    }
+    return -1;
+  }
+
+  function stopBeam() {
+    if (beamStopped || feedbackTimer > 0 || entranceProgress < 0.8) return;
+
+    playSound('stop');
+    beamStopped = true;
+
+    const hitIdx = getOutcropUnderBeam();
+    if (hitIdx === -1) {
+      // Missed all outcrops - resume beam
+      setTimeout(() => {
+        beamStopped = false;
+      }, 200);
+      return;
+    }
+
+    selectedOutcrop = hitIdx;
+    const choice = outcrops[hitIdx].choice;
+
+    if (choice.is_correct) {
+      feedbackType = 'correct';
+      feedbackTimer = 0.6;
+      outcrops[hitIdx].pulseScale = 1.3;
+      playSound('correct');
+
+      // Spawn pearl celebration particles
+      for (let j = 0; j < 20; j++) {
+        pearlParticles.push({
+          x: outcrops[hitIdx].x,
+          y: outcrops[hitIdx].y - 30,
+          vx: (Math.random() - 0.5) * 150,
+          vy: -Math.random() * 120 - 30,
+          size: 3 + Math.random() * 4,
+          alpha: 1,
+          color: ['#FFFFFF', '#E0E8FF', COLORS.amber, COLORS.cyan][Math.floor(Math.random() * 4)]
+        });
+      }
+    } else {
+      feedbackType = 'wrong';
+      feedbackTimer = 0.8;
+      answeredWrong[hitIdx] = true;
+      outcrops[hitIdx].shakeX = 12;
+      playSound('wrong');
+
+      // Spawn grey pebble particles
+      for (let j = 0; j < 8; j++) {
+        pearlParticles.push({
+          x: outcrops[hitIdx].x,
+          y: outcrops[hitIdx].y - 20,
+          vx: (Math.random() - 0.5) * 80,
+          vy: -Math.random() * 60,
+          size: 2 + Math.random() * 3,
+          alpha: 1,
+          color: '#8C8C84'
+        });
+      }
+    }
+  }
+
+  function drawGame() {
+    // Night sky gradient
+    const skyGrad = ctx.createLinearGradient(0, 0, 0, H);
+    skyGrad.addColorStop(0, '#0a0a20');
+    skyGrad.addColorStop(0.4, '#121235');
+    skyGrad.addColorStop(0.7, '#1a1a3a');
+    skyGrad.addColorStop(1, '#0d1b2a');
+    ctx.fillStyle = skyGrad;
+    ctx.fillRect(0, 0, W, H);
+
+    // Stars
+    stars.forEach(s => {
+      const twinkle = 0.4 + 0.6 * (0.5 + 0.5 * Math.sin(gameTime * s.speed + s.twinkle));
+      ctx.globalAlpha = twinkle;
+      ctx.fillStyle = '#FFFFFF';
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, s.size, 0, Math.PI * 2);
+      ctx.fill();
+    });
+    ctx.globalAlpha = 1;
+
+    // Moon
+    const moonX = W / 2;
+    const moonY = 80;
+    const moonR = 40;
+
+    // Moon glow
+    const moonGlow = ctx.createRadialGradient(moonX, moonY, moonR * 0.5, moonX, moonY, moonR * 3);
+    moonGlow.addColorStop(0, 'rgba(240, 240, 220, 0.3)');
+    moonGlow.addColorStop(0.5, 'rgba(200, 200, 180, 0.1)');
+    moonGlow.addColorStop(1, 'rgba(200, 200, 180, 0)');
+    ctx.fillStyle = moonGlow;
+    ctx.beginPath();
+    ctx.arc(moonX, moonY, moonR * 3, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Moon body
+    const moonBodyGrad = ctx.createRadialGradient(moonX - 8, moonY - 8, 0, moonX, moonY, moonR);
+    moonBodyGrad.addColorStop(0, '#FFFFF0');
+    moonBodyGrad.addColorStop(0.7, '#E8E8D0');
+    moonBodyGrad.addColorStop(1, '#D4D4B8');
+    ctx.fillStyle = moonBodyGrad;
+    ctx.beginPath();
+    ctx.arc(moonX, moonY, moonR, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Moon craters (subtle)
+    ctx.fillStyle = 'rgba(180, 180, 160, 0.3)';
+    ctx.beginPath(); ctx.arc(moonX - 12, moonY + 5, 8, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(moonX + 10, moonY - 10, 5, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(moonX + 5, moonY + 12, 4, 0, Math.PI * 2); ctx.fill();
+
+    // Moonlight beam (sweeping)
+    const beamLen = 500;
+    const beamWidth = 0.12; // radians spread
+
+    ctx.save();
+    ctx.globalAlpha = 0.25;
+    const beamGrad = ctx.createRadialGradient(moonX, moonY, 0, moonX, moonY, beamLen);
+    beamGrad.addColorStop(0, 'rgba(240, 240, 200, 0.6)');
+    beamGrad.addColorStop(0.5, 'rgba(220, 220, 180, 0.3)');
+    beamGrad.addColorStop(1, 'rgba(200, 200, 160, 0)');
+    ctx.fillStyle = beamGrad;
+    ctx.beginPath();
+    ctx.moveTo(moonX, moonY);
+    ctx.arc(moonX, moonY, beamLen, beamAngle - beamWidth, beamAngle + beamWidth);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+
+    // Beam center line (bright)
+    ctx.save();
+    ctx.globalAlpha = 0.5;
+    ctx.strokeStyle = 'rgba(255, 255, 220, 0.4)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(moonX, moonY);
+    ctx.lineTo(moonX + Math.cos(beamAngle) * beamLen, moonY + Math.sin(beamAngle) * beamLen);
+    ctx.stroke();
+    ctx.restore();
+
+    // Rocky shoreline
+    const shoreGrad = ctx.createLinearGradient(0, 340, 0, H);
+    shoreGrad.addColorStop(0, '#2a2a35');
+    shoreGrad.addColorStop(0.3, '#1e1e28');
+    shoreGrad.addColorStop(1, '#0d1b2a');
+    ctx.fillStyle = shoreGrad;
+    ctx.beginPath();
+    ctx.moveTo(0, 380);
+    ctx.bezierCurveTo(100, 360, 200, 370, 300, 350);
+    ctx.bezierCurveTo(400, 340, 500, 355, 600, 345);
+    ctx.bezierCurveTo(680, 350, 720, 360, 720, 370);
+    ctx.lineTo(720, H);
+    ctx.lineTo(0, H);
+    ctx.closePath();
+    ctx.fill();
+
+    // Water/tide pools area
+    const waterGrad = ctx.createLinearGradient(0, 400, 0, H);
+    waterGrad.addColorStop(0, 'rgba(30, 50, 80, 0.6)');
+    waterGrad.addColorStop(1, 'rgba(10, 20, 40, 0.8)');
+    ctx.fillStyle = waterGrad;
+    ctx.beginPath();
+    ctx.moveTo(0, 430);
+    ctx.bezierCurveTo(180, 420, 360, 435, 540, 425);
+    ctx.lineTo(720, 430);
+    ctx.lineTo(720, H);
+    ctx.lineTo(0, H);
+    ctx.closePath();
+    ctx.fill();
+
+    // Tide pool moon reflections
+    ctx.save();
+    ctx.globalAlpha = 0.15 + 0.05 * Math.sin(gameTime * 1.5);
+    ctx.fillStyle = '#E8E8D0';
+    ctx.beginPath();
+    ctx.ellipse(200, 470, 25, 8, 0.1, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.ellipse(500, 480, 20, 6, -0.1, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.ellipse(380, 500, 18, 5, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+
+    // Water ripple particles
+    waterParticles.forEach(p => {
+      ctx.save();
+      ctx.globalAlpha = p.alpha * 0.3;
+      ctx.strokeStyle = 'rgba(200, 220, 255, 0.5)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.ellipse(p.x, p.y, p.radius, p.radius * 0.4, 0, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    });
+
+    // Seal skins on rocks (decorative)
+    drawSealSkin(120, 400, 0.2);
+    drawSealSkin(580, 395, -0.15);
+
+    // Mist
+    mistParticles.forEach(p => {
+      ctx.save();
+      ctx.globalAlpha = p.alpha;
+      const mistGrad = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, p.size);
+      mistGrad.addColorStop(0, 'rgba(180, 190, 210, 0.3)');
+      mistGrad.addColorStop(1, 'rgba(180, 190, 210, 0)');
+      ctx.fillStyle = mistGrad;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    });
+
+    // Draw outcrops with pearls and answer text
+    outcrops.forEach((o, i) => {
+      ctx.save();
+      ctx.globalAlpha = o.alpha;
+      ctx.translate(o.x + o.shakeX, o.y);
+      ctx.scale(o.scale * o.pulseScale, o.scale * o.pulseScale);
+
+      // Rocky outcrop base
+      drawRockyOutcrop(0, 0, answeredWrong[i]);
+
+      // Pearl cluster on top
+      drawPearlCluster(0, -35, answeredWrong[i], i);
+
+      // Highlight if beam is pointing at this outcrop
+      const hitIdx = getOutcropUnderBeam();
+      if (hitIdx === i && !answeredWrong[i] && !beamStopped) {
+        ctx.strokeStyle = 'rgba(255, 255, 200, 0.5)';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(0, -20, 45, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+
+      // Feedback glow
+      if (selectedOutcrop === i && feedbackTimer > 0) {
+        if (feedbackType === 'correct') {
+          ctx.globalAlpha = feedbackTimer * 1.5;
+          const glowGrad = ctx.createRadialGradient(0, -20, 0, 0, -20, 60);
+          glowGrad.addColorStop(0, 'rgba(107, 191, 89, 0.5)');
+          glowGrad.addColorStop(1, 'rgba(107, 191, 89, 0)');
+          ctx.fillStyle = glowGrad;
+          ctx.beginPath();
+          ctx.arc(0, -20, 60, 0, Math.PI * 2);
+          ctx.fill();
+        } else if (feedbackType === 'wrong') {
+          ctx.globalAlpha = feedbackTimer;
+          const glowGrad = ctx.createRadialGradient(0, -20, 0, 0, -20, 60);
+          glowGrad.addColorStop(0, 'rgba(232, 93, 74, 0.4)');
+          glowGrad.addColorStop(1, 'rgba(232, 93, 74, 0)');
+          ctx.fillStyle = glowGrad;
+          ctx.beginPath();
+          ctx.arc(0, -20, 60, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+
+      ctx.restore();
+    });
+
+    // Pearl shimmer particles
+    pearlParticles.forEach(p => {
+      ctx.save();
+      ctx.globalAlpha = p.alpha;
+      ctx.fillStyle = p.color;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    });
+
+    // Answer text boxes below outcrops
+    outcrops.forEach((o, i) => {
+      if (o.alpha < 0.1) return;
+      ctx.save();
+      ctx.globalAlpha = o.alpha;
+      drawAnswerBox(o.x, o.y + 55, o.choice.text, o.label, answeredWrong[i], selectedOutcrop === i && feedbackTimer > 0 ? feedbackType : null);
+      ctx.restore();
+    });
+  }
+
+  function drawSealSkin(x, y, rotation) {
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(rotation);
+    ctx.fillStyle = '#3a3530';
+    ctx.beginPath();
+    ctx.ellipse(0, 0, 22, 8, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // Spots
+    ctx.fillStyle = '#4a4540';
+    ctx.beginPath(); ctx.arc(-8, -2, 3, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(5, 1, 2, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(-2, 3, 2.5, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+  }
+
+  function drawRockyOutcrop(x, y, isGrey) {
+    const baseColor = isGrey ? '#4a4a48' : '#3a3535';
+    const highlightColor = isGrey ? '#5a5a58' : '#4a4040';
+
+    // Main rock shape
+    ctx.fillStyle = baseColor;
+    ctx.beginPath();
+    ctx.moveTo(x - 35, y + 10);
+    ctx.lineTo(x - 30, y - 20);
+    ctx.lineTo(x - 15, y - 30);
+    ctx.lineTo(x + 5, y - 35);
+    ctx.lineTo(x + 20, y - 28);
+    ctx.lineTo(x + 30, y - 15);
+    ctx.lineTo(x + 35, y + 10);
+    ctx.closePath();
+    ctx.fill();
+
+    // Highlight edge
+    ctx.fillStyle = highlightColor;
+    ctx.beginPath();
+    ctx.moveTo(x - 15, y - 30);
+    ctx.lineTo(x + 5, y - 35);
+    ctx.lineTo(x + 20, y - 28);
+    ctx.lineTo(x + 10, y - 20);
+    ctx.lineTo(x - 5, y - 25);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  function drawPearlCluster(x, y, isGrey, index) {
+    const pearlPositions = [
+      { dx: -8, dy: -5, r: 6 },
+      { dx: 6, dy: -3, r: 5 },
+      { dx: -2, dy: -10, r: 7 },
+      { dx: 10, dy: -8, r: 4 },
+      { dx: -12, dy: 0, r: 5 }
+    ];
+
+    pearlPositions.forEach(p => {
+      if (isGrey) {
+        // Grey pebble
+        ctx.fillStyle = '#7a7a78';
+        ctx.beginPath();
+        ctx.arc(x + p.dx, y + p.dy, p.r, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#8a8a88';
+        ctx.beginPath();
+        ctx.arc(x + p.dx - 1, y + p.dy - 1, p.r * 0.4, 0, Math.PI * 2);
+        ctx.fill();
+      } else {
+        // Shimmering pearl
+        const shimmer = 0.7 + 0.3 * Math.sin(gameTime * 3 + index + p.dx);
+        const pearlGrad = ctx.createRadialGradient(
+          x + p.dx - p.r * 0.3, y + p.dy - p.r * 0.3, 0,
+          x + p.dx, y + p.dy, p.r
+        );
+        pearlGrad.addColorStop(0, `rgba(255, 255, 255, ${shimmer})`);
+        pearlGrad.addColorStop(0.5, `rgba(220, 230, 255, ${shimmer * 0.8})`);
+        pearlGrad.addColorStop(1, `rgba(180, 200, 230, ${shimmer * 0.6})`);
+        ctx.fillStyle = pearlGrad;
+        ctx.beginPath();
+        ctx.arc(x + p.dx, y + p.dy, p.r, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Pearl highlight
+        ctx.fillStyle = `rgba(255, 255, 255, ${shimmer * 0.8})`;
+        ctx.beginPath();
+        ctx.arc(x + p.dx - p.r * 0.3, y + p.dy - p.r * 0.3, p.r * 0.3, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    });
+  }
+
+  function drawAnswerBox(cx, cy, text, label, isGrey, feedback) {
+    const boxW = 148;
+    const boxH = 95;
+    const bx = cx - boxW / 2;
+    const by = cy;
+
+    // Background
+    let bgColor = isGrey ? 'rgba(90, 90, 84, 0.7)' : 'rgba(255, 255, 255, 0.12)';
+    let borderColor = isGrey ? 'rgba(90, 90, 84, 0.5)' : 'rgba(255, 255, 255, 0.2)';
+    let textColor = isGrey ? '#8C8C84' : '#F5F5F0';
+
+    if (feedback === 'correct') {
+      bgColor = 'rgba(107, 191, 89, 0.3)';
+      borderColor = COLORS.success;
+      textColor = '#FFFFFF';
+    } else if (feedback === 'wrong') {
+      bgColor = 'rgba(232, 93, 74, 0.3)';
+      borderColor = COLORS.error;
+      textColor = '#F5F5F0';
+    }
+
+    ctx.fillStyle = bgColor;
+    ctx.beginPath();
+    ctx.roundRect(bx, by, boxW, boxH, 8);
+    ctx.fill();
+
+    ctx.strokeStyle = borderColor;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.roundRect(bx, by, boxW, boxH, 8);
+    ctx.stroke();
+
+    // Label badge
+    const labelColor = isGrey ? '#5A5A54' : COLORS.orange;
+    ctx.fillStyle = labelColor;
+    ctx.beginPath();
+    ctx.roundRect(bx + 5, by + 5, 22, 18, 4);
+    ctx.fill();
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = "600 12px 'Nunito Sans', sans-serif";
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, bx + 16, by + 14);
+
+    // Answer text (word-wrapped)
+    ctx.fillStyle = textColor;
+    ctx.font = "400 14px 'Nunito', sans-serif";
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+    wrapText(ctx, text, bx + 5, by + 27, boxW - 10, 16);
+  }
+
+  function wrapText(ctx, text, x, y, maxWidth, lineHeight) {
+    const words = text.split(' ');
+    let line = '';
+    let lineY = y;
+
+    for (let i = 0; i < words.length; i++) {
+      const testLine = line + (line ? ' ' : '') + words[i];
+      const metrics = ctx.measureText(testLine);
+      if (metrics.width > maxWidth && line !== '') {
+        ctx.fillText(line, x, lineY);
+        line = words[i];
+        lineY += lineHeight;
+      } else {
+        line = testLine;
+      }
+    }
+    ctx.fillText(line, x, lineY);
+  }
+
+  function handleInput(e) {
+    if (gameState !== 'playing') return;
+
+    if (e.code === 'Space' || e.code === 'Enter') {
+      e.preventDefault();
+      stopBeam();
+    }
+  }
+
+  // Also support mouse clicks on outcrops
+  canvas.addEventListener('click', (e) => {
+    if (gameState !== 'playing') return;
+
+    const { x, y } = screenToLogical(e.clientX, e.clientY);
+
+    // Check if clicking on an outcrop answer box
+    outcrops.forEach((o, i) => {
+      if (answeredWrong[i]) return;
+      const boxW = 148;
+      const boxH = 95;
+      const bx = o.x - boxW / 2;
+      const by = o.y + 55;
+      if (x >= bx && x <= bx + boxW && y >= by && y <= by + boxH) {
+        // Direct click on answer box
+        if (feedbackTimer > 0) return;
+        beamStopped = true;
+        selectedOutcrop = i;
+
+        const choice = o.choice;
+        if (choice.is_correct) {
+          feedbackType = 'correct';
+          feedbackTimer = 0.6;
+          o.pulseScale = 1.3;
+          playSound('correct');
+          for (let j = 0; j < 20; j++) {
+            pearlParticles.push({
+              x: o.x,
+              y: o.y - 30,
+              vx: (Math.random() - 0.5) * 150,
+              vy: -Math.random() * 120 - 30,
+              size: 3 + Math.random() * 4,
+              alpha: 1,
+              color: ['#FFFFFF', '#E0E8FF', COLORS.amber, COLORS.cyan][Math.floor(Math.random() * 4)]
+            });
+          }
+        } else {
+          feedbackType = 'wrong';
+          feedbackTimer = 0.8;
+          answeredWrong[i] = true;
+          o.shakeX = 12;
+          playSound('wrong');
+          for (let j = 0; j < 8; j++) {
+            pearlParticles.push({
+              x: o.x,
+              y: o.y - 20,
+              vx: (Math.random() - 0.5) * 80,
+              vy: -Math.random() * 60,
+              size: 2 + Math.random() * 3,
+              alpha: 1,
+              color: '#8C8C84'
+            });
+          }
+        }
+      }
+    });
+  });
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 4: GAME LOOP - DO NOT MODIFY                                      ║
+  // ║  Standard loop with responsive scaling and DPR support.                    ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  let lastTime = performance.now();
+
+  function gameLoop(now) {
+    const dt = Math.min((now - lastTime) / 1000, 0.05); // Cap at 50ms
+    lastTime = now;
+
+    // Apply transform for logical coordinate system
+    ctx.setTransform(scale * dpr, 0, 0, scale * dpr, 0, 0);
+
+    if (gameState === 'playing') {
+      updateGame(dt);
+      drawGame();
+    } else {
+      drawGame(); // Draw game state behind overlay
+      drawEndScreen(dt);
+    }
+
+    // Reset transform for next frame
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+    requestAnimationFrame(gameLoop);
+  }
+
+  // Input handlers
+  document.addEventListener('keydown', (e) => {
+    if (gameState === 'ended' && (e.code === 'KeyR')) {
+      // Restart game
+      gameState = 'playing';
+      gameResult = null;
+      gameExplanation = '';
+      confettiParticles = [];
+      initGame();
+      return;
+    }
+    handleInput(e);
+  });
+
+  document.addEventListener('keyup', (e) => {
+    // Optional: handle key release in your handleInput
+  });
+
+  // Canvas click handler for end screen buttons
+  canvas.addEventListener('click', (e) => {
+    if (gameState !== 'ended') return;
+
+    const { x, y } = screenToLogical(e.clientX, e.clientY);
+
+    if (gameResult) {
+      // Correct answer: check both buttons
+      if (pointInRect(x, y, restartButton)) {
+        gameState = 'playing';
+        gameResult = null;
+        gameExplanation = '';
+        confettiParticles = [];
+        initGame();
+        return;
+      }
+      if (pointInRect(x, y, nextButton)) {
+        // Notify parent to go to next question
+        if (window.parent && window.parent !== window) {
+          window.parent.postMessage({ type: 'quiz-next' }, '*');
+        }
+        return;
+      }
+    } else {
+      // Wrong answer: check centered restart button
+      const centeredRestart = { x: W / 2 - 75, y: H / 2 + 60, w: 150, h: 48 };
+      if (pointInRect(x, y, centeredRestart)) {
+        gameState = 'playing';
+        gameResult = null;
+        gameExplanation = '';
+        confettiParticles = [];
+        initGame();
+        return;
+      }
+    }
+  });
+
+  // Handle resize
+  window.addEventListener('resize', resizeCanvas);
+
+  // Initialize
+  resizeCanvas();
+  initGame();
+  requestAnimationFrame(gameLoop);
+  </script>
+</body>
+</html>

@@ -1,0 +1,1217 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <title>Reed Weaving Tension Pendulum</title>
+  <link href="https://fonts.googleapis.com/css2?family=Belanosima:wght@400;600;700&family=Nunito+Sans:wght@400;500;600;700&family=Nunito:wght@400;500;600&display=swap" rel="stylesheet">
+  <!--
+  ╔══════════════════════════════════════════════════════════════════════════════╗
+  ║  GAME FACTORY TEMPLATE - MOBILE                                              ║
+  ║  Fills 100% of container, non-uniform scaling, touch input.                  ║
+  ║  Logical dimensions: 360×640 (use aspectRatio for proportional shapes)       ║
+  ╚══════════════════════════════════════════════════════════════════════════════╝
+  -->
+  <style>
+    /* ═══════════════════════════════════════════════════════════════════════════
+       BASE STYLES - Can be extended, not removed
+       ═══════════════════════════════════════════════════════════════════════════ */
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      touch-action: none; /* Prevent default touch behaviors */
+      -webkit-touch-callout: none;
+      -webkit-user-select: none;
+      user-select: none;
+    }
+    body {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      background: #1a1a2e;
+      font-family: 'Nunito Sans', system-ui, -apple-system, sans-serif;
+    }
+    #gameCanvas {
+      background: #FAFAF7;
+      /* Canvas fills viewport via JS, these are fallbacks */
+      width: 100vw;
+      height: 100vh;
+    }
+  </style>
+</head>
+<body>
+  <!-- ═══════════════════════════════════════════════════════════════════════════
+       CANVAS - Sized dynamically to fill viewport
+       ═══════════════════════════════════════════════════════════════════════════ -->
+  <canvas id="gameCanvas"></canvas>
+
+  <script>
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 1: QUESTION PLACEHOLDER - DO NOT MODIFY FORMAT                    ║
+  // ║  Platform replaces this at runtime. Use these exact 60-char answers.       ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  const QUESTION = {
+    type: "mcq",
+    prompt: "Sample question text",
+    choices: [
+      { text: "This is sample answer A which is long enough to test text overflow", is_correct: true, explanation: "Why A is correct" },
+      { text: "This is sample answer B which is long enough to test text overflow", is_correct: false, explanation: "Why B is wrong" },
+      { text: "This is sample answer C which is long enough to test text overflow", is_correct: false, explanation: "Why C is wrong" },
+      { text: "This is sample answer D which is long enough to test text overflow", is_correct: false, explanation: "Why D is wrong" }
+    ],
+    isLastQuestion: false
+  };
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 2: ENGINE CORE (MOBILE) - DO NOT MODIFY                           ║
+  // ║  Non-uniform scaling (fills container), touch input, tap-to-restart.       ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  const canvas = document.getElementById('gameCanvas');
+  const ctx = canvas.getContext('2d');
+
+  // Logical dimensions (game code works in this coordinate space)
+  const W = 360, H = 640;
+
+  // Scaling state (computed on resize)
+  let scaleX = 1;
+  let scaleY = 1;
+  let aspectRatio = 1;  // scaleX/scaleY - use for proportional shapes
+
+  // Game state
+  let gameState = 'playing'; // 'playing' | 'ended'
+  let gameResult = null;     // true (correct) | false (wrong)
+  let gameExplanation = '';
+  let endScreenTime = 0;
+  let confettiParticles = [];
+
+  // End screen button bounds (logical coordinates)
+  const restartButton = { x: 20, y: H / 2 + 50, w: 155, h: 56 };
+  const nextButton = { x: 185, y: H / 2 + 50, w: 155, h: 56 };
+  // Centered restart button for wrong answers
+  const centeredRestartButton = { x: W / 2 - 100, y: H / 2 + 50, w: 200, h: 56 };
+
+  /** Draw a styled button with aspect-ratio aware text */
+  function drawMobileButton(rect, label, color, pulse) {
+    const textAdj = getTextScaleAdjustment();
+    const p = pulse ? 1 + Math.sin(endScreenTime * 4) * 0.03 : 1;
+
+    ctx.save();
+    ctx.translate(rect.x + rect.w / 2, rect.y + rect.h / 2);
+    ctx.scale(p, p);
+    ctx.translate(-(rect.x + rect.w / 2), -(rect.y + rect.h / 2));
+
+    // Button background
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.roundRect(rect.x, rect.y, rect.w, rect.h, 12);
+    ctx.fill();
+
+    // Button text (aspect-ratio aware)
+    ctx.save();
+    ctx.translate(rect.x + rect.w / 2, rect.y + rect.h / 2);
+    ctx.scale(textAdj / aspectRatio, textAdj);
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = 'bold 18px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, 0, 0);
+    ctx.restore();
+
+    ctx.restore();
+  }
+
+  /**
+   * Resize canvas to fill viewport completely (no letterboxing).
+   * Uses non-uniform scaling - game code works in 360×640 logical space.
+   * Use aspectRatio to draw proportionally correct shapes.
+   */
+  function resizeCanvas() {
+    const dpr = window.devicePixelRatio || 1;
+
+    // Physical canvas size (actual pixels)
+    canvas.width = window.innerWidth * dpr;
+    canvas.height = window.innerHeight * dpr;
+
+    // CSS size (fills viewport)
+    canvas.style.width = window.innerWidth + 'px';
+    canvas.style.height = window.innerHeight + 'px';
+
+    // Non-uniform scaling to fill entire canvas
+    scaleX = canvas.width / W;
+    scaleY = canvas.height / H;
+
+    // Aspect ratio for proportional shape drawing
+    // >1 means container is wider than logical space
+    // <1 means container is taller than logical space
+    aspectRatio = scaleX / scaleY;
+
+    // Recalculate text sizing on resize (implement this in SECTION 3)
+    if (typeof recalculateTextSizing === 'function') {
+      recalculateTextSizing();
+    }
+  }
+
+  // === ASPECT-RATIO-AWARE TEXT WITH CLAMPED SCALING ===
+  // Text gets stretched by non-uniform scaling, so we compensate.
+  // Also clamp the effective scale to keep text legible at all sizes.
+  const TEXT_SCALE_MIN = 0.75;
+  const TEXT_SCALE_MAX = 1.4;
+
+  function getTextScaleAdjustment() {
+    const baseScale = window.innerHeight / H;
+    const clampedScale = Math.min(TEXT_SCALE_MAX, Math.max(TEXT_SCALE_MIN, baseScale));
+    return clampedScale / baseScale;
+  }
+
+  /**
+   * Draw text with aspect-ratio compensation and clamped scaling.
+   * Use this instead of raw ctx.fillText() to prevent text stretching.
+   * Default font is 16px (minimum for answer text). Use 18-20px for better readability.
+   */
+  function drawText(text, x, y, options = {}) {
+    const { font = "500 16px system-ui, sans-serif", color = '#F5F5F0', align = 'center', baseline = 'middle' } = options;
+    ctx.save();
+    ctx.translate(x, y);
+    const adj = getTextScaleAdjustment();
+    ctx.scale(adj / aspectRatio, adj);
+    ctx.font = font;
+    ctx.fillStyle = color;
+    ctx.textAlign = align;
+    ctx.textBaseline = baseline;
+    ctx.fillText(text, 0, 0);
+    ctx.restore();
+  }
+
+  /**
+   * Convert screen coordinates to logical coordinates.
+   * Use this in handleTouch to get positions in 360×640 space.
+   */
+  function screenToLogical(screenX, screenY) {
+    const dpr = window.devicePixelRatio || 1;
+    const rect = canvas.getBoundingClientRect();
+    const canvasX = (screenX - rect.left) * dpr;
+    const canvasY = (screenY - rect.top) * dpr;
+    return {
+      x: canvasX / scaleX,
+      y: canvasY / scaleY
+    };
+  }
+
+  /**
+   * Check if a point is inside a rectangle (logical coordinates).
+   */
+  function pointInRect(px, py, rect) {
+    return px >= rect.x && px <= rect.x + rect.w &&
+           py >= rect.y && py <= rect.y + rect.h;
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // TEXT UTILITIES - Dynamic wrapping and font sizing
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  /**
+   * Wrap text to fit within a maximum width (in logical coordinates).
+   * Accounts for canvas transforms applied by drawText().
+   */
+  function wrapText(text, maxWidth, font, maxLines = 3) {
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.font = font;
+    const adj = getTextScaleAdjustment();
+    const maxRawWidth = maxWidth * aspectRatio / adj;
+    const words = text.split(' ');
+    const lines = [];
+    let currentLine = '';
+    words.forEach(word => {
+      const testLine = currentLine ? currentLine + ' ' + word : word;
+      if (ctx.measureText(testLine).width > maxRawWidth && currentLine) {
+        lines.push(currentLine);
+        currentLine = word;
+      } else {
+        currentLine = testLine;
+      }
+    });
+    if (currentLine) lines.push(currentLine);
+    ctx.restore();
+    return lines.slice(0, maxLines);
+  }
+
+  /**
+   * Find the optimal font size to fit content in available space.
+   */
+  function findOptimalFontSize(options) {
+    const {
+      texts,
+      maxWidth,
+      availableHeight,
+      minFont = 12,
+      maxFont = 18,
+      itemPadding = 4,
+      fontFamily = "'Nunito Sans', sans-serif"
+    } = options;
+
+    let bestFontSize = minFont;
+    let bestWrappedTexts = [];
+
+    for (let fontSize = maxFont; fontSize >= minFont; fontSize -= 0.5) {
+      const font = `${fontSize}px ${fontFamily}`;
+      const lineHeight = fontSize + 2;
+
+      let totalHeight = 0;
+      const wrappedTexts = [];
+
+      for (const text of texts) {
+        const lines = wrapText(text, maxWidth, font);
+        wrappedTexts.push(lines);
+        totalHeight += itemPadding + lines.length * lineHeight;
+      }
+
+      if (totalHeight <= availableHeight) {
+        bestFontSize = fontSize;
+        bestWrappedTexts = wrappedTexts;
+        break;
+      }
+
+      bestWrappedTexts = wrappedTexts;
+    }
+
+    return { fontSize: bestFontSize, wrappedTexts: bestWrappedTexts };
+  }
+
+  const engine = {
+    /** Call this to end the game. DO NOT draw your own end screen. */
+    end(isCorrect, explanation) {
+      if (gameState === 'ended') return;
+      gameState = 'ended';
+      gameResult = isCorrect;
+      gameExplanation = explanation || '';
+      endScreenTime = 0;
+
+      // Spawn confetti for correct answers
+      if (isCorrect) {
+        for (let i = 0; i < 50; i++) {
+          confettiParticles.push({
+            x: W / 2,
+            y: H / 2,
+            vx: (Math.random() - 0.5) * 400,
+            vy: -Math.random() * 300 - 80,
+            size: 4 + Math.random() * 6,
+            color: ['#FFD700', '#FF6B6B', '#4ECDC4', '#95E1D3', '#F38181'][Math.floor(Math.random() * 5)],
+            rotation: Math.random() * Math.PI * 2,
+            rotationSpeed: (Math.random() - 0.5) * 10
+          });
+        }
+      }
+
+      // Notify parent frame
+      if (window.parent && window.parent !== window) {
+        window.parent.postMessage({
+          type: 'quiz-end',
+          isCorrect: isCorrect,
+          explanation: explanation || ''
+        }, '*');
+      }
+    }
+  };
+
+  /** STANDARD END SCREEN (MOBILE) - DO NOT MODIFY */
+  function drawEndScreen(dt) {
+    endScreenTime += dt;
+
+    // Update confetti
+    confettiParticles = confettiParticles.filter(p => {
+      p.vy += 600 * dt; // gravity
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.rotation += p.rotationSpeed * dt;
+      p.vx *= 0.99;
+      return p.y < H + 50;
+    });
+
+    // Dark overlay
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
+    ctx.fillRect(0, 0, W, H);
+
+    // Draw confetti
+    confettiParticles.forEach(p => {
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rotation);
+      ctx.fillStyle = p.color;
+      ctx.fillRect(-p.size / 2, -p.size / 4, p.size, p.size / 2);
+      ctx.restore();
+    });
+
+    // Result emoji (aspect-ratio aware)
+    const textAdj = getTextScaleAdjustment();
+    ctx.save();
+    ctx.translate(W / 2, H / 2 - 80);
+    ctx.scale(textAdj / aspectRatio, textAdj);
+    ctx.font = '64px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(gameResult ? '🎉' : '😢', 0, 0);
+    ctx.restore();
+
+    // Result text (aspect-ratio aware)
+    ctx.save();
+    ctx.translate(W / 2, H / 2 - 10);
+    ctx.scale(textAdj / aspectRatio, textAdj);
+    ctx.fillStyle = gameResult ? '#4ADE80' : '#F87171';
+    ctx.font = 'bold 32px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(gameResult ? 'Correct!' : 'Wrong!', 0, 0);
+    ctx.restore();
+
+    // Buttons
+    if (gameResult) {
+      // Correct: show both Restart and Next/Finish
+      drawMobileButton(restartButton, 'Restart', '#E87A3E', true);
+      const nextLabel = QUESTION.isLastQuestion ? 'Finish' : 'Next';
+      drawMobileButton(nextButton, nextLabel, '#4ECDC4', true);
+    } else {
+      // Wrong: show only centered Restart button
+      drawMobileButton(centeredRestartButton, 'Restart', '#E87A3E', true);
+    }
+  }
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 3: YOUR GAME CODE - IMPLEMENT THESE FUNCTIONS                     ║
+  // ║  Reed Weaving Tension Pendulum - Mobile MCQ Game                           ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+
+  // === COLORS ===
+  const COLORS = {
+    bgPrimary: '#FAFAF7',
+    bgWarm: '#FFF4ED',
+    surface: '#FFFFFF',
+    textPrimary: '#2B2B28',
+    textSecondary: '#5A5A54',
+    orange: '#E87A3E',
+    orangeHover: '#D66B31',
+    amber: '#F5A742',
+    cyan: '#4ECDC4',
+    success: '#6BBF59',
+    error: '#E85D4A',
+    borderSubtle: '#E6E6E0',
+    borderStrong: '#D4D4CC',
+    peach: '#FFB89D',
+    peachLight: '#FFF0EB',
+    wood: '#8B6914',
+    woodDark: '#6B4F10',
+    woodLight: '#A07828',
+    reed: '#B8A54C',
+    reedDark: '#8B7D3A',
+    reedLight: '#D4C86E',
+    stone: '#7A7A72',
+    stoneDark: '#5A5A54',
+    twine: '#C2A060',
+    skyTop: '#87CEEB',
+    skyBottom: '#E8D5B0',
+    sand: '#E8D5B0',
+    sea: '#4ECDC4',
+  };
+
+  // === SOUND ===
+  let audioCtx = null;
+  function getAudioCtx() {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    return audioCtx;
+  }
+
+  function playSound(type) {
+    try {
+      const ctx = getAudioCtx();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+
+      if (type === 'swing') {
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(180, ctx.currentTime);
+        osc.frequency.linearRampToValueAtTime(120, ctx.currentTime + 0.3);
+        gain.gain.setValueAtTime(0.15, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);
+        osc.start(ctx.currentTime);
+        osc.stop(ctx.currentTime + 0.3);
+      } else if (type === 'strike') {
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(300, ctx.currentTime);
+        osc.frequency.linearRampToValueAtTime(100, ctx.currentTime + 0.2);
+        gain.gain.setValueAtTime(0.3, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.2);
+        osc.start(ctx.currentTime);
+        osc.stop(ctx.currentTime + 0.2);
+      } else if (type === 'correct') {
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(523, ctx.currentTime);
+        osc.frequency.setValueAtTime(659, ctx.currentTime + 0.1);
+        osc.frequency.setValueAtTime(784, ctx.currentTime + 0.2);
+        gain.gain.setValueAtTime(0.2, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.4);
+        osc.start(ctx.currentTime);
+        osc.stop(ctx.currentTime + 0.4);
+      } else if (type === 'wrong') {
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(200, ctx.currentTime);
+        osc.frequency.linearRampToValueAtTime(80, ctx.currentTime + 0.4);
+        gain.gain.setValueAtTime(0.15, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.4);
+        osc.start(ctx.currentTime);
+        osc.stop(ctx.currentTime + 0.4);
+      } else if (type === 'collapse') {
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(150, ctx.currentTime);
+        osc.frequency.linearRampToValueAtTime(30, ctx.currentTime + 0.6);
+        gain.gain.setValueAtTime(0.2, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.6);
+        osc.start(ctx.currentTime);
+        osc.stop(ctx.currentTime + 0.6);
+      }
+    } catch (e) {}
+  }
+
+  // === GAME STATE ===
+  let pendulum = {};
+  let reedBundles = [];
+  let loom = {};
+  let gamePhase = 'ready'; // 'ready' | 'swinging' | 'struck' | 'collapsing'
+  let collapseTimer = 0;
+  let collapseDebris = [];
+  let struckIndex = -1;
+  let celebrateTimer = 0;
+  let entranceTimer = 0;
+  let particles = [];
+  let grassStrands = [];
+
+  function initGame() {
+    // Pendulum pivot at top center of loom
+    pendulum = {
+      pivotX: W / 2,
+      pivotY: 45,
+      length: 220,
+      angle: -0.55, // start slightly left
+      angularVelocity: 2.0, // auto-swing
+      released: false,
+      stoneRadius: 14,
+      scale: 0,
+      alpha: 0,
+      dropX: 0,
+      dropY: 0,
+      dropVY: 0,
+    };
+
+    // Loom frame
+    loom = {
+      x: 20,
+      y: 25,
+      w: 320,
+      h: 260,
+      collapsed: false,
+      collapseAngle: 0,
+      shakeX: 0,
+    };
+
+    // 4 reed bundles in a horizontal row at the bottom of the swing arc
+    const bundleW = 80;
+    const bundleH = 140;
+    const gap = 4;
+    const totalW = bundleW * 4 + gap * 3;
+    const startX = (W - totalW) / 2;
+    const bundleY = 240;
+
+    reedBundles = QUESTION.choices.map((choice, i) => {
+      // Pre-compute snapped reed offsets so they don't flicker
+      const snapOffsets = [];
+      for (let r = 0; r < 5; r++) {
+        snapOffsets.push({
+          topOffX: (Math.random() - 0.5) * 6,
+          botOffX: (Math.random() - 0.5) * 4,
+        });
+      }
+      return {
+        x: startX + i * (bundleW + gap),
+        y: bundleY,
+        w: bundleW,
+        h: bundleH,
+        choice: choice,
+        scale: 0,
+        alpha: 0,
+        shakeX: 0,
+        snapped: false,
+        snapOffsets: snapOffsets,
+        wrappedText: [],
+        fontSize: 14,
+      };
+    });
+
+    // Reset state
+    gamePhase = 'ready';
+    collapseTimer = 0;
+    collapseDebris = [];
+    struckIndex = -1;
+    celebrateTimer = 0;
+    entranceTimer = 0;
+    particles = [];
+
+    // Generate hanging grass strands on loom
+    grassStrands = [];
+    for (let i = 0; i < 16; i++) {
+      grassStrands.push({
+        x: loom.x + 20 + Math.random() * (loom.w - 40),
+        y: loom.y + 25 + Math.random() * 60,
+        length: 30 + Math.random() * 50,
+        sway: Math.random() * Math.PI * 2,
+        swaySpeed: 0.5 + Math.random() * 1,
+      });
+    }
+
+    recalculateTextSizing();
+  }
+
+  function recalculateTextSizing() {
+    if (!reedBundles || reedBundles.length === 0) return;
+
+    // Use 14px font and wrap text to fit within column width, allowing up to 7 lines
+    const fontSize = 14;
+    const font = `${fontSize}px 'Nunito', sans-serif`;
+
+    reedBundles.forEach((bundle, i) => {
+      bundle.wrappedText = wrapText(QUESTION.choices[i].text, bundle.w - 6, font, 7);
+      bundle.fontSize = fontSize;
+    });
+  }
+
+  function updateGame(dt) {
+    if (gameState !== 'playing') return;
+
+    // Entrance animation
+    entranceTimer += dt;
+
+    // Animate pendulum entrance
+    if (pendulum.scale < 1) {
+      pendulum.scale = Math.min(1, pendulum.scale + dt * 3);
+      pendulum.alpha = Math.min(1, pendulum.alpha + dt * 3);
+    }
+
+    // Animate bundles entrance (staggered)
+    reedBundles.forEach((b, i) => {
+      const delay = 0.15 + i * 0.1;
+      if (entranceTimer > delay && b.scale < 1) {
+        const t = Math.min(1, (entranceTimer - delay) * 3);
+        const spring = 1 + Math.sin(t * Math.PI * 2) * 0.15 * (1 - t);
+        b.scale = t * spring;
+        b.alpha = Math.min(1, t * 1.5);
+      }
+    });
+
+    // Sway grass strands
+    grassStrands.forEach(g => {
+      g.sway += g.swaySpeed * dt;
+    });
+
+    if (gamePhase === 'ready') {
+      // Auto-swing pendulum back and forth (player watches and taps to release)
+      const gravity = 9.8;
+      const damping = 0.999;
+      pendulum.angularVelocity += (-gravity / pendulum.length * 50) * Math.sin(pendulum.angle) * dt;
+      pendulum.angularVelocity *= damping;
+      pendulum.angle += pendulum.angularVelocity * dt;
+    }
+
+    if (gamePhase === 'dropping') {
+      // Stone drops from release position
+      pendulum.dropVY += 600 * dt; // gravity
+      pendulum.dropY += pendulum.dropVY * dt;
+
+      // Check collision with bundles
+      reedBundles.forEach((bundle, i) => {
+        if (struckIndex >= 0) return;
+        const bCenterX = bundle.x + bundle.w / 2;
+        const bTopY = bundle.y;
+        const dx = pendulum.dropX - bCenterX;
+        const dy = pendulum.dropY - bTopY;
+
+        if (Math.abs(dx) < bundle.w / 2 + pendulum.stoneRadius && pendulum.dropY >= bTopY - pendulum.stoneRadius && pendulum.dropY <= bTopY + 30) {
+          struckIndex = i;
+          gamePhase = 'struck';
+          playSound('strike');
+
+          const choice = bundle.choice;
+          if (choice.is_correct) {
+            celebrateTimer = 0;
+            playSound('correct');
+            // Spawn celebration particles
+            for (let p = 0; p < 25; p++) {
+              particles.push({
+                x: bCenterX,
+                y: bTopY,
+                vx: (Math.random() - 0.5) * 200,
+                vy: -Math.random() * 200 - 50,
+                size: 3 + Math.random() * 5,
+                color: [COLORS.orange, COLORS.amber, COLORS.cyan, COLORS.success][Math.floor(Math.random() * 4)],
+                life: 1,
+                rotation: Math.random() * Math.PI * 2,
+                rotSpeed: (Math.random() - 0.5) * 8,
+              });
+            }
+            setTimeout(() => {
+              engine.end(true, choice.explanation);
+            }, 600);
+          } else {
+            playSound('wrong');
+            playSound('collapse');
+            gamePhase = 'collapsing';
+            collapseTimer = 0;
+            bundle.snapped = true;
+
+            // Spawn debris
+            for (let d = 0; d < 15; d++) {
+              collapseDebris.push({
+                x: loom.x + Math.random() * loom.w,
+                y: loom.y + Math.random() * loom.h * 0.5,
+                vx: (Math.random() - 0.5) * 100,
+                vy: Math.random() * 50,
+                size: 4 + Math.random() * 8,
+                rotation: Math.random() * Math.PI * 2,
+                rotSpeed: (Math.random() - 0.5) * 6,
+                color: [COLORS.reed, COLORS.reedDark, COLORS.reedLight, COLORS.twine][Math.floor(Math.random() * 4)],
+                life: 1,
+              });
+            }
+          }
+        }
+      });
+
+      // If stone falls past all bundles without hitting any
+      if (pendulum.dropY > H + 20 && struckIndex < 0) {
+        // Reset - missed all bundles
+        gamePhase = 'ready';
+        pendulum.angle = -0.55;
+        pendulum.angularVelocity = 2.0;
+        pendulum.released = false;
+      }
+    }
+
+    if (gamePhase === 'struck' && struckIndex >= 0) {
+      celebrateTimer += dt;
+      const bundle = reedBundles[struckIndex];
+      // Pulse the struck bundle
+      if (bundle.choice.is_correct) {
+        bundle.scale = 1 + Math.sin(celebrateTimer * 10) * 0.05;
+      }
+    }
+
+    if (gamePhase === 'collapsing') {
+      collapseTimer += dt;
+      loom.collapseAngle = Math.min(0.3, collapseTimer * 0.5);
+      loom.shakeX = Math.sin(collapseTimer * 30) * 4 * Math.max(0, 1 - collapseTimer);
+
+      // Wrong bundle shakes
+      if (struckIndex >= 0) {
+        const b = reedBundles[struckIndex];
+        b.shakeX = Math.sin(collapseTimer * 25) * 6 * Math.max(0, 1 - collapseTimer * 2);
+      }
+
+      // Update debris
+      collapseDebris.forEach(d => {
+        d.vy += 300 * dt;
+        d.x += d.vx * dt;
+        d.y += d.vy * dt;
+        d.rotation += d.rotSpeed * dt;
+        d.life -= dt * 0.5;
+      });
+      collapseDebris = collapseDebris.filter(d => d.life > 0 && d.y < H + 20);
+
+      if (collapseTimer > 1.2) {
+        const choice = reedBundles[struckIndex].choice;
+        engine.end(false, choice.explanation);
+      }
+    }
+
+    // Update particles
+    particles.forEach(p => {
+      p.vy += 400 * dt;
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.rotation += p.rotSpeed * dt;
+      p.life -= dt;
+    });
+    particles = particles.filter(p => p.life > 0);
+  }
+
+  function drawGame() {
+    // Sky gradient background
+    const grad = ctx.createLinearGradient(0, 0, 0, H);
+    grad.addColorStop(0, COLORS.skyTop);
+    grad.addColorStop(0.5, '#C8E0F0');
+    grad.addColorStop(0.8, COLORS.skyBottom);
+    grad.addColorStop(1, COLORS.sand);
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, W, H);
+
+    // Ocean in far background
+    ctx.fillStyle = COLORS.sea + '40';
+    ctx.fillRect(0, H * 0.35, W, 40);
+
+    // Workshop floor
+    ctx.fillStyle = '#C8B080';
+    ctx.fillRect(0, H * 0.85, W, H * 0.15);
+    ctx.fillStyle = '#B8A070';
+    for (let i = 0; i < 8; i++) {
+      ctx.fillRect(i * 50 - 10, H * 0.85, 2, H * 0.15);
+    }
+
+    // Sunlight rays
+    ctx.save();
+    ctx.globalAlpha = 0.08;
+    ctx.fillStyle = COLORS.amber;
+    for (let i = 0; i < 5; i++) {
+      ctx.beginPath();
+      ctx.moveTo(W * 0.8, 0);
+      ctx.lineTo(W * 0.2 + i * 60, H);
+      ctx.lineTo(W * 0.25 + i * 60, H);
+      ctx.closePath();
+      ctx.fill();
+    }
+    ctx.restore();
+
+    // Draw loom with potential collapse
+    drawLoom();
+
+    // Draw hanging grass strands
+    drawGrassStrands();
+
+    // Draw reed bundles
+    reedBundles.forEach((bundle, i) => drawReedBundle(bundle, i));
+
+    // Draw pendulum
+    drawPendulum();
+
+    // Draw particles
+    particles.forEach(p => {
+      ctx.save();
+      ctx.globalAlpha = p.life;
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rotation);
+      ctx.fillStyle = p.color;
+      ctx.fillRect(-p.size / 2, -p.size / 4, p.size, p.size / 2);
+      ctx.restore();
+    });
+
+    // Draw collapse debris
+    collapseDebris.forEach(d => {
+      ctx.save();
+      ctx.globalAlpha = d.life;
+      ctx.translate(d.x, d.y);
+      ctx.rotate(d.rotation);
+      ctx.fillStyle = d.color;
+      ctx.fillRect(-d.size / 2, -d.size / 4, d.size, d.size / 2);
+      ctx.restore();
+    });
+  }
+
+  function drawLoom() {
+    ctx.save();
+
+    // Apply collapse transform
+    if (gamePhase === 'collapsing' || loom.collapsed) {
+      ctx.translate(W / 2 + loom.shakeX, H * 0.85);
+      ctx.rotate(loom.collapseAngle);
+      ctx.translate(-W / 2, -H * 0.85);
+    }
+
+    // Loom vertical posts
+    const postW = 10;
+    ctx.fillStyle = COLORS.woodDark;
+    // Left post
+    ctx.fillRect(loom.x, loom.y, postW, loom.h);
+    // Right post
+    ctx.fillRect(loom.x + loom.w - postW, loom.y, postW, loom.h);
+
+    // Wood grain detail
+    ctx.fillStyle = COLORS.wood;
+    ctx.fillRect(loom.x + 2, loom.y, 3, loom.h);
+    ctx.fillRect(loom.x + loom.w - postW + 2, loom.y, 3, loom.h);
+
+    // Top crossbar
+    ctx.fillStyle = COLORS.woodDark;
+    ctx.fillRect(loom.x - 10, loom.y, loom.w + 20, 12);
+    ctx.fillStyle = COLORS.wood;
+    ctx.fillRect(loom.x - 10, loom.y + 2, loom.w + 20, 4);
+
+    // Bottom crossbar
+    ctx.fillStyle = COLORS.woodDark;
+    ctx.fillRect(loom.x, loom.y + loom.h - 8, loom.w, 8);
+
+    // Horizontal warp threads
+    ctx.strokeStyle = COLORS.twine + 'A0';
+    ctx.lineWidth = 1;
+    for (let y = loom.y + 25; y < loom.y + 120; y += 8) {
+      ctx.beginPath();
+      ctx.moveTo(loom.x + postW, y);
+      ctx.lineTo(loom.x + loom.w - postW, y);
+      ctx.stroke();
+    }
+
+    // Vertical warp threads
+    ctx.strokeStyle = COLORS.reed + '80';
+    ctx.lineWidth = 1.5;
+    for (let x = loom.x + 20; x < loom.x + loom.w - 10; x += 12) {
+      ctx.beginPath();
+      ctx.moveTo(x, loom.y + 12);
+      ctx.lineTo(x, loom.y + 130);
+      ctx.stroke();
+    }
+
+    ctx.restore();
+  }
+
+  function drawGrassStrands() {
+    grassStrands.forEach(g => {
+      ctx.save();
+      ctx.strokeStyle = COLORS.reedLight + 'B0';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      const swayOffset = Math.sin(g.sway) * 5;
+      ctx.moveTo(g.x, g.y);
+      ctx.quadraticCurveTo(g.x + swayOffset, g.y + g.length * 0.5, g.x + swayOffset * 1.5, g.y + g.length);
+      ctx.stroke();
+      ctx.restore();
+    });
+  }
+
+  function drawReedBundle(bundle, index) {
+    if (bundle.scale <= 0) return;
+
+    ctx.save();
+    const cx = bundle.x + bundle.w / 2;
+    const cy = bundle.y + bundle.h / 2;
+
+    ctx.translate(cx + bundle.shakeX, cy);
+    ctx.scale(bundle.scale, bundle.scale);
+    ctx.translate(-cx, -cy);
+
+    ctx.globalAlpha = bundle.alpha;
+
+    // Bundle background - vertical reeds
+    const isStruck = index === struckIndex;
+    let bgColor = COLORS.reedLight + '40';
+    let borderColor = COLORS.reedDark;
+
+    if (isStruck) {
+      if (bundle.choice.is_correct) {
+        bgColor = COLORS.success + '30';
+        borderColor = COLORS.success;
+      } else {
+        bgColor = COLORS.error + '30';
+        borderColor = COLORS.error;
+      }
+    }
+
+    // Reed bundle shape - tapered rectangle
+    ctx.fillStyle = bgColor;
+    ctx.beginPath();
+    ctx.roundRect(bundle.x, bundle.y, bundle.w, bundle.h, 6);
+    ctx.fill();
+
+    // Draw individual reeds
+    const reedCount = 5;
+    for (let r = 0; r < reedCount; r++) {
+      const rx = bundle.x + 10 + r * ((bundle.w - 20) / (reedCount - 1));
+      const reedColor = r % 2 === 0 ? COLORS.reed : COLORS.reedLight;
+
+      if (bundle.snapped && bundle.snapOffsets[r]) {
+        // Snapped reeds - broken at middle (using pre-computed offsets)
+        const off = bundle.snapOffsets[r];
+        ctx.strokeStyle = reedColor;
+        ctx.lineWidth = 2.5;
+        ctx.beginPath();
+        ctx.moveTo(rx, bundle.y + 5);
+        ctx.lineTo(rx + off.topOffX, bundle.y + bundle.h * 0.4);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(rx + off.botOffX, bundle.y + bundle.h * 0.5);
+        ctx.lineTo(rx, bundle.y + bundle.h - 5);
+        ctx.stroke();
+      } else {
+        ctx.strokeStyle = reedColor;
+        ctx.lineWidth = 2.5;
+        ctx.beginPath();
+        ctx.moveTo(rx, bundle.y + 5);
+        ctx.lineTo(rx, bundle.y + bundle.h - 5);
+        ctx.stroke();
+      }
+    }
+
+    // Twine binding at top
+    ctx.strokeStyle = COLORS.twine;
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(bundle.x + 4, bundle.y + 10);
+    ctx.lineTo(bundle.x + bundle.w - 4, bundle.y + 10);
+    ctx.stroke();
+
+    // Border
+    ctx.strokeStyle = borderColor;
+    ctx.lineWidth = isStruck ? 3 : 1.5;
+    ctx.beginPath();
+    ctx.roundRect(bundle.x, bundle.y, bundle.w, bundle.h, 6);
+    ctx.stroke();
+
+    // Answer letter
+    const letters = ['A', 'B', 'C', 'D'];
+    drawText(letters[index], cx, bundle.y - 10, {
+      font: "700 16px 'Nunito Sans', sans-serif",
+      color: isStruck ? borderColor : COLORS.textPrimary,
+    });
+
+    // Answer text below bundle
+    const lines = bundle.wrappedText || [bundle.choice.text];
+    const fontSize = bundle.fontSize || 14;
+    const lineHeight = fontSize + 2;
+    const textStartY = bundle.y + bundle.h + 10;
+
+    lines.forEach((line, li) => {
+      drawText(line, cx, textStartY + li * lineHeight, {
+        font: `500 ${fontSize}px 'Nunito', sans-serif`,
+        color: isStruck ? borderColor : COLORS.textPrimary,
+      });
+    });
+
+    ctx.restore();
+  }
+
+  function drawStone(sx, sy) {
+    const r = pendulum.stoneRadius;
+    // Shadow
+    ctx.fillStyle = 'rgba(0,0,0,0.15)';
+    ctx.beginPath();
+    ctx.ellipse(sx + 2, sy + 3, r, r * aspectRatio, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Stone body
+    const stoneGrad = ctx.createRadialGradient(sx - 3, sy - 3, 2, sx, sy, r);
+    stoneGrad.addColorStop(0, '#9A9A92');
+    stoneGrad.addColorStop(0.6, COLORS.stone);
+    stoneGrad.addColorStop(1, COLORS.stoneDark);
+    ctx.fillStyle = stoneGrad;
+    ctx.beginPath();
+    ctx.ellipse(sx, sy, r, r * aspectRatio, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Stone highlight
+    ctx.fillStyle = 'rgba(255,255,255,0.3)';
+    ctx.beginPath();
+    ctx.ellipse(sx - 4, sy - 4, r * 0.35, r * 0.35 * aspectRatio, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Twine wrap around stone
+    ctx.strokeStyle = COLORS.twine + 'C0';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.ellipse(sx, sy, r * 0.85, r * 0.85 * aspectRatio, 0.3, 0, Math.PI);
+    ctx.stroke();
+  }
+
+  function drawPendulum() {
+    if (pendulum.scale <= 0) return;
+
+    ctx.save();
+    ctx.globalAlpha = pendulum.alpha;
+
+    // Pivot point
+    ctx.fillStyle = COLORS.woodDark;
+    ctx.beginPath();
+    ctx.ellipse(pendulum.pivotX, pendulum.pivotY, 6, 6 * aspectRatio, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    if (gamePhase === 'dropping' || gamePhase === 'struck' || gamePhase === 'collapsing') {
+      // Draw rope dangling from pivot (no stone)
+      const ropeEndX = pendulum.pivotX + Math.sin(pendulum.angle) * pendulum.length * 0.7;
+      const ropeEndY = pendulum.pivotY + Math.cos(pendulum.angle) * pendulum.length * 0.7;
+      ctx.strokeStyle = COLORS.twine + '80';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(pendulum.pivotX, pendulum.pivotY);
+      ctx.quadraticCurveTo(pendulum.pivotX, ropeEndY * 0.6 + pendulum.pivotY * 0.4, ropeEndX, ropeEndY);
+      ctx.stroke();
+
+      // Draw the dropped stone at its drop position
+      if (pendulum.dropY < H + 20) {
+        drawStone(pendulum.dropX, pendulum.dropY);
+      }
+    } else {
+      // Normal swinging - draw rope + stone
+      const stoneX = pendulum.pivotX + Math.sin(pendulum.angle) * pendulum.length;
+      const stoneY = pendulum.pivotY + Math.cos(pendulum.angle) * pendulum.length;
+
+      // Twine rope
+      ctx.strokeStyle = COLORS.twine;
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(pendulum.pivotX, pendulum.pivotY);
+      const midX = (pendulum.pivotX + stoneX) / 2 + Math.sin(pendulum.angle) * 5;
+      const midY = (pendulum.pivotY + stoneY) / 2 + 5;
+      ctx.quadraticCurveTo(midX, midY, stoneX, stoneY);
+      ctx.stroke();
+
+      // Stone
+      drawStone(stoneX, stoneY);
+
+      // Pulsing arrow indicator when ready
+      if (gamePhase === 'ready' && entranceTimer > 0.8) {
+        const pulse = Math.sin(entranceTimer * 4) * 0.3 + 0.7;
+        ctx.save();
+        ctx.globalAlpha = pulse * pendulum.alpha;
+        // Small downward arrow below stone
+        const arrowX = stoneX;
+        const arrowY = stoneY + pendulum.stoneRadius + 8;
+        ctx.fillStyle = COLORS.orange;
+        ctx.beginPath();
+        ctx.moveTo(arrowX, arrowY + 10);
+        ctx.lineTo(arrowX - 6, arrowY);
+        ctx.lineTo(arrowX + 6, arrowY);
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
+      }
+    }
+
+    ctx.restore();
+  }
+
+  function handleTouch(e, type) {
+    if (gameState !== 'playing') return;
+
+    if (type === 'start') {
+      const touch = e.touches[0] || e.changedTouches[0];
+      const { x, y } = screenToLogical(touch.clientX, touch.clientY);
+
+      if (gamePhase === 'ready') {
+        // Release the stone - it drops from current pendulum position
+        const stoneX = pendulum.pivotX + Math.sin(pendulum.angle) * pendulum.length;
+        const stoneY = pendulum.pivotY + Math.cos(pendulum.angle) * pendulum.length;
+        pendulum.released = true;
+        pendulum.dropX = stoneX;
+        pendulum.dropY = stoneY;
+        pendulum.dropVY = 50; // small initial downward velocity
+        gamePhase = 'dropping';
+        playSound('swing');
+      }
+    }
+  }
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 4: GAME LOOP - DO NOT MODIFY                                      ║
+  // ║  Standard loop with responsive scaling and touch handling.                 ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  let lastTime = performance.now();
+
+  function gameLoop(now) {
+    const dt = Math.min((now - lastTime) / 1000, 0.05); // Cap at 50ms
+    lastTime = now;
+
+    // Apply transform for logical coordinate system (non-uniform scaling)
+    ctx.setTransform(scaleX, 0, 0, scaleY, 0, 0);
+
+    if (gameState === 'playing') {
+      updateGame(dt);
+      drawGame();
+    } else {
+      drawGame(); // Draw game state behind overlay
+      drawEndScreen(dt);
+    }
+
+    // Reset transform for next frame
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+    requestAnimationFrame(gameLoop);
+  }
+
+  // Touch handlers
+  function onTouchStart(e) {
+    e.preventDefault();
+    if (gameState === 'ended') {
+      const touch = e.touches[0];
+      const { x, y } = screenToLogical(touch.clientX, touch.clientY);
+
+      if (gameResult) {
+        // Correct answer: check both buttons
+        if (pointInRect(x, y, restartButton)) {
+          gameState = 'playing';
+          gameResult = null;
+          gameExplanation = '';
+          confettiParticles = [];
+          initGame();
+          return;
+        }
+        if (pointInRect(x, y, nextButton)) {
+          // Notify parent to go to next question
+          if (window.parent && window.parent !== window) {
+            window.parent.postMessage({ type: 'quiz-next' }, '*');
+          }
+          return;
+        }
+      } else {
+        // Wrong answer: check centered restart button
+        if (pointInRect(x, y, centeredRestartButton)) {
+          gameState = 'playing';
+          gameResult = null;
+          gameExplanation = '';
+          confettiParticles = [];
+          initGame();
+          return;
+        }
+      }
+    }
+    handleTouch(e, 'start');
+  }
+
+  function onTouchMove(e) {
+    e.preventDefault();
+    handleTouch(e, 'move');
+  }
+
+  function onTouchEnd(e) {
+    e.preventDefault();
+    handleTouch(e, 'end');
+  }
+
+  canvas.addEventListener('touchstart', onTouchStart, { passive: false });
+  canvas.addEventListener('touchmove', onTouchMove, { passive: false });
+  canvas.addEventListener('touchend', onTouchEnd, { passive: false });
+
+  // Also support mouse for testing in browser
+  canvas.addEventListener('mousedown', (e) => {
+    const fakeTouch = { touches: [{ clientX: e.clientX, clientY: e.clientY }], changedTouches: [{ clientX: e.clientX, clientY: e.clientY }] };
+    onTouchStart(fakeTouch);
+  });
+
+  canvas.addEventListener('mouseup', (e) => {
+    const fakeTouch = { touches: [], changedTouches: [{ clientX: e.clientX, clientY: e.clientY }] };
+    onTouchEnd(fakeTouch);
+  });
+
+  // Handle resize
+  window.addEventListener('resize', resizeCanvas);
+  window.addEventListener('orientationchange', () => {
+    setTimeout(resizeCanvas, 100); // Delay for orientation change to complete
+  });
+
+  // Prevent pull-to-refresh and overscroll
+  document.body.addEventListener('touchmove', (e) => e.preventDefault(), { passive: false });
+
+  // Initialize
+  resizeCanvas();
+  initGame();
+  requestAnimationFrame(gameLoop);
+  </script>
+</body>
+</html>

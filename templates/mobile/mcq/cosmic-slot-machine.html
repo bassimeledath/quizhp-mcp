@@ -1,0 +1,1054 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <link href="https://fonts.googleapis.com/css2?family=Belanosima:wght@400;600;700&family=Nunito+Sans:wght@400;500;600;700&family=Nunito:wght@400;500;600&display=swap" rel="stylesheet">
+  <title>Cosmic Slot Machine</title>
+  <!--
+  ╔══════════════════════════════════════════════════════════════════════════════╗
+  ║  GAME FACTORY TEMPLATE - MOBILE                                              ║
+  ║  Fills 100% of container, non-uniform scaling, touch input.                  ║
+  ║  Logical dimensions: 360×640 (use aspectRatio for proportional shapes)       ║
+  ╚══════════════════════════════════════════════════════════════════════════════╝
+  -->
+  <style>
+    /* ═══════════════════════════════════════════════════════════════════════════
+       BASE STYLES - Can be extended, not removed
+       ═══════════════════════════════════════════════════════════════════════════ */
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      touch-action: none; /* Prevent default touch behaviors */
+      -webkit-touch-callout: none;
+      -webkit-user-select: none;
+      user-select: none;
+    }
+    body {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      background: #1a1a2e;
+      font-family: 'Nunito Sans', system-ui, -apple-system, sans-serif;
+    }
+    #gameCanvas {
+      background: #0a0a1a;
+      /* Canvas fills viewport via JS, these are fallbacks */
+      width: 100vw;
+      height: 100vh;
+    }
+  </style>
+</head>
+<body>
+  <!-- ═══════════════════════════════════════════════════════════════════════════
+       CANVAS - Sized dynamically to fill viewport
+       ═══════════════════════════════════════════════════════════════════════════ -->
+  <canvas id="gameCanvas"></canvas>
+
+  <script>
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 1: QUESTION PLACEHOLDER - DO NOT MODIFY FORMAT                    ║
+  // ║  Platform replaces this at runtime. Use these exact 60-char answers.       ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  const QUESTION = {
+    type: "mcq",
+    prompt: "Sample question text",
+    choices: [
+      { text: "This is sample answer A which is long enough to test text overflow", is_correct: true, explanation: "Why A is correct" },
+      { text: "This is sample answer B which is long enough to test text overflow", is_correct: false, explanation: "Why B is wrong" },
+      { text: "This is sample answer C which is long enough to test text overflow", is_correct: false, explanation: "Why C is wrong" },
+      { text: "This is sample answer D which is long enough to test text overflow", is_correct: false, explanation: "Why D is wrong" }
+    ],
+    isLastQuestion: false
+  };
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 2: ENGINE CORE (MOBILE) - DO NOT MODIFY                           ║
+  // ║  Non-uniform scaling (fills container), touch input, tap-to-restart.       ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  const canvas = document.getElementById('gameCanvas');
+  const ctx = canvas.getContext('2d');
+
+  // Logical dimensions (game code works in this coordinate space)
+  const W = 360, H = 640;
+
+  // Scaling state (computed on resize)
+  let scaleX = 1;
+  let scaleY = 1;
+  let aspectRatio = 1;  // scaleX/scaleY - use for proportional shapes
+
+  // Game state
+  let gameState = 'playing'; // 'playing' | 'ended'
+  let gameResult = null;     // true (correct) | false (wrong)
+  let gameExplanation = '';
+  let endScreenTime = 0;
+  let confettiParticles = [];
+
+  // End screen button bounds (logical coordinates)
+  const restartButton = { x: 20, y: H / 2 + 50, w: 155, h: 56 };
+  const nextButton = { x: 185, y: H / 2 + 50, w: 155, h: 56 };
+  // Centered restart button for wrong answers
+  const centeredRestartButton = { x: W / 2 - 100, y: H / 2 + 50, w: 200, h: 56 };
+
+  /** Draw a styled button with aspect-ratio aware text */
+  function drawMobileButton(rect, label, color, pulse) {
+    const textAdj = getTextScaleAdjustment();
+    const p = pulse ? 1 + Math.sin(endScreenTime * 4) * 0.03 : 1;
+
+    ctx.save();
+    ctx.translate(rect.x + rect.w / 2, rect.y + rect.h / 2);
+    ctx.scale(p, p);
+    ctx.translate(-(rect.x + rect.w / 2), -(rect.y + rect.h / 2));
+
+    // Button background
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.roundRect(rect.x, rect.y, rect.w, rect.h, 12);
+    ctx.fill();
+
+    // Button text (aspect-ratio aware)
+    ctx.save();
+    ctx.translate(rect.x + rect.w / 2, rect.y + rect.h / 2);
+    ctx.scale(textAdj / aspectRatio, textAdj);
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = 'bold 18px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, 0, 0);
+    ctx.restore();
+
+    ctx.restore();
+  }
+
+  /**
+   * Resize canvas to fill viewport completely (no letterboxing).
+   * Uses non-uniform scaling - game code works in 360×640 logical space.
+   * Use aspectRatio to draw proportionally correct shapes.
+   */
+  function resizeCanvas() {
+    const dpr = window.devicePixelRatio || 1;
+
+    // Physical canvas size (actual pixels)
+    canvas.width = window.innerWidth * dpr;
+    canvas.height = window.innerHeight * dpr;
+
+    // CSS size (fills viewport)
+    canvas.style.width = window.innerWidth + 'px';
+    canvas.style.height = window.innerHeight + 'px';
+
+    // Non-uniform scaling to fill entire canvas
+    scaleX = canvas.width / W;
+    scaleY = canvas.height / H;
+
+    // Aspect ratio for proportional shape drawing
+    // >1 means container is wider than logical space
+    // <1 means container is taller than logical space
+    aspectRatio = scaleX / scaleY;
+
+    // Recalculate text sizing on resize (implement this in SECTION 3)
+    if (typeof recalculateTextSizing === 'function') {
+      recalculateTextSizing();
+    }
+  }
+
+  // === ASPECT-RATIO-AWARE TEXT WITH CLAMPED SCALING ===
+  // Text gets stretched by non-uniform scaling, so we compensate.
+  // Also clamp the effective scale to keep text legible at all sizes.
+  const TEXT_SCALE_MIN = 0.75;
+  const TEXT_SCALE_MAX = 1.4;
+
+  function getTextScaleAdjustment() {
+    const baseScale = window.innerHeight / H;
+    const clampedScale = Math.min(TEXT_SCALE_MAX, Math.max(TEXT_SCALE_MIN, baseScale));
+    return clampedScale / baseScale;
+  }
+
+  /**
+   * Draw text with aspect-ratio compensation and clamped scaling.
+   * Use this instead of raw ctx.fillText() to prevent text stretching.
+   * Default font is 16px (minimum for answer text). Use 18-20px for better readability.
+   */
+  function drawText(text, x, y, options = {}) {
+    const { font = "500 16px system-ui, sans-serif", color = '#F5F5F0', align = 'center', baseline = 'middle' } = options;
+    ctx.save();
+    ctx.translate(x, y);
+    const adj = getTextScaleAdjustment();
+    ctx.scale(adj / aspectRatio, adj);
+    ctx.font = font;
+    ctx.fillStyle = color;
+    ctx.textAlign = align;
+    ctx.textBaseline = baseline;
+    ctx.fillText(text, 0, 0);
+    ctx.restore();
+  }
+
+  /**
+   * Convert screen coordinates to logical coordinates.
+   * Use this in handleTouch to get positions in 360×640 space.
+   */
+  function screenToLogical(screenX, screenY) {
+    const dpr = window.devicePixelRatio || 1;
+    const rect = canvas.getBoundingClientRect();
+    const canvasX = (screenX - rect.left) * dpr;
+    const canvasY = (screenY - rect.top) * dpr;
+    return {
+      x: canvasX / scaleX,
+      y: canvasY / scaleY
+    };
+  }
+
+  /**
+   * Check if a point is inside a rectangle (logical coordinates).
+   */
+  function pointInRect(px, py, rect) {
+    return px >= rect.x && px <= rect.x + rect.w &&
+           py >= rect.y && py <= rect.y + rect.h;
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // TEXT UTILITIES - Dynamic wrapping and font sizing
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  /**
+   * Wrap text to fit within a maximum width (in logical coordinates).
+   * Accounts for canvas transforms applied by drawText().
+   */
+  function wrapText(text, maxWidth, font, maxLines = 3) {
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.font = font;
+    const adj = getTextScaleAdjustment();
+    const maxRawWidth = maxWidth * aspectRatio / adj;
+    const words = text.split(' ');
+    const lines = [];
+    let currentLine = '';
+    words.forEach(word => {
+      const testLine = currentLine ? currentLine + ' ' + word : word;
+      if (ctx.measureText(testLine).width > maxRawWidth && currentLine) {
+        lines.push(currentLine);
+        currentLine = word;
+      } else {
+        currentLine = testLine;
+      }
+    });
+    if (currentLine) lines.push(currentLine);
+    ctx.restore();
+    return lines.slice(0, maxLines);
+  }
+
+  /**
+   * Find the optimal font size to fit content in available space.
+   */
+  function findOptimalFontSize(options) {
+    const {
+      texts,
+      maxWidth,
+      availableHeight,
+      minFont = 12,
+      maxFont = 18,
+      itemPadding = 4,
+      fontFamily = "'Nunito Sans', sans-serif"
+    } = options;
+
+    let bestFontSize = minFont;
+    let bestWrappedTexts = [];
+
+    for (let fontSize = maxFont; fontSize >= minFont; fontSize -= 0.5) {
+      const font = `${fontSize}px ${fontFamily}`;
+      const lineHeight = fontSize + 2;
+
+      let totalHeight = 0;
+      const wrappedTexts = [];
+
+      for (const text of texts) {
+        const lines = wrapText(text, maxWidth, font);
+        wrappedTexts.push(lines);
+        totalHeight += itemPadding + lines.length * lineHeight;
+      }
+
+      if (totalHeight <= availableHeight) {
+        bestFontSize = fontSize;
+        bestWrappedTexts = wrappedTexts;
+        break;
+      }
+
+      bestWrappedTexts = wrappedTexts;
+    }
+
+    return { fontSize: bestFontSize, wrappedTexts: bestWrappedTexts };
+  }
+
+  const engine = {
+    /** Call this to end the game. DO NOT draw your own end screen. */
+    end(isCorrect, explanation) {
+      if (gameState === 'ended') return;
+      gameState = 'ended';
+      gameResult = isCorrect;
+      gameExplanation = explanation || '';
+      endScreenTime = 0;
+
+      // Spawn confetti for correct answers
+      if (isCorrect) {
+        for (let i = 0; i < 50; i++) {
+          confettiParticles.push({
+            x: W / 2,
+            y: H / 2,
+            vx: (Math.random() - 0.5) * 400,
+            vy: -Math.random() * 300 - 80,
+            size: 4 + Math.random() * 6,
+            color: ['#FFD700', '#FF6B6B', '#4ECDC4', '#95E1D3', '#F38181'][Math.floor(Math.random() * 5)],
+            rotation: Math.random() * Math.PI * 2,
+            rotationSpeed: (Math.random() - 0.5) * 10
+          });
+        }
+      }
+
+      // Notify parent frame
+      if (window.parent && window.parent !== window) {
+        window.parent.postMessage({
+          type: 'quiz-end',
+          isCorrect: isCorrect,
+          explanation: explanation || ''
+        }, '*');
+      }
+    }
+  };
+
+  /** STANDARD END SCREEN (MOBILE) - DO NOT MODIFY */
+  function drawEndScreen(dt) {
+    endScreenTime += dt;
+
+    // Update confetti
+    confettiParticles = confettiParticles.filter(p => {
+      p.vy += 600 * dt; // gravity
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.rotation += p.rotationSpeed * dt;
+      p.vx *= 0.99;
+      return p.y < H + 50;
+    });
+
+    // Dark overlay
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
+    ctx.fillRect(0, 0, W, H);
+
+    // Draw confetti
+    confettiParticles.forEach(p => {
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rotation);
+      ctx.fillStyle = p.color;
+      ctx.fillRect(-p.size / 2, -p.size / 4, p.size, p.size / 2);
+      ctx.restore();
+    });
+
+    // Result emoji (aspect-ratio aware)
+    const textAdj = getTextScaleAdjustment();
+    ctx.save();
+    ctx.translate(W / 2, H / 2 - 80);
+    ctx.scale(textAdj / aspectRatio, textAdj);
+    ctx.font = '64px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(gameResult ? '🎉' : '😢', 0, 0);
+    ctx.restore();
+
+    // Result text (aspect-ratio aware)
+    ctx.save();
+    ctx.translate(W / 2, H / 2 - 10);
+    ctx.scale(textAdj / aspectRatio, textAdj);
+    ctx.fillStyle = gameResult ? '#4ADE80' : '#F87171';
+    ctx.font = 'bold 32px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(gameResult ? 'Correct!' : 'Wrong!', 0, 0);
+    ctx.restore();
+
+    // Buttons
+    if (gameResult) {
+      // Correct: show both Restart and Next/Finish
+      drawMobileButton(restartButton, 'Restart', '#E87A3E', true);
+      const nextLabel = QUESTION.isLastQuestion ? 'Finish' : 'Next';
+      drawMobileButton(nextButton, nextLabel, '#4ECDC4', true);
+    } else {
+      // Wrong: show only centered Restart button
+      drawMobileButton(centeredRestartButton, 'Restart', '#E87A3E', true);
+    }
+  }
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 3: YOUR GAME CODE - IMPLEMENT THESE FUNCTIONS                     ║
+  // ║  Cosmic Slot Machine - MCQ game with 3 spinning reels                      ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+
+  // === COLORS ===
+  const COLORS = {
+    bgDeep: '#0a0a1a',
+    bgPanel: '#141428',
+    bgReel: '#1C1C3A',
+    orange: '#E87A3E',
+    orangeHover: '#D66B31',
+    amber: '#F5A742',
+    cyan: '#4ECDC4',
+    success: '#6BBF59',
+    error: '#E85D4A',
+    textPrimary: '#F5F5F0',
+    textSecondary: '#C2C2B8',
+    borderSubtle: '#2A2A50',
+    borderGlow: '#4ECDC4',
+    starColor: '#F5A742',
+    neonPurple: '#9B59B6',
+    neonBlue: '#3498DB',
+    neonPink: '#E74C8C',
+  };
+
+  // === SOUND EFFECTS ===
+  const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+  function playSound(type) {
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+
+    if (type === 'click') {
+      osc.frequency.value = 600;
+      gain.gain.setValueAtTime(0.12, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.08);
+      osc.start(); osc.stop(audioCtx.currentTime + 0.08);
+    } else if (type === 'stop') {
+      osc.frequency.value = 880;
+      osc.type = 'triangle';
+      gain.gain.setValueAtTime(0.15, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.15);
+      osc.start(); osc.stop(audioCtx.currentTime + 0.15);
+    } else if (type === 'allStopped') {
+      osc.frequency.value = 523;
+      osc.type = 'sine';
+      gain.gain.setValueAtTime(0.15, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.3);
+      osc.start(); osc.stop(audioCtx.currentTime + 0.3);
+      // Second note
+      const osc2 = audioCtx.createOscillator();
+      const gain2 = audioCtx.createGain();
+      osc2.connect(gain2); gain2.connect(audioCtx.destination);
+      osc2.frequency.value = 659;
+      osc2.type = 'sine';
+      gain2.gain.setValueAtTime(0.12, audioCtx.currentTime + 0.1);
+      gain2.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.4);
+      osc2.start(audioCtx.currentTime + 0.1); osc2.stop(audioCtx.currentTime + 0.4);
+    } else if (type === 'correct') {
+      osc.frequency.value = 523;
+      osc.type = 'sine';
+      gain.gain.setValueAtTime(0.15, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.5);
+      osc.start(); osc.stop(audioCtx.currentTime + 0.5);
+      const osc2 = audioCtx.createOscillator();
+      const g2 = audioCtx.createGain();
+      osc2.connect(g2); g2.connect(audioCtx.destination);
+      osc2.frequency.value = 784;
+      osc2.type = 'sine';
+      g2.gain.setValueAtTime(0.12, audioCtx.currentTime + 0.15);
+      g2.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.5);
+      osc2.start(audioCtx.currentTime + 0.15); osc2.stop(audioCtx.currentTime + 0.5);
+    } else if (type === 'wrong') {
+      osc.frequency.value = 200;
+      osc.type = 'sawtooth';
+      gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.4);
+      osc.start(); osc.stop(audioCtx.currentTime + 0.4);
+    }
+  }
+
+  // === GAME STATE ===
+  let reels = [];       // 3 reels, each cycling through answer indices
+  let answers = [];     // Answer button data for final selection
+  let stars = [];       // Background stars
+  let leverButton = {}; // The stop lever
+  let machineState = 'spinning'; // 'spinning' | 'stopping' | 'stopped' | 'selecting'
+  let currentReelToStop = 0;     // Which reel to stop next (0, 1, 2)
+  let stoppedValues = [];        // The answer index each reel stopped on
+  let selectTimer = 0;           // Timer after all reels stop
+  let gameTime = 0;
+  let entranceProgress = 0;      // For entrance animation
+
+  // Symbols for reels (letters A-D corresponding to answers)
+  const REEL_SYMBOLS = ['A', 'B', 'C', 'D'];
+  const SYMBOL_COLORS = [COLORS.orange, COLORS.cyan, COLORS.amber, COLORS.neonPurple];
+
+  function initGame() {
+    gameTime = 0;
+    entranceProgress = 0;
+    machineState = 'spinning';
+    currentReelToStop = 0;
+    stoppedValues = [];
+    selectTimer = 0;
+
+    // Initialize 3 reels
+    reels = [];
+    for (let i = 0; i < 3; i++) {
+      reels.push({
+        offset: Math.random() * 4,  // Random start offset for visual variety
+        speed: 6 + i * 1.5,         // Each reel slightly different speed
+        stopped: false,
+        stoppedIndex: -1,
+        stopAnim: 0,                // Animation progress when stopping
+        x: 60 + i * 100,            // Horizontal position
+      });
+    }
+
+    // Lever button at bottom
+    leverButton = {
+      x: W / 2 - 70,
+      y: 380,
+      w: 140,
+      h: 56,
+      scale: 1,
+      glowPhase: 0,
+    };
+
+    // Answer buttons (shown after all reels stop)
+    answers = QUESTION.choices.map((choice, i) => ({
+      x: 20,
+      y: 450 + i * 48,
+      w: 320,
+      h: 44,
+      choice: choice,
+      index: i,
+      alpha: 0,
+      scale: 0,
+      wrappedText: [choice.text],
+      fontSize: 16,
+      shakeX: 0,
+      pulseScale: 1,
+    }));
+
+    // Background stars
+    stars = [];
+    for (let i = 0; i < 40; i++) {
+      stars.push({
+        x: Math.random() * W,
+        y: Math.random() * H,
+        size: 0.5 + Math.random() * 2,
+        twinkleSpeed: 1 + Math.random() * 3,
+        twinkleOffset: Math.random() * Math.PI * 2,
+      });
+    }
+
+    recalculateTextSizing();
+  }
+
+  function recalculateTextSizing() {
+    if (!answers || answers.length === 0) return;
+
+    const { fontSize, wrappedTexts } = findOptimalFontSize({
+      texts: QUESTION.choices.map(c => c.text),
+      maxWidth: 290,
+      availableHeight: 180,
+      minFont: 14,
+      maxFont: 16,
+      fontFamily: "'Nunito', sans-serif",
+    });
+
+    answers.forEach((ans, i) => {
+      ans.wrappedText = wrappedTexts[i];
+      ans.fontSize = fontSize;
+    });
+  }
+
+  function updateGame(dt) {
+    if (gameState !== 'playing') return;
+
+    gameTime += dt;
+    entranceProgress = Math.min(1, entranceProgress + dt * 2);
+
+    // Update reel spinning
+    reels.forEach((reel, i) => {
+      if (!reel.stopped) {
+        reel.offset += reel.speed * dt;
+      } else {
+        // Bounce animation when stopping
+        reel.stopAnim = Math.min(1, reel.stopAnim + dt * 4);
+      }
+    });
+
+    // Lever glow animation
+    if (machineState === 'spinning' || machineState === 'stopping') {
+      leverButton.glowPhase += dt * 3;
+    }
+
+    // After all reels stopped, transition to selecting
+    if (machineState === 'stopping' && currentReelToStop >= 3) {
+      machineState = 'stopped';
+      selectTimer = 0;
+      playSound('allStopped');
+    }
+
+    if (machineState === 'stopped') {
+      selectTimer += dt;
+      // Animate answer buttons appearing
+      answers.forEach((ans, i) => {
+        const delay = i * 0.1;
+        const t = Math.max(0, Math.min(1, (selectTimer - delay) / 0.3));
+        // Spring easing
+        const spring = 1 + Math.sin(t * Math.PI * 2) * 0.15 * (1 - t);
+        ans.alpha = t;
+        ans.scale = t * spring;
+      });
+
+      if (selectTimer > 0.5) {
+        machineState = 'selecting';
+      }
+    }
+
+    if (machineState === 'selecting') {
+      // Keep answers fully visible
+      answers.forEach(ans => {
+        ans.alpha = 1;
+        ans.scale = 1;
+      });
+    }
+  }
+
+  function drawGame() {
+    // Background - deep space
+    ctx.fillStyle = COLORS.bgDeep;
+    ctx.fillRect(0, 0, W, H);
+
+    // Draw stars
+    stars.forEach(star => {
+      const twinkle = 0.3 + 0.7 * Math.abs(Math.sin(gameTime * star.twinkleSpeed + star.twinkleOffset));
+      ctx.globalAlpha = twinkle;
+      ctx.fillStyle = COLORS.starColor;
+      ctx.beginPath();
+      ctx.ellipse(star.x, star.y, star.size, star.size * aspectRatio, 0, 0, Math.PI * 2);
+      ctx.fill();
+    });
+    ctx.globalAlpha = 1;
+
+    // Machine housing - entrance animation
+    const machineY = -200 * (1 - easeOutBack(entranceProgress));
+
+    ctx.save();
+    ctx.translate(0, machineY);
+
+    // Machine frame (outer border glow)
+    const glowIntensity = 0.3 + 0.2 * Math.sin(gameTime * 2);
+    ctx.fillStyle = `rgba(78, 205, 196, ${glowIntensity * 0.15})`;
+    ctx.beginPath();
+    ctx.roundRect(18, 28, 324, 300, 16);
+    ctx.fill();
+
+    // Machine body
+    ctx.fillStyle = COLORS.bgPanel;
+    ctx.beginPath();
+    ctx.roundRect(20, 30, 320, 296, 14);
+    ctx.fill();
+
+    // Machine border
+    ctx.strokeStyle = COLORS.borderSubtle;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.roundRect(20, 30, 320, 296, 14);
+    ctx.stroke();
+
+    // Top accent strip
+    const topGrad = ctx.createLinearGradient(20, 30, 340, 30);
+    topGrad.addColorStop(0, COLORS.orange);
+    topGrad.addColorStop(0.5, COLORS.amber);
+    topGrad.addColorStop(1, COLORS.cyan);
+    ctx.fillStyle = topGrad;
+    ctx.beginPath();
+    ctx.roundRect(20, 30, 320, 6, [14, 14, 0, 0]);
+    ctx.fill();
+
+    // Title
+    drawText('COSMIC SLOTS', W / 2, 58, {
+      font: "700 22px 'Belanosima', sans-serif",
+      color: COLORS.amber,
+    });
+
+    // Draw 3 reels
+    const reelW = 80;
+    const reelH = 180;
+    const reelStartX = 40;
+    const reelY = 80;
+    const reelGap = 20;
+
+    for (let i = 0; i < 3; i++) {
+      const reel = reels[i];
+      const rx = reelStartX + i * (reelW + reelGap);
+
+      // Reel background
+      ctx.fillStyle = COLORS.bgReel;
+      ctx.beginPath();
+      ctx.roundRect(rx, reelY, reelW, reelH, 8);
+      ctx.fill();
+
+      // Reel border
+      ctx.strokeStyle = reel.stopped ? COLORS.cyan : COLORS.borderSubtle;
+      ctx.lineWidth = reel.stopped ? 2 : 1;
+      ctx.beginPath();
+      ctx.roundRect(rx, reelY, reelW, reelH, 8);
+      ctx.stroke();
+
+      // Clip to reel area
+      ctx.save();
+      ctx.beginPath();
+      ctx.roundRect(rx, reelY, reelW, reelH, 8);
+      ctx.clip();
+
+      // Draw spinning symbols
+      const symbolH = 45;
+      const totalSymbols = 4;
+      const cycleH = symbolH * totalSymbols;
+      const offset = reel.stopped ? reel.stoppedIndex * symbolH : reel.offset * symbolH;
+
+      for (let j = -2; j <= totalSymbols + 2; j++) {
+        const symIndex = ((j % totalSymbols) + totalSymbols) % totalSymbols;
+        const baseY = reelY + (reelH / 2) - symbolH / 2 + (j * symbolH) - (offset % cycleH);
+        const sy = baseY;
+
+        if (sy > reelY - symbolH && sy < reelY + reelH + symbolH) {
+          // Symbol background
+          const distFromCenter = Math.abs(sy - (reelY + reelH / 2 - symbolH / 2));
+          const centerFade = Math.max(0, 1 - distFromCenter / (reelH * 0.6));
+
+          ctx.globalAlpha = 0.3 + 0.7 * centerFade;
+
+          // Symbol circle
+          const cx = rx + reelW / 2;
+          const cy = sy + symbolH / 2;
+          const symR = 16;
+
+          ctx.fillStyle = SYMBOL_COLORS[symIndex];
+          ctx.beginPath();
+          ctx.ellipse(cx, cy, symR, symR * aspectRatio, 0, 0, Math.PI * 2);
+          ctx.fill();
+
+          // Symbol letter
+          drawText(REEL_SYMBOLS[symIndex], cx, cy, {
+            font: "700 18px 'Nunito Sans', sans-serif",
+            color: '#FFFFFF',
+          });
+
+          ctx.globalAlpha = 1;
+        }
+      }
+
+      ctx.restore();
+
+      // Center line indicator
+      ctx.strokeStyle = COLORS.amber;
+      ctx.lineWidth = 2;
+      ctx.globalAlpha = 0.6;
+      ctx.beginPath();
+      ctx.moveTo(rx - 3, reelY + reelH / 2);
+      ctx.lineTo(rx + reelW + 3, reelY + reelH / 2);
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+
+      // Stopped indicator
+      if (reel.stopped) {
+        const bounce = Math.sin(reel.stopAnim * Math.PI) * 3 * (1 - reel.stopAnim);
+        drawText(REEL_SYMBOLS[reel.stoppedIndex], rx + reelW / 2, reelY + reelH + 16 + bounce, {
+          font: "700 16px 'Nunito Sans', sans-serif",
+          color: SYMBOL_COLORS[reel.stoppedIndex],
+        });
+      }
+    }
+
+    // Bottom panel with glow
+    ctx.fillStyle = 'rgba(20, 20, 40, 0.8)';
+    ctx.beginPath();
+    ctx.roundRect(20, 280, 320, 46, [0, 0, 14, 14]);
+    ctx.fill();
+
+    // Status text
+    let statusText = '';
+    if (machineState === 'spinning') statusText = 'Tap STOP to halt reels!';
+    else if (machineState === 'stopping') statusText = `Reel ${currentReelToStop + 1} of 3 - Tap STOP`;
+    else if (machineState === 'stopped' || machineState === 'selecting') statusText = 'Choose your answer!';
+
+    drawText(statusText, W / 2, 303, {
+      font: "500 14px 'Nunito Sans', sans-serif",
+      color: COLORS.textSecondary,
+    });
+
+    ctx.restore(); // End machine housing transform
+
+    // Draw lever/stop button (below machine, not affected by entrance anim after it settles)
+    if (machineState === 'spinning' || machineState === 'stopping') {
+      const leverGlow = 0.5 + 0.5 * Math.sin(leverButton.glowPhase);
+
+      // Glow behind button
+      ctx.fillStyle = `rgba(232, 122, 62, ${leverGlow * 0.2})`;
+      ctx.beginPath();
+      ctx.roundRect(leverButton.x - 4, leverButton.y - 4, leverButton.w + 8, leverButton.h + 8, 16);
+      ctx.fill();
+
+      // Button background
+      const btnGrad = ctx.createLinearGradient(leverButton.x, leverButton.y, leverButton.x, leverButton.y + leverButton.h);
+      btnGrad.addColorStop(0, COLORS.orange);
+      btnGrad.addColorStop(1, COLORS.orangeHover);
+      ctx.fillStyle = btnGrad;
+      ctx.beginPath();
+      ctx.roundRect(leverButton.x, leverButton.y, leverButton.w, leverButton.h, 12);
+      ctx.fill();
+
+      // Button border
+      ctx.strokeStyle = COLORS.amber;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.roundRect(leverButton.x, leverButton.y, leverButton.w, leverButton.h, 12);
+      ctx.stroke();
+
+      const stopLabel = machineState === 'spinning' ? 'STOP' : `STOP ${currentReelToStop + 1}/3`;
+      drawText(stopLabel, W / 2, leverButton.y + leverButton.h / 2, {
+        font: "700 20px 'Nunito Sans', sans-serif",
+        color: '#FFFFFF',
+      });
+    }
+
+    // Draw answer selection buttons
+    if (machineState === 'stopped' || machineState === 'selecting') {
+      answers.forEach((ans, i) => {
+        if (ans.alpha <= 0) return;
+
+        ctx.globalAlpha = ans.alpha;
+        ctx.save();
+
+        const cx = ans.x + ans.w / 2;
+        const cy = ans.y + ans.h / 2;
+        ctx.translate(cx, cy);
+        ctx.scale(ans.scale, ans.scale);
+        ctx.translate(-cx, -cy);
+
+        // Button background
+        ctx.fillStyle = `rgba(28, 28, 58, 0.9)`;
+        ctx.beginPath();
+        ctx.roundRect(ans.x + ans.shakeX, ans.y, ans.w, ans.h, 10);
+        ctx.fill();
+
+        // Border with symbol color
+        ctx.strokeStyle = SYMBOL_COLORS[i];
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.roundRect(ans.x + ans.shakeX, ans.y, ans.w, ans.h, 10);
+        ctx.stroke();
+
+        // Symbol badge
+        const badgeX = ans.x + 20 + ans.shakeX;
+        const badgeY = ans.y + ans.h / 2;
+        ctx.fillStyle = SYMBOL_COLORS[i];
+        ctx.beginPath();
+        ctx.ellipse(badgeX, badgeY, 12, 12 * aspectRatio, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        drawText(REEL_SYMBOLS[i], badgeX, badgeY, {
+          font: "700 14px 'Nunito Sans', sans-serif",
+          color: '#FFFFFF',
+        });
+
+        // Answer text
+        const lines = ans.wrappedText || [ans.choice.text];
+        const fontSize = ans.fontSize || 16;
+        const lineH = fontSize + 2;
+        const textStartY = ans.y + ans.h / 2 - ((lines.length - 1) * lineH) / 2;
+
+        lines.forEach((line, li) => {
+          drawText(line, ans.x + 38 + ans.shakeX + (ans.w - 44) / 2, textStartY + li * lineH, {
+            font: `500 ${fontSize}px 'Nunito', sans-serif`,
+            color: COLORS.textPrimary,
+          });
+        });
+
+        ctx.restore();
+        ctx.globalAlpha = 1;
+      });
+    }
+  }
+
+  // Easing helper
+  function easeOutBack(t) {
+    const c1 = 1.70158;
+    const c3 = c1 + 1;
+    return 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2);
+  }
+
+  function handleTouch(e, type) {
+    if (gameState !== 'playing') return;
+    if (type !== 'start') return;
+
+    const touch = e.touches[0] || e.changedTouches[0];
+    const { x, y } = screenToLogical(touch.clientX, touch.clientY);
+
+    // Resume audio context on first interaction
+    if (audioCtx.state === 'suspended') {
+      audioCtx.resume();
+    }
+
+    // Handle lever/stop button press
+    if ((machineState === 'spinning' || machineState === 'stopping') && pointInRect(x, y, leverButton)) {
+      playSound('stop');
+
+      if (machineState === 'spinning') {
+        machineState = 'stopping';
+        currentReelToStop = 0;
+      }
+
+      if (currentReelToStop < 3) {
+        const reel = reels[currentReelToStop];
+        reel.stopped = true;
+        // Pick a random answer to land on
+        reel.stoppedIndex = Math.floor(Math.random() * 4);
+        reel.stopAnim = 0;
+        currentReelToStop++;
+      }
+      return;
+    }
+
+    // Handle answer selection
+    if (machineState === 'selecting') {
+      answers.forEach(ans => {
+        if (pointInRect(x, y, { x: ans.x, y: ans.y, w: ans.w, h: ans.h })) {
+          playSound('click');
+          const choice = ans.choice;
+
+          if (choice.is_correct) {
+            playSound('correct');
+            ans.pulseScale = 1.1;
+          } else {
+            playSound('wrong');
+            // Shake animation
+            let shakeTime = 0;
+            const shakeInterval = setInterval(() => {
+              shakeTime += 16;
+              ans.shakeX = Math.sin(shakeTime * 0.05 * Math.PI) * 6 * (1 - shakeTime / 400);
+              if (shakeTime >= 400) {
+                ans.shakeX = 0;
+                clearInterval(shakeInterval);
+              }
+            }, 16);
+          }
+
+          // Delay end slightly to show feedback
+          setTimeout(() => {
+            engine.end(choice.is_correct, choice.explanation);
+          }, choice.is_correct ? 300 : 500);
+        }
+      });
+    }
+  }
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 4: GAME LOOP - DO NOT MODIFY                                      ║
+  // ║  Standard loop with responsive scaling and touch handling.                 ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  let lastTime = performance.now();
+
+  function gameLoop(now) {
+    const dt = Math.min((now - lastTime) / 1000, 0.05); // Cap at 50ms
+    lastTime = now;
+
+    // Apply transform for logical coordinate system (non-uniform scaling)
+    ctx.setTransform(scaleX, 0, 0, scaleY, 0, 0);
+
+    if (gameState === 'playing') {
+      updateGame(dt);
+      drawGame();
+    } else {
+      drawGame(); // Draw game state behind overlay
+      drawEndScreen(dt);
+    }
+
+    // Reset transform for next frame
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+    requestAnimationFrame(gameLoop);
+  }
+
+  // Touch handlers
+  function onTouchStart(e) {
+    e.preventDefault();
+    if (gameState === 'ended') {
+      const touch = e.touches[0];
+      const { x, y } = screenToLogical(touch.clientX, touch.clientY);
+
+      if (gameResult) {
+        // Correct answer: check both buttons
+        if (pointInRect(x, y, restartButton)) {
+          gameState = 'playing';
+          gameResult = null;
+          gameExplanation = '';
+          confettiParticles = [];
+          initGame();
+          return;
+        }
+        if (pointInRect(x, y, nextButton)) {
+          // Notify parent to go to next question
+          if (window.parent && window.parent !== window) {
+            window.parent.postMessage({ type: 'quiz-next' }, '*');
+          }
+          return;
+        }
+      } else {
+        // Wrong answer: check centered restart button
+        if (pointInRect(x, y, centeredRestartButton)) {
+          gameState = 'playing';
+          gameResult = null;
+          gameExplanation = '';
+          confettiParticles = [];
+          initGame();
+          return;
+        }
+      }
+    }
+    handleTouch(e, 'start');
+  }
+
+  function onTouchMove(e) {
+    e.preventDefault();
+    handleTouch(e, 'move');
+  }
+
+  function onTouchEnd(e) {
+    e.preventDefault();
+    handleTouch(e, 'end');
+  }
+
+  canvas.addEventListener('touchstart', onTouchStart, { passive: false });
+  canvas.addEventListener('touchmove', onTouchMove, { passive: false });
+  canvas.addEventListener('touchend', onTouchEnd, { passive: false });
+
+  // Also support mouse for testing in browser
+  canvas.addEventListener('mousedown', (e) => {
+    const fakeTouch = { touches: [{ clientX: e.clientX, clientY: e.clientY }], changedTouches: [{ clientX: e.clientX, clientY: e.clientY }] };
+    onTouchStart(fakeTouch);
+  });
+
+  canvas.addEventListener('mouseup', (e) => {
+    const fakeTouch = { touches: [], changedTouches: [{ clientX: e.clientX, clientY: e.clientY }] };
+    onTouchEnd(fakeTouch);
+  });
+
+  // Handle resize
+  window.addEventListener('resize', resizeCanvas);
+  window.addEventListener('orientationchange', () => {
+    setTimeout(resizeCanvas, 100); // Delay for orientation change to complete
+  });
+
+  // Prevent pull-to-refresh and overscroll
+  document.body.addEventListener('touchmove', (e) => e.preventDefault(), { passive: false });
+
+  // Initialize
+  resizeCanvas();
+  initGame();
+  requestAnimationFrame(gameLoop);
+  </script>
+</body>
+</html>

@@ -1,0 +1,929 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Bank Vault Dial Crack</title>
+  <link href="https://fonts.googleapis.com/css2?family=Belanosima:wght@400;600;700&family=Nunito+Sans:wght@400;500;600;700&family=Nunito:wght@400;500;600&display=swap" rel="stylesheet">
+  <!--
+  +======================================================================+
+  |  GAME FACTORY TEMPLATE                                                |
+  |  This template enforces critical invariants. Follow the section markers.|
+  +======================================================================+
+  -->
+  <style>
+    /* BASE STYLES - Can be extended, not removed */
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+    }
+    body {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      background: #1a1a2e;
+      font-family: 'Nunito Sans', system-ui, -apple-system, sans-serif;
+    }
+    #gameCanvas {
+      background: #16213e;
+      border-radius: 8px;
+      display: block;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="gameCanvas"></canvas>
+
+  <script>
+  // +====================================================================+
+  // |  SECTION 1: QUESTION PLACEHOLDER - DO NOT MODIFY FORMAT              |
+  // |  Platform replaces this at runtime. Use these exact 60-char answers. |
+  // +====================================================================+
+  const QUESTION = {
+    type: "true_false",
+    prompt: "Sample question text",
+    choices: [
+      { text: "This is sample answer A which is long enough to test text overflow", is_correct: true, explanation: "Why A is correct" },
+      { text: "This is sample answer B which is long enough to test text overflow", is_correct: false, explanation: "Why B is wrong" }
+    ],
+    isLastQuestion: false
+  };
+
+  // +====================================================================+
+  // |  SECTION 2: ENGINE CORE - DO NOT MODIFY                              |
+  // |  Standard engine interface and end screen. This is sacred.           |
+  // +====================================================================+
+  const canvas = document.getElementById('gameCanvas');
+  const ctx = canvas.getContext('2d');
+
+  const W = 720, H = 540;
+
+  let scale = 1;
+  let dpr = 1;
+
+  let gameState = 'playing';
+  let gameResult = null;
+  let gameExplanation = '';
+  let endScreenTime = 0;
+  let confettiParticles = [];
+
+  const restartButton = { x: W / 2 - 170, y: H / 2 + 60, w: 150, h: 48 };
+  const nextButton = { x: W / 2 + 20, y: H / 2 + 60, w: 150, h: 48 };
+
+  function pointInRect(px, py, rect) {
+    return px >= rect.x && px <= rect.x + rect.w &&
+           py >= rect.y && py <= rect.y + rect.h;
+  }
+
+  function drawButton(rect, label, color, pulse) {
+    const p = pulse ? 1 + Math.sin(endScreenTime * 4) * 0.03 : 1;
+    ctx.save();
+    ctx.translate(rect.x + rect.w / 2, rect.y + rect.h / 2);
+    ctx.scale(p, p);
+    ctx.translate(-(rect.x + rect.w / 2), -(rect.y + rect.h / 2));
+
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.roundRect(rect.x, rect.y, rect.w, rect.h, 12);
+    ctx.fill();
+
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = "bold 18px 'Nunito Sans', system-ui, sans-serif";
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, rect.x + rect.w / 2, rect.y + rect.h / 2);
+
+    ctx.restore();
+  }
+
+  function resizeCanvas() {
+    dpr = window.devicePixelRatio || 1;
+    const availW = window.innerWidth;
+    const availH = window.innerHeight;
+    const scaleX = availW / W;
+    const scaleY = availH / H;
+    scale = Math.min(scaleX, scaleY);
+    canvas.width = W * scale * dpr;
+    canvas.height = H * scale * dpr;
+    canvas.style.width = (W * scale) + 'px';
+    canvas.style.height = (H * scale) + 'px';
+  }
+
+  function screenToLogical(screenX, screenY) {
+    const rect = canvas.getBoundingClientRect();
+    return {
+      x: (screenX - rect.left) * (W / rect.width),
+      y: (screenY - rect.top) * (H / rect.height)
+    };
+  }
+
+  const engine = {
+    end(isCorrect, explanation) {
+      if (gameState === 'ended') return;
+      gameState = 'ended';
+      gameResult = isCorrect;
+      gameExplanation = explanation || '';
+      endScreenTime = 0;
+
+      if (isCorrect) {
+        for (let i = 0; i < 50; i++) {
+          confettiParticles.push({
+            x: W / 2,
+            y: H / 2,
+            vx: (Math.random() - 0.5) * 600,
+            vy: -Math.random() * 400 - 100,
+            size: 4 + Math.random() * 6,
+            color: ['#FFD700', '#FF6B6B', '#4ECDC4', '#95E1D3', '#F38181'][Math.floor(Math.random() * 5)],
+            rotation: Math.random() * Math.PI * 2,
+            rotationSpeed: (Math.random() - 0.5) * 10
+          });
+        }
+      }
+
+      if (window.parent && window.parent !== window) {
+        window.parent.postMessage({
+          type: 'quiz-end',
+          isCorrect: isCorrect,
+          explanation: explanation || ''
+        }, '*');
+      }
+    }
+  };
+
+  function drawEndScreen(dt) {
+    endScreenTime += dt;
+
+    confettiParticles = confettiParticles.filter(p => {
+      p.vy += 800 * dt;
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.rotation += p.rotationSpeed * dt;
+      p.vx *= 0.99;
+      return p.y < H + 50;
+    });
+
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
+    ctx.fillRect(0, 0, W, H);
+
+    confettiParticles.forEach(p => {
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rotation);
+      ctx.fillStyle = p.color;
+      ctx.fillRect(-p.size / 2, -p.size / 4, p.size, p.size / 2);
+      ctx.restore();
+    });
+
+    ctx.font = '72px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(gameResult ? '🎉' : '😢', W / 2, H / 2 - 50);
+
+    ctx.fillStyle = gameResult ? '#4ADE80' : '#F87171';
+    ctx.font = "bold 36px 'Nunito Sans', system-ui, sans-serif";
+    ctx.fillText(gameResult ? 'Correct!' : 'Wrong!', W / 2, H / 2 + 20);
+
+    if (gameResult) {
+      drawButton(restartButton, 'Restart', '#E87A3E', true);
+      const nextLabel = QUESTION.isLastQuestion ? 'Finish' : 'Next';
+      drawButton(nextButton, nextLabel, '#4ECDC4', true);
+    } else {
+      const centeredRestart = { x: W / 2 - 75, y: H / 2 + 60, w: 150, h: 48 };
+      drawButton(centeredRestart, 'Restart', '#E87A3E', true);
+    }
+  }
+
+  // +====================================================================+
+  // |  SECTION 3: YOUR GAME CODE - IMPLEMENT THESE FUNCTIONS               |
+  // +====================================================================+
+
+  // === COLORS ===
+  const COLORS = {
+    bgPrimary: '#FAFAF7',
+    bgSurface: '#FFFFFF',
+    bgSurfaceSecondary: '#F5F5F0',
+    textPrimary: '#2B2B28',
+    textSecondary: '#5A5A54',
+    textTertiary: '#8C8C84',
+    orange: '#E87A3E',
+    orangeHover: '#D66B31',
+    amber: '#F5A742',
+    cyan: '#4ECDC4',
+    success: '#6BBF59',
+    error: '#E85D4A',
+    borderSubtle: '#E6E6E0',
+    borderStrong: '#D4D4CC',
+    vaultDark: '#3A3A38',
+    vaultMedium: '#5A5A54',
+    vaultLight: '#8C8C84',
+    vaultShine: '#C2C2B8',
+    vaultDeep: '#2B2B28'
+  };
+
+  // === SOUND ENGINE ===
+  const AudioCtx = window.AudioContext || window.webkitAudioContext;
+  let audioCtx = null;
+  function getAudioCtx() {
+    if (!audioCtx) audioCtx = new AudioCtx();
+    return audioCtx;
+  }
+
+  function playClick() {
+    try {
+      const ctx = getAudioCtx();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(800, ctx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(600, ctx.currentTime + 0.05);
+      gain.gain.setValueAtTime(0.15, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.08);
+      osc.start(ctx.currentTime);
+      osc.stop(ctx.currentTime + 0.08);
+    } catch(e) {}
+  }
+
+  function playDialTick() {
+    try {
+      const ctx = getAudioCtx();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(1200, ctx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(800, ctx.currentTime + 0.03);
+      gain.gain.setValueAtTime(0.08, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.04);
+      osc.start(ctx.currentTime);
+      osc.stop(ctx.currentTime + 0.04);
+    } catch(e) {}
+  }
+
+  function playCorrect() {
+    try {
+      const ctx = getAudioCtx();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(523, ctx.currentTime);
+      osc.frequency.setValueAtTime(659, ctx.currentTime + 0.1);
+      osc.frequency.setValueAtTime(784, ctx.currentTime + 0.2);
+      gain.gain.setValueAtTime(0.2, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.4);
+      osc.start(ctx.currentTime);
+      osc.stop(ctx.currentTime + 0.4);
+    } catch(e) {}
+  }
+
+  function playWrong() {
+    try {
+      const ctx = getAudioCtx();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(300, ctx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(150, ctx.currentTime + 0.3);
+      gain.gain.setValueAtTime(0.15, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);
+      osc.start(ctx.currentTime);
+      osc.stop(ctx.currentTime + 0.3);
+    } catch(e) {}
+  }
+
+  function playVaultOpen() {
+    try {
+      const ctx = getAudioCtx();
+      // Heavy metallic clunk
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.type = 'square';
+      osc.frequency.setValueAtTime(100, ctx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(50, ctx.currentTime + 0.2);
+      gain.gain.setValueAtTime(0.2, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);
+      osc.start(ctx.currentTime);
+      osc.stop(ctx.currentTime + 0.3);
+    } catch(e) {}
+  }
+
+  // === GAME STATE ===
+  let dialAngle = 0;          // Current dial rotation in radians
+  let targetAngle = 0;        // Target angle for smooth rotation
+  let dialSpeed = 0;          // Current rotation speed
+  const DIAL_STEP = Math.PI / 24; // Each key press rotates 7.5 degrees
+  let selectedZone = -1;      // -1 = none, 0 = left/True, 1 = right/False
+  let submitting = false;     // True when spacebar pressed
+  let submitTime = 0;         // Time tracking for submit animation
+  let entranceTime = 0;       // Entrance animation timer
+  let breatheTime = 0;        // Ambient breathing timer
+  let vaultShake = { x: 0, y: 0 }; // Shake offset
+  let dialGlow = 0;           // Glow intensity for selected zone
+  let particles = [];         // Game particles (sparks on dial movement)
+
+  // Zones: True is left side (pointing left, ~PI), False is right side (pointing right, ~0)
+  // The dial pointer points UP at angle 0, TRUE zone is top-left, FALSE zone is top-right
+  // TRUE: angle near -PI/4 to -3PI/4 (left half)
+  // FALSE: angle near PI/4 to 3PI/4 (right half)
+  // Simpler: TRUE = pointer facing left half, FALSE = pointer facing right half
+
+  function getSelectedZone() {
+    // Normalize angle to [0, 2PI)
+    let norm = ((dialAngle % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
+    // TRUE zone: left half of dial (PI/2 to 3PI/2, i.e., pointing left area)
+    // FALSE zone: right half (-PI/2 to PI/2, i.e., pointing right area)
+    // Pointer at 0 = pointing up
+    // We'll use: left side = TRUE, right side = FALSE
+    // Left: norm > PI (pointer pointing into left zone)
+    // Right: norm <= PI (pointer pointing into right zone)
+    // Actually, let's be more intuitive:
+    // 0 = up, PI/2 = right, PI = down, 3PI/2 = left
+    // TRUE label at left (~3PI/2 area), FALSE label at right (~PI/2 area)
+    // So: TRUE zone = norm between PI and 2*PI (left side)
+    //     FALSE zone = norm between 0 and PI (right side)
+    // But we want a dead zone at top/bottom for drama
+    const deadZone = Math.PI / 6; // 30 degrees dead zone at top and bottom
+
+    if (norm > Math.PI + deadZone && norm < 2 * Math.PI - deadZone) {
+      return 0; // TRUE (left side)
+    } else if (norm > deadZone && norm < Math.PI - deadZone) {
+      return 1; // FALSE (right side)
+    }
+    return -1; // dead zone
+  }
+
+  function initGame() {
+    dialAngle = 0;
+    targetAngle = 0;
+    dialSpeed = 0;
+    selectedZone = -1;
+    submitting = false;
+    submitTime = 0;
+    entranceTime = 0;
+    breatheTime = 0;
+    vaultShake = { x: 0, y: 0 };
+    dialGlow = 0;
+    particles = [];
+  }
+
+  function updateGame(dt) {
+    if (gameState !== 'playing') return;
+
+    entranceTime += dt;
+    breatheTime += dt;
+
+    // Smooth dial rotation toward target
+    const diff = targetAngle - dialAngle;
+    dialAngle += diff * Math.min(1, dt * 12);
+
+    // Update selected zone
+    selectedZone = getSelectedZone();
+
+    // Update glow
+    if (selectedZone >= 0) {
+      dialGlow = Math.min(1, dialGlow + dt * 3);
+    } else {
+      dialGlow = Math.max(0, dialGlow - dt * 3);
+    }
+
+    // Update particles
+    particles = particles.filter(p => {
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.vy += 200 * dt;
+      p.life -= dt;
+      p.alpha = Math.max(0, p.life / p.maxLife);
+      return p.life > 0;
+    });
+
+    // Handle submit animation
+    if (submitting) {
+      submitTime += dt;
+
+      // Shake during first 0.3s
+      if (submitTime < 0.3) {
+        const intensity = 4 * (1 - submitTime / 0.3);
+        vaultShake.x = (Math.random() - 0.5) * intensity;
+        vaultShake.y = (Math.random() - 0.5) * intensity;
+      } else {
+        vaultShake.x = 0;
+        vaultShake.y = 0;
+      }
+
+      // After animation, resolve
+      if (submitTime > 0.6) {
+        const choice = QUESTION.choices[selectedZone];
+        if (choice.is_correct) {
+          playCorrect();
+          playVaultOpen();
+        } else {
+          playWrong();
+        }
+        engine.end(choice.is_correct, choice.explanation);
+        submitting = false;
+      }
+    }
+  }
+
+  // Helper: wrap text in a box
+  function wrapText(text, maxWidth, font) {
+    ctx.font = font;
+    const words = text.split(' ');
+    const lines = [];
+    let currentLine = '';
+
+    for (const word of words) {
+      const testLine = currentLine ? currentLine + ' ' + word : word;
+      if (ctx.measureText(testLine).width > maxWidth && currentLine) {
+        lines.push(currentLine);
+        currentLine = word;
+      } else {
+        currentLine = testLine;
+      }
+    }
+    if (currentLine) lines.push(currentLine);
+    return lines;
+  }
+
+  function drawGame() {
+    // Background - warm off-white
+    ctx.fillStyle = COLORS.bgPrimary;
+    ctx.fillRect(0, 0, W, H);
+
+    // Subtle grid pattern for bank feel
+    ctx.strokeStyle = COLORS.borderSubtle;
+    ctx.lineWidth = 0.5;
+    for (let i = 0; i < W; i += 40) {
+      ctx.beginPath();
+      ctx.moveTo(i, 0);
+      ctx.lineTo(i, H);
+      ctx.stroke();
+    }
+    for (let i = 0; i < H; i += 40) {
+      ctx.beginPath();
+      ctx.moveTo(0, i);
+      ctx.lineTo(W, i);
+      ctx.stroke();
+    }
+
+    const cx = W / 2;
+    const cy = 240; // Center of vault dial
+    const vaultRadius = 160;
+
+    // Entrance animation
+    const entranceScale = Math.min(1, entranceTime / 0.5);
+    const entranceEase = 1 - Math.pow(1 - entranceScale, 3);
+
+    ctx.save();
+    ctx.translate(cx + vaultShake.x, cy + vaultShake.y);
+    ctx.scale(entranceEase, entranceEase);
+
+    // === VAULT DOOR BACKGROUND ===
+    // Outer vault ring (metallic border)
+    const outerGrad = ctx.createRadialGradient(0, 0, vaultRadius - 10, 0, 0, vaultRadius + 20);
+    outerGrad.addColorStop(0, COLORS.vaultLight);
+    outerGrad.addColorStop(0.5, COLORS.vaultDark);
+    outerGrad.addColorStop(1, COLORS.vaultDeep);
+    ctx.fillStyle = outerGrad;
+    ctx.beginPath();
+    ctx.arc(0, 0, vaultRadius + 15, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Main vault circle
+    const vaultGrad = ctx.createRadialGradient(-30, -30, 0, 0, 0, vaultRadius);
+    vaultGrad.addColorStop(0, '#6A6A64');
+    vaultGrad.addColorStop(0.6, COLORS.vaultDark);
+    vaultGrad.addColorStop(1, COLORS.vaultDeep);
+    ctx.fillStyle = vaultGrad;
+    ctx.beginPath();
+    ctx.arc(0, 0, vaultRadius, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Inner ring detail
+    ctx.strokeStyle = COLORS.vaultLight;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(0, 0, vaultRadius - 8, 0, Math.PI * 2);
+    ctx.stroke();
+
+    // Tick marks around dial
+    for (let i = 0; i < 60; i++) {
+      const angle = (i / 60) * Math.PI * 2;
+      const isMajor = i % 5 === 0;
+      const innerR = isMajor ? vaultRadius - 30 : vaultRadius - 20;
+      const outerR = vaultRadius - 10;
+
+      ctx.strokeStyle = isMajor ? COLORS.vaultShine : COLORS.vaultLight;
+      ctx.lineWidth = isMajor ? 2.5 : 1;
+      ctx.beginPath();
+      ctx.moveTo(Math.cos(angle) * innerR, Math.sin(angle) * innerR);
+      ctx.lineTo(Math.cos(angle) * outerR, Math.sin(angle) * outerR);
+      ctx.stroke();
+    }
+
+    // Numbers on major ticks
+    ctx.fillStyle = COLORS.vaultShine;
+    ctx.font = "600 14px 'Nunito Sans', sans-serif";
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    for (let i = 0; i < 12; i++) {
+      const angle = (i / 12) * Math.PI * 2 - Math.PI / 2;
+      const r = vaultRadius - 42;
+      const num = i * 5;
+      ctx.fillText(num.toString(), Math.cos(angle) * r, Math.sin(angle) * r);
+    }
+
+    // === TRUE/FALSE ZONE INDICATORS ===
+    // TRUE zone highlight (left side)
+    const trueGlowAlpha = selectedZone === 0 ? 0.3 + Math.sin(breatheTime * 3) * 0.1 : 0.08;
+    ctx.fillStyle = `rgba(107, 191, 89, ${trueGlowAlpha})`;
+    ctx.beginPath();
+    ctx.arc(0, 0, vaultRadius - 50, Math.PI + Math.PI / 6, 2 * Math.PI - Math.PI / 6);
+    ctx.lineTo(0, 0);
+    ctx.closePath();
+    ctx.fill();
+
+    // FALSE zone highlight (right side)
+    const falseGlowAlpha = selectedZone === 1 ? 0.3 + Math.sin(breatheTime * 3) * 0.1 : 0.08;
+    ctx.fillStyle = `rgba(232, 93, 74, ${falseGlowAlpha})`;
+    ctx.beginPath();
+    ctx.arc(0, 0, vaultRadius - 50, Math.PI / 6, Math.PI - Math.PI / 6);
+    ctx.lineTo(0, 0);
+    ctx.closePath();
+    ctx.fill();
+
+    // Zone labels on vault face
+    ctx.save();
+    ctx.font = "700 22px 'Belanosima', sans-serif";
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+
+    // TRUE label (left)
+    ctx.fillStyle = selectedZone === 0 ? COLORS.success : COLORS.vaultShine;
+    ctx.fillText('TRUE', -70, 0);
+
+    // FALSE label (right)
+    ctx.fillStyle = selectedZone === 1 ? COLORS.error : COLORS.vaultShine;
+    ctx.fillText('FALSE', 70, 0);
+    ctx.restore();
+
+    // Center hub
+    const hubGrad = ctx.createRadialGradient(0, 0, 0, 0, 0, 25);
+    hubGrad.addColorStop(0, COLORS.vaultLight);
+    hubGrad.addColorStop(1, COLORS.vaultDark);
+    ctx.fillStyle = hubGrad;
+    ctx.beginPath();
+    ctx.arc(0, 0, 25, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.strokeStyle = COLORS.vaultShine;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(0, 0, 25, 0, Math.PI * 2);
+    ctx.stroke();
+
+    // === DIAL POINTER ===
+    ctx.save();
+    ctx.rotate(dialAngle);
+
+    // Pointer shadow
+    ctx.fillStyle = 'rgba(0,0,0,0.3)';
+    ctx.beginPath();
+    ctx.moveTo(0, -vaultRadius + 55);
+    ctx.lineTo(-10, 12);
+    ctx.lineTo(10, 12);
+    ctx.closePath();
+    ctx.fill();
+
+    // Pointer body
+    const pointerGrad = ctx.createLinearGradient(-8, 0, 8, 0);
+    pointerGrad.addColorStop(0, COLORS.orange);
+    pointerGrad.addColorStop(0.5, COLORS.amber);
+    pointerGrad.addColorStop(1, COLORS.orange);
+    ctx.fillStyle = pointerGrad;
+    ctx.beginPath();
+    ctx.moveTo(0, -vaultRadius + 52);
+    ctx.lineTo(-8, 8);
+    ctx.lineTo(8, 8);
+    ctx.closePath();
+    ctx.fill();
+
+    // Pointer outline
+    ctx.strokeStyle = COLORS.orangeHover;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(0, -vaultRadius + 52);
+    ctx.lineTo(-8, 8);
+    ctx.lineTo(8, 8);
+    ctx.closePath();
+    ctx.stroke();
+
+    // Pointer tip glow
+    if (selectedZone >= 0) {
+      const glowColor = selectedZone === 0 ? COLORS.success : COLORS.error;
+      ctx.fillStyle = glowColor;
+      ctx.shadowColor = glowColor;
+      ctx.shadowBlur = 12;
+      ctx.beginPath();
+      ctx.arc(0, -vaultRadius + 55, 5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.shadowBlur = 0;
+    }
+
+    ctx.restore();
+
+    // Fixed marker at top (the reference point)
+    ctx.fillStyle = COLORS.orange;
+    ctx.beginPath();
+    ctx.moveTo(0, -vaultRadius - 15);
+    ctx.lineTo(-8, -vaultRadius - 3);
+    ctx.lineTo(8, -vaultRadius - 3);
+    ctx.closePath();
+    ctx.fill();
+
+    // Decorative bolts
+    const boltPositions = [
+      { angle: Math.PI / 4, r: vaultRadius + 8 },
+      { angle: 3 * Math.PI / 4, r: vaultRadius + 8 },
+      { angle: 5 * Math.PI / 4, r: vaultRadius + 8 },
+      { angle: 7 * Math.PI / 4, r: vaultRadius + 8 }
+    ];
+    boltPositions.forEach(bp => {
+      const bx = Math.cos(bp.angle) * bp.r;
+      const by = Math.sin(bp.angle) * bp.r;
+      ctx.fillStyle = COLORS.vaultMedium;
+      ctx.beginPath();
+      ctx.arc(bx, by, 6, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = COLORS.vaultLight;
+      ctx.lineWidth = 1;
+      ctx.stroke();
+      // Bolt slot
+      ctx.strokeStyle = COLORS.vaultDeep;
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(bx - 3, by);
+      ctx.lineTo(bx + 3, by);
+      ctx.stroke();
+    });
+
+    ctx.restore(); // End vault transform
+
+    // === DRAW PARTICLES ===
+    particles.forEach(p => {
+      ctx.globalAlpha = p.alpha;
+      ctx.fillStyle = p.color;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+      ctx.fill();
+    });
+    ctx.globalAlpha = 1;
+
+    // === ANSWER TEXT BOXES (below vault) ===
+    const boxY = 430;
+    const boxH = 80;
+    const boxW = 320;
+    const gap = 24;
+    const totalW = boxW * 2 + gap;
+    const startX = (W - totalW) / 2;
+
+    QUESTION.choices.forEach((choice, i) => {
+      const bx = startX + i * (boxW + gap);
+      const isSelected = selectedZone === i;
+      const label = i === 0 ? 'TRUE' : 'FALSE';
+      const labelColor = i === 0 ? COLORS.success : COLORS.error;
+
+      // Box shadow
+      ctx.fillStyle = 'rgba(0,0,0,0.06)';
+      ctx.beginPath();
+      ctx.roundRect(bx + 2, boxY + 2, boxW, boxH, 12);
+      ctx.fill();
+
+      // Box background
+      ctx.fillStyle = isSelected ? (i === 0 ? '#E8F8E5' : '#FDECEB') : COLORS.bgSurface;
+      ctx.beginPath();
+      ctx.roundRect(bx, boxY, boxW, boxH, 12);
+      ctx.fill();
+
+      // Box border
+      ctx.strokeStyle = isSelected ? labelColor : COLORS.borderSubtle;
+      ctx.lineWidth = isSelected ? 3 : 2;
+      ctx.beginPath();
+      ctx.roundRect(bx, boxY, boxW, boxH, 12);
+      ctx.stroke();
+
+      // Selection indicator pip
+      if (isSelected) {
+        ctx.fillStyle = labelColor;
+        ctx.beginPath();
+        ctx.arc(bx + boxW / 2, boxY - 6, 5, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      // Label badge
+      ctx.fillStyle = labelColor;
+      ctx.beginPath();
+      ctx.roundRect(bx + 12, boxY + 8, 56, 22, 4);
+      ctx.fill();
+      ctx.fillStyle = '#FFFFFF';
+      ctx.font = "700 12px 'Nunito Sans', sans-serif";
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(label, bx + 40, boxY + 19);
+
+      // Answer text (wrapped)
+      ctx.fillStyle = COLORS.textPrimary;
+      const answerFont = "400 16px 'Nunito', sans-serif";
+      const lines = wrapText(choice.text, boxW - 28, answerFont);
+      ctx.font = answerFont;
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'top';
+      const textStartY = boxY + 36;
+      const lineHeight = 20;
+      lines.forEach((line, li) => {
+        if (li < 3) { // Max 3 lines
+          ctx.fillText(line, bx + 14, textStartY + li * lineHeight);
+        }
+      });
+    });
+
+    // === ZONE STATUS INDICATOR ===
+    if (selectedZone >= 0 && !submitting) {
+      const pulseAlpha = 0.6 + Math.sin(breatheTime * 4) * 0.3;
+      ctx.fillStyle = selectedZone === 0 ?
+        `rgba(107, 191, 89, ${pulseAlpha})` :
+        `rgba(232, 93, 74, ${pulseAlpha})`;
+      ctx.font = "600 18px 'Nunito Sans', sans-serif";
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('SPACEBAR to crack the vault!', W / 2, 415);
+    } else if (selectedZone < 0 && !submitting) {
+      ctx.fillStyle = COLORS.textTertiary;
+      ctx.font = "500 16px 'Nunito Sans', sans-serif";
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('Align the dial to TRUE or FALSE', W / 2, 415);
+    }
+
+    // Submit animation - vault opening effect
+    if (submitting) {
+      const progress = Math.min(1, submitTime / 0.6);
+
+      // Radial burst from center of vault
+      if (submitTime > 0.3) {
+        const burstProgress = (submitTime - 0.3) / 0.3;
+        const burstRadius = burstProgress * 200;
+        const burstAlpha = (1 - burstProgress) * 0.4;
+        ctx.fillStyle = selectedZone === 0 ?
+          `rgba(107, 191, 89, ${burstAlpha})` :
+          `rgba(232, 93, 74, ${burstAlpha})`;
+        ctx.beginPath();
+        ctx.arc(cx, cy, burstRadius, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+  }
+
+  function handleInput(e) {
+    if (gameState !== 'playing') return;
+    if (submitting) return;
+
+    if (e.code === 'ArrowLeft') {
+      e.preventDefault();
+      targetAngle -= DIAL_STEP;
+      playDialTick();
+
+      // Spawn spark particles
+      const sparkAngle = dialAngle - Math.PI / 2;
+      for (let i = 0; i < 3; i++) {
+        particles.push({
+          x: W / 2 + Math.cos(sparkAngle) * 120,
+          y: 240 + Math.sin(sparkAngle) * 120,
+          vx: (Math.random() - 0.5) * 100,
+          vy: (Math.random() - 0.5) * 100 - 50,
+          size: 1.5 + Math.random() * 2,
+          color: COLORS.amber,
+          life: 0.4 + Math.random() * 0.3,
+          maxLife: 0.7,
+          alpha: 1
+        });
+      }
+    } else if (e.code === 'ArrowRight') {
+      e.preventDefault();
+      targetAngle += DIAL_STEP;
+      playDialTick();
+
+      const sparkAngle = dialAngle + Math.PI / 2;
+      for (let i = 0; i < 3; i++) {
+        particles.push({
+          x: W / 2 + Math.cos(sparkAngle) * 120,
+          y: 240 + Math.sin(sparkAngle) * 120,
+          vx: (Math.random() - 0.5) * 100,
+          vy: (Math.random() - 0.5) * 100 - 50,
+          size: 1.5 + Math.random() * 2,
+          color: COLORS.amber,
+          life: 0.4 + Math.random() * 0.3,
+          maxLife: 0.7,
+          alpha: 1
+        });
+      }
+    } else if (e.code === 'Space') {
+      e.preventDefault();
+      if (selectedZone >= 0) {
+        submitting = true;
+        submitTime = 0;
+        playClick();
+      }
+    }
+  }
+
+  // +====================================================================+
+  // |  SECTION 4: GAME LOOP - DO NOT MODIFY                                |
+  // +====================================================================+
+  let lastTime = performance.now();
+
+  function gameLoop(now) {
+    const dt = Math.min((now - lastTime) / 1000, 0.05);
+    lastTime = now;
+
+    ctx.setTransform(scale * dpr, 0, 0, scale * dpr, 0, 0);
+
+    if (gameState === 'playing') {
+      updateGame(dt);
+      drawGame();
+    } else {
+      drawGame();
+      drawEndScreen(dt);
+    }
+
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+    requestAnimationFrame(gameLoop);
+  }
+
+  document.addEventListener('keydown', (e) => {
+    if (gameState === 'ended' && (e.code === 'KeyR')) {
+      gameState = 'playing';
+      gameResult = null;
+      gameExplanation = '';
+      confettiParticles = [];
+      initGame();
+      return;
+    }
+    handleInput(e);
+  });
+
+  document.addEventListener('keyup', (e) => {
+  });
+
+  canvas.addEventListener('click', (e) => {
+    if (gameState !== 'ended') return;
+
+    const { x, y } = screenToLogical(e.clientX, e.clientY);
+
+    if (gameResult) {
+      if (pointInRect(x, y, restartButton)) {
+        gameState = 'playing';
+        gameResult = null;
+        gameExplanation = '';
+        confettiParticles = [];
+        initGame();
+        return;
+      }
+      if (pointInRect(x, y, nextButton)) {
+        if (window.parent && window.parent !== window) {
+          window.parent.postMessage({ type: 'quiz-next' }, '*');
+        }
+        return;
+      }
+    } else {
+      const centeredRestart = { x: W / 2 - 75, y: H / 2 + 60, w: 150, h: 48 };
+      if (pointInRect(x, y, centeredRestart)) {
+        gameState = 'playing';
+        gameResult = null;
+        gameExplanation = '';
+        confettiParticles = [];
+        initGame();
+        return;
+      }
+    }
+  });
+
+  window.addEventListener('resize', resizeCanvas);
+
+  resizeCanvas();
+  initGame();
+  requestAnimationFrame(gameLoop);
+  </script>
+</body>
+</html>

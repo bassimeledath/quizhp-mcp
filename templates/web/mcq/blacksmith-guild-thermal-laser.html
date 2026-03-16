@@ -1,0 +1,1031 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Blacksmith Guild Thermal Laser</title>
+  <link href="https://fonts.googleapis.com/css2?family=Belanosima:wght@400;600;700&family=Nunito+Sans:wght@400;500;600;700&family=Nunito:wght@400;500;600&display=swap" rel="stylesheet">
+  <!--
+  ╔══════════════════════════════════════════════════════════════════════════════╗
+  ║  GAME FACTORY TEMPLATE                                                        ║
+  ║  This template enforces critical invariants. Follow the section markers.      ║
+  ╚══════════════════════════════════════════════════════════════════════════════╝
+  -->
+  <style>
+    /* ═══════════════════════════════════════════════════════════════════════════
+       BASE STYLES - Can be extended, not removed
+       ═══════════════════════════════════════════════════════════════════════════ */
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+    }
+    body {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      background: #1a1a2e;
+      font-family: system-ui, -apple-system, sans-serif;
+    }
+    #gameCanvas {
+      background: #16213e;
+      border-radius: 8px;
+      display: block;
+    }
+  </style>
+</head>
+<body>
+  <!-- ═══════════════════════════════════════════════════════════════════════════
+       CANVAS - Sized dynamically to fill available space
+       ═══════════════════════════════════════════════════════════════════════════ -->
+  <canvas id="gameCanvas"></canvas>
+
+  <script>
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 1: QUESTION PLACEHOLDER - DO NOT MODIFY FORMAT                    ║
+  // ║  Platform replaces this at runtime. Use these exact 60-char answers.       ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  const QUESTION = {
+    type: "mcq",
+    prompt: "Sample question text",
+    choices: [
+      { text: "This is sample answer A which is long enough to test text overflow", is_correct: true, explanation: "Why A is correct" },
+      { text: "This is sample answer B which is long enough to test text overflow", is_correct: false, explanation: "Why B is wrong" },
+      { text: "This is sample answer C which is long enough to test text overflow", is_correct: false, explanation: "Why C is wrong" },
+      { text: "This is sample answer D which is long enough to test text overflow", is_correct: false, explanation: "Why D is wrong" }
+    ],
+    isLastQuestion: false
+  };
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 2: ENGINE CORE - DO NOT MODIFY                                    ║
+  // ║  Standard engine interface and end screen. This is sacred.                 ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  const canvas = document.getElementById('gameCanvas');
+  const ctx = canvas.getContext('2d');
+
+  // Logical dimensions (game code works in this coordinate space)
+  const W = 720, H = 540;
+
+  // Scaling state (computed on resize)
+  let scale = 1;
+  let dpr = 1;
+
+  let gameState = 'playing'; // 'playing' | 'ended'
+  let gameResult = null;     // true (correct) | false (wrong)
+  let gameExplanation = '';
+  let endScreenTime = 0;
+  let confettiParticles = [];
+
+  // End screen button bounds (logical coordinates)
+  const restartButton = { x: W / 2 - 170, y: H / 2 + 60, w: 150, h: 48 };
+  const nextButton = { x: W / 2 + 20, y: H / 2 + 60, w: 150, h: 48 };
+
+  /** Check if point is inside rectangle */
+  function pointInRect(px, py, rect) {
+    return px >= rect.x && px <= rect.x + rect.w &&
+           py >= rect.y && py <= rect.y + rect.h;
+  }
+
+  /** Draw a styled button */
+  function drawButton(rect, label, color, pulse) {
+    const p = pulse ? 1 + Math.sin(endScreenTime * 4) * 0.03 : 1;
+    ctx.save();
+    ctx.translate(rect.x + rect.w / 2, rect.y + rect.h / 2);
+    ctx.scale(p, p);
+    ctx.translate(-(rect.x + rect.w / 2), -(rect.y + rect.h / 2));
+
+    // Button background
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.roundRect(rect.x, rect.y, rect.w, rect.h, 12);
+    ctx.fill();
+
+    // Button text
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = 'bold 18px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, rect.x + rect.w / 2, rect.y + rect.h / 2);
+
+    ctx.restore();
+  }
+
+  /**
+   * Resize canvas to fill available space with proper DPR scaling.
+   * Maintains logical coordinate system (720×540).
+   */
+  function resizeCanvas() {
+    dpr = window.devicePixelRatio || 1;
+
+    // Get available space
+    const availW = window.innerWidth;
+    const availH = window.innerHeight;
+
+    // Calculate scale to fit logical space (720×540) in available space
+    const scaleX = availW / W;
+    const scaleY = availH / H;
+    scale = Math.min(scaleX, scaleY);
+
+    // Physical canvas buffer (DPR-scaled for crisp rendering)
+    canvas.width = W * scale * dpr;
+    canvas.height = H * scale * dpr;
+
+    // CSS display size
+    canvas.style.width = (W * scale) + 'px';
+    canvas.style.height = (H * scale) + 'px';
+  }
+
+  /**
+   * Convert screen coordinates to logical coordinates.
+   * Use this for mouse/click events to get positions in 720×540 space.
+   */
+  function screenToLogical(screenX, screenY) {
+    const rect = canvas.getBoundingClientRect();
+    return {
+      x: (screenX - rect.left) * (W / rect.width),
+      y: (screenY - rect.top) * (H / rect.height)
+    };
+  }
+
+  const engine = {
+    /** Call this to end the game. DO NOT draw your own end screen. */
+    end(isCorrect, explanation) {
+      if (gameState === 'ended') return;
+      gameState = 'ended';
+      gameResult = isCorrect;
+      gameExplanation = explanation || '';
+      endScreenTime = 0;
+
+      // Spawn confetti for correct answers
+      if (isCorrect) {
+        for (let i = 0; i < 50; i++) {
+          confettiParticles.push({
+            x: W / 2,
+            y: H / 2,
+            vx: (Math.random() - 0.5) * 600,
+            vy: -Math.random() * 400 - 100,
+            size: 4 + Math.random() * 6,
+            color: ['#FFD700', '#FF6B6B', '#4ECDC4', '#95E1D3', '#F38181'][Math.floor(Math.random() * 5)],
+            rotation: Math.random() * Math.PI * 2,
+            rotationSpeed: (Math.random() - 0.5) * 10
+          });
+        }
+      }
+
+      // Notify parent frame
+      if (window.parent && window.parent !== window) {
+        window.parent.postMessage({
+          type: 'quiz-end',
+          isCorrect: isCorrect,
+          explanation: explanation || ''
+        }, '*');
+      }
+    }
+  };
+
+  /** STANDARD END SCREEN - DO NOT MODIFY */
+  function drawEndScreen(dt) {
+    endScreenTime += dt;
+
+    // Update confetti
+    confettiParticles = confettiParticles.filter(p => {
+      p.vy += 800 * dt; // gravity
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.rotation += p.rotationSpeed * dt;
+      p.vx *= 0.99;
+      return p.y < H + 50;
+    });
+
+    // Dark overlay
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
+    ctx.fillRect(0, 0, W, H);
+
+    // Draw confetti
+    confettiParticles.forEach(p => {
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rotation);
+      ctx.fillStyle = p.color;
+      ctx.fillRect(-p.size / 2, -p.size / 4, p.size, p.size / 2);
+      ctx.restore();
+    });
+
+    // Result emoji
+    ctx.font = '72px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(gameResult ? '🎉' : '😢', W / 2, H / 2 - 50);
+
+    // Result text
+    ctx.fillStyle = gameResult ? '#4ADE80' : '#F87171';
+    ctx.font = 'bold 36px system-ui, sans-serif';
+    ctx.fillText(gameResult ? 'Correct!' : 'Wrong!', W / 2, H / 2 + 20);
+
+    // Buttons
+    if (gameResult) {
+      // Correct: show both Restart and Next/Finish
+      drawButton(restartButton, 'Restart', '#E87A3E', true);
+      const nextLabel = QUESTION.isLastQuestion ? 'Finish' : 'Next';
+      drawButton(nextButton, nextLabel, '#4ECDC4', true);
+    } else {
+      // Wrong: show only centered Restart button
+      const centeredRestart = { x: W / 2 - 75, y: H / 2 + 60, w: 150, h: 48 };
+      drawButton(centeredRestart, 'Restart', '#E87A3E', true);
+    }
+  }
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 3: YOUR GAME CODE - IMPLEMENT THESE FUNCTIONS                     ║
+  // ║  This is where your game logic goes. See requirements below.               ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+
+  // === COLORS ===
+  const COLORS = {
+    bgPrimary: '#FAFAF7',
+    bgSurface: '#FFFFFF',
+    textPrimary: '#2B2B28',
+    textSecondary: '#5A5A54',
+    orange: '#E87A3E',
+    orangeHover: '#D66B31',
+    amber: '#F5A742',
+    cyan: '#4ECDC4',
+    success: '#6BBF59',
+    error: '#E85D4A',
+    borderSubtle: '#E6E6E0',
+    borderStrong: '#D4D4CC'
+  };
+
+  // === SOUND ENGINE ===
+  const AudioCtx = window.AudioContext || window.webkitAudioContext;
+  let audioCtx = null;
+  function getAudioCtx() {
+    if (!audioCtx) audioCtx = new AudioCtx();
+    return audioCtx;
+  }
+
+  function playSound(type) {
+    try {
+      const ctx = getAudioCtx();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+
+      if (type === 'fire') {
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(200, ctx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(800, ctx.currentTime + 0.15);
+        gain.gain.setValueAtTime(0.15, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.25);
+        osc.start(ctx.currentTime);
+        osc.stop(ctx.currentTime + 0.25);
+      } else if (type === 'correct') {
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(523, ctx.currentTime);
+        osc.frequency.setValueAtTime(659, ctx.currentTime + 0.1);
+        osc.frequency.setValueAtTime(784, ctx.currentTime + 0.2);
+        gain.gain.setValueAtTime(0.2, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.4);
+        osc.start(ctx.currentTime);
+        osc.stop(ctx.currentTime + 0.4);
+      } else if (type === 'wrong') {
+        osc.type = 'square';
+        osc.frequency.setValueAtTime(200, ctx.currentTime);
+        osc.frequency.setValueAtTime(150, ctx.currentTime + 0.15);
+        gain.gain.setValueAtTime(0.15, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.35);
+        osc.start(ctx.currentTime);
+        osc.stop(ctx.currentTime + 0.35);
+      } else if (type === 'aim') {
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(440, ctx.currentTime);
+        gain.gain.setValueAtTime(0.04, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.05);
+        osc.start(ctx.currentTime);
+        osc.stop(ctx.currentTime + 0.05);
+      }
+    } catch(e) {}
+  }
+
+  // === GAME STATE ===
+  let beam = { x: W / 2, y: 140, targetIdx: 0, speed: 200 };
+  let shields = [];
+  let sparks = [];
+  let ambientSparks = [];
+  let laserFired = false;
+  let laserProgress = 0;
+  let laserTarget = null;
+  let resultTimer = 0;
+  let resultShowing = false;
+  let selectedIdx = -1;
+  let shieldAnimations = [];
+  let crackingShield = -1;
+  let crackProgress = 0;
+  let metalPlate = { y: 0, vy: 0, falling: false, crackAlpha: 0 };
+  let gameTime = 0;
+  let entranceProgress = 0;
+  const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  // Rune symbols for decoration
+  const RUNE_SYMBOLS = ['ᚠ', 'ᚢ', 'ᚦ', 'ᚨ', 'ᚱ', 'ᚲ', 'ᚷ', 'ᚹ'];
+
+  function initGame() {
+    // Shield positions: 4 shields on stone wall, vertical stack layout
+    const shieldW = 480;
+    const shieldH = 56;
+    const gap = 12;
+    const startX = (W - shieldW) / 2;
+    const totalH = shieldH * 4 + gap * 3;
+    const startY = H - totalH - 30;
+
+    shields = QUESTION.choices.map((choice, i) => ({
+      x: startX,
+      y: startY + i * (shieldH + gap),
+      w: shieldW,
+      h: shieldH,
+      choice: choice,
+      idx: i,
+      hovered: false,
+      scale: 1,
+      alpha: prefersReducedMotion ? 1 : 0,
+      offsetX: 0,
+      glowAlpha: 0
+    }));
+
+    beam = { x: W / 2, y: 130, targetIdx: 0, speed: 200 };
+    sparks = [];
+    ambientSparks = [];
+    laserFired = false;
+    laserProgress = 0;
+    laserTarget = null;
+    resultTimer = 0;
+    resultShowing = false;
+    selectedIdx = -1;
+    shieldAnimations = [];
+    crackingShield = -1;
+    crackProgress = 0;
+    metalPlate = { y: 0, vy: 0, falling: false, crackAlpha: 0 };
+    gameTime = 0;
+    entranceProgress = 0;
+
+    // Entrance animation stagger
+    if (!prefersReducedMotion) {
+      shields.forEach((s, i) => {
+        s.entranceDelay = i * 0.08;
+      });
+    }
+  }
+
+  // Word wrap helper for answer text
+  function wrapText(text, maxWidth, font) {
+    ctx.font = font;
+    const words = text.split(' ');
+    const lines = [];
+    let currentLine = '';
+
+    for (const word of words) {
+      const testLine = currentLine ? currentLine + ' ' + word : word;
+      if (ctx.measureText(testLine).width > maxWidth) {
+        if (currentLine) lines.push(currentLine);
+        currentLine = word;
+      } else {
+        currentLine = testLine;
+      }
+    }
+    if (currentLine) lines.push(currentLine);
+    return lines;
+  }
+
+  function updateGame(dt) {
+    if (gameState !== 'playing') return;
+
+    gameTime += dt;
+    entranceProgress = Math.min(entranceProgress + dt, 2);
+
+    // Update entrance animations
+    if (!prefersReducedMotion) {
+      shields.forEach(s => {
+        const t = Math.max(0, Math.min(1, (entranceProgress - s.entranceDelay) / 0.35));
+        const spring = 1 + Math.sin(t * Math.PI * 2) * 0.15 * (1 - t);
+        s.scale = t * spring;
+        s.alpha = t;
+        if (t >= 1) { s.scale = 1; s.alpha = 1; }
+      });
+    }
+
+    // Ambient forge sparks
+    if (Math.random() < 0.3) {
+      ambientSparks.push({
+        x: 100 + Math.random() * 520,
+        y: 40 + Math.random() * 80,
+        vx: (Math.random() - 0.5) * 60,
+        vy: -Math.random() * 40 - 20,
+        life: 0.5 + Math.random() * 0.8,
+        maxLife: 0.5 + Math.random() * 0.8,
+        size: 1 + Math.random() * 2.5,
+        color: Math.random() > 0.5 ? COLORS.orange : COLORS.amber
+      });
+    }
+
+    // Update ambient sparks
+    ambientSparks.forEach(s => {
+      s.x += s.vx * dt;
+      s.y += s.vy * dt;
+      s.vy += 30 * dt;
+      s.life -= dt;
+    });
+    ambientSparks = ambientSparks.filter(s => s.life > 0);
+
+    // Handle laser firing
+    if (laserFired && !resultShowing) {
+      laserProgress += dt * 4;
+      if (laserProgress >= 1) {
+        laserProgress = 1;
+        resultShowing = true;
+        const choice = shields[selectedIdx].choice;
+
+        // Spawn impact sparks
+        const targetShield = shields[selectedIdx];
+        for (let i = 0; i < 20; i++) {
+          sparks.push({
+            x: targetShield.x + targetShield.w / 2,
+            y: targetShield.y,
+            vx: (Math.random() - 0.5) * 300,
+            vy: -Math.random() * 200 - 50,
+            life: 0.4 + Math.random() * 0.4,
+            maxLife: 0.4 + Math.random() * 0.4,
+            size: 2 + Math.random() * 3,
+            color: choice.is_correct ? COLORS.success : COLORS.error
+          });
+        }
+
+        if (choice.is_correct) {
+          playSound('correct');
+          shields[selectedIdx].glowAlpha = 1;
+        } else {
+          playSound('wrong');
+          crackingShield = selectedIdx;
+          crackProgress = 0;
+          metalPlate.falling = true;
+          metalPlate.y = 0;
+          metalPlate.vy = 0;
+          metalPlate.crackAlpha = 0;
+        }
+
+        resultTimer = 0;
+      }
+    }
+
+    // Result display timer
+    if (resultShowing) {
+      resultTimer += dt;
+      const choice = shields[selectedIdx].choice;
+
+      // Crack and fall animation for wrong answer
+      if (!choice.is_correct && crackingShield >= 0) {
+        crackProgress = Math.min(crackProgress + dt * 3, 1);
+        metalPlate.crackAlpha = Math.min(metalPlate.crackAlpha + dt * 4, 1);
+        if (crackProgress > 0.5) {
+          metalPlate.vy += 600 * dt;
+          metalPlate.y += metalPlate.vy * dt;
+        }
+      }
+
+      // Correct answer celebration pulse
+      if (choice.is_correct) {
+        shields[selectedIdx].glowAlpha = 0.5 + Math.sin(resultTimer * 8) * 0.5;
+      }
+
+      // Wrong answer shake
+      if (!choice.is_correct && resultTimer < 0.4) {
+        const decay = 1 - resultTimer / 0.4;
+        shields[selectedIdx].offsetX = Math.sin(resultTimer * Math.PI * 14) * 8 * decay;
+      } else if (!choice.is_correct) {
+        shields[selectedIdx].offsetX = 0;
+      }
+
+      if (resultTimer > 1.2) {
+        engine.end(choice.is_correct, choice.explanation);
+      }
+    }
+
+    // Update impact sparks
+    sparks.forEach(s => {
+      s.x += s.vx * dt;
+      s.y += s.vy * dt;
+      s.vy += 400 * dt;
+      s.life -= dt;
+    });
+    sparks = sparks.filter(s => s.life > 0);
+
+    // Update shield hover state based on beam position
+    if (!laserFired) {
+      shields.forEach((s, i) => {
+        s.hovered = (i === beam.targetIdx);
+      });
+    }
+  }
+
+  function drawGame() {
+    // === BACKGROUND: Soot-filled forge ===
+    // Dark forge background gradient
+    const bgGrad = ctx.createLinearGradient(0, 0, 0, H);
+    bgGrad.addColorStop(0, '#1C1410');
+    bgGrad.addColorStop(0.3, '#2A1E16');
+    bgGrad.addColorStop(0.7, '#1E1612');
+    bgGrad.addColorStop(1, '#14100E');
+    ctx.fillStyle = bgGrad;
+    ctx.fillRect(0, 0, W, H);
+
+    // Stone wall texture (subtle rectangles)
+    ctx.globalAlpha = 0.08;
+    for (let row = 0; row < 18; row++) {
+      for (let col = 0; col < 12; col++) {
+        const bx = col * 65 + (row % 2) * 32;
+        const by = row * 32;
+        ctx.fillStyle = '#8B7355';
+        ctx.fillRect(bx + 1, by + 1, 62, 29);
+        ctx.strokeStyle = '#3D2E1F';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(bx, by, 64, 31);
+      }
+    }
+    ctx.globalAlpha = 1;
+
+    // === ANVIL (center bottom area) ===
+    const anvilX = W / 2;
+    const anvilY = 185;
+
+    // Anvil body
+    ctx.fillStyle = '#3A3530';
+    ctx.beginPath();
+    ctx.moveTo(anvilX - 60, anvilY);
+    ctx.lineTo(anvilX + 60, anvilY);
+    ctx.lineTo(anvilX + 45, anvilY + 20);
+    ctx.lineTo(anvilX + 30, anvilY + 20);
+    ctx.lineTo(anvilX + 30, anvilY + 45);
+    ctx.lineTo(anvilX - 30, anvilY + 45);
+    ctx.lineTo(anvilX - 30, anvilY + 20);
+    ctx.lineTo(anvilX - 45, anvilY + 20);
+    ctx.closePath();
+    ctx.fill();
+
+    // Anvil highlight
+    ctx.fillStyle = '#504840';
+    ctx.beginPath();
+    ctx.moveTo(anvilX - 55, anvilY + 2);
+    ctx.lineTo(anvilX + 55, anvilY + 2);
+    ctx.lineTo(anvilX + 50, anvilY + 8);
+    ctx.lineTo(anvilX - 50, anvilY + 8);
+    ctx.closePath();
+    ctx.fill();
+
+    // === GLOWING METAL PLATE with runes ===
+    const plateX = anvilX - 50;
+    const plateY = anvilY - 25;
+    const plateW = 100;
+    const plateH = 20;
+
+    if (!metalPlate.falling || crackProgress < 0.5) {
+      // Glow underneath
+      ctx.save();
+      ctx.shadowColor = COLORS.orange;
+      ctx.shadowBlur = 20 + Math.sin(gameTime * 3) * 5;
+      ctx.fillStyle = '#FF6030';
+      ctx.fillRect(plateX, plateY, plateW, plateH);
+      ctx.restore();
+
+      // Plate surface
+      const plateGrad = ctx.createLinearGradient(plateX, plateY, plateX, plateY + plateH);
+      plateGrad.addColorStop(0, '#FF8844');
+      plateGrad.addColorStop(0.5, '#E87A3E');
+      plateGrad.addColorStop(1, '#CC5522');
+      ctx.fillStyle = plateGrad;
+      ctx.fillRect(plateX, plateY, plateW, plateH);
+
+      // Rune inscriptions on plate
+      ctx.font = "14px 'Nunito Sans', sans-serif";
+      ctx.fillStyle = '#FFD4A0';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      for (let i = 0; i < 4; i++) {
+        ctx.fillText(RUNE_SYMBOLS[i], plateX + 15 + i * 22, plateY + plateH / 2);
+      }
+
+      // Crack lines on plate if wrong answer
+      if (metalPlate.crackAlpha > 0) {
+        ctx.strokeStyle = `rgba(20, 10, 5, ${metalPlate.crackAlpha})`;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(plateX + plateW * 0.3, plateY);
+        ctx.lineTo(plateX + plateW * 0.5, plateY + plateH * 0.6);
+        ctx.lineTo(plateX + plateW * 0.7, plateY + plateH);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(plateX + plateW * 0.6, plateY);
+        ctx.lineTo(plateX + plateW * 0.4, plateY + plateH);
+        ctx.stroke();
+      }
+    } else {
+      // Falling plate pieces
+      ctx.save();
+      ctx.translate(anvilX, anvilY - 15 + metalPlate.y);
+      ctx.rotate(metalPlate.y * 0.01);
+      ctx.globalAlpha = Math.max(0, 1 - metalPlate.y / 200);
+      const plateGrad = ctx.createLinearGradient(-50, -10, -50, 10);
+      plateGrad.addColorStop(0, '#CC5522');
+      plateGrad.addColorStop(1, '#993311');
+      ctx.fillStyle = plateGrad;
+      ctx.fillRect(-50, -10, 45, 20);
+      ctx.fillRect(10, -10, 40, 20);
+      ctx.restore();
+    }
+
+    // === HEAT BEAM SOURCE (top center) ===
+    const beamSourceX = beam.x;
+    const beamSourceY = 35;
+
+    // Beam emitter glow
+    ctx.save();
+    const emitterGlow = ctx.createRadialGradient(beamSourceX, beamSourceY, 0, beamSourceX, beamSourceY, 35);
+    emitterGlow.addColorStop(0, 'rgba(232, 122, 62, 0.6)');
+    emitterGlow.addColorStop(0.5, 'rgba(232, 122, 62, 0.2)');
+    emitterGlow.addColorStop(1, 'rgba(232, 122, 62, 0)');
+    ctx.fillStyle = emitterGlow;
+    ctx.fillRect(beamSourceX - 40, beamSourceY - 40, 80, 80);
+    ctx.restore();
+
+    // Beam emitter device
+    ctx.fillStyle = '#504540';
+    ctx.beginPath();
+    ctx.roundRect(beamSourceX - 18, beamSourceY - 12, 36, 24, 4);
+    ctx.fill();
+
+    // Emitter lens
+    const lensGrad = ctx.createRadialGradient(beamSourceX, beamSourceY, 0, beamSourceX, beamSourceY, 8);
+    lensGrad.addColorStop(0, '#FFAA55');
+    lensGrad.addColorStop(0.7, COLORS.orange);
+    lensGrad.addColorStop(1, '#CC5522');
+    ctx.fillStyle = lensGrad;
+    ctx.beginPath();
+    ctx.arc(beamSourceX, beamSourceY, 8, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Pulsing inner core
+    const coreSize = 3 + Math.sin(gameTime * 6) * 1;
+    ctx.fillStyle = '#FFE0B0';
+    ctx.beginPath();
+    ctx.arc(beamSourceX, beamSourceY, coreSize, 0, Math.PI * 2);
+    ctx.fill();
+
+    // === AIM LINE (dotted line from emitter to targeted shield) ===
+    if (!laserFired && shields[beam.targetIdx]) {
+      const target = shields[beam.targetIdx];
+      const targetCenterX = target.x + target.w / 2;
+      const targetY = target.y;
+
+      ctx.setLineDash([6, 8]);
+      ctx.strokeStyle = `rgba(232, 122, 62, ${0.3 + Math.sin(gameTime * 4) * 0.15})`;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(beamSourceX, beamSourceY + 12);
+      ctx.lineTo(targetCenterX, targetY);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      // Small crosshair at target
+      const chSize = 8;
+      ctx.strokeStyle = `rgba(232, 122, 62, ${0.6 + Math.sin(gameTime * 5) * 0.3})`;
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(targetCenterX - chSize, targetY);
+      ctx.lineTo(targetCenterX + chSize, targetY);
+      ctx.moveTo(targetCenterX, targetY - chSize);
+      ctx.lineTo(targetCenterX, targetY + chSize);
+      ctx.stroke();
+    }
+
+    // === LASER BEAM (when fired) ===
+    if (laserFired && shields[selectedIdx]) {
+      const target = shields[selectedIdx];
+      const startX = beamSourceX;
+      const startY = beamSourceY + 12;
+      const endX = target.x + target.w / 2;
+      const endY = target.y + target.h / 2;
+
+      const currentX = startX + (endX - startX) * laserProgress;
+      const currentY = startY + (endY - startY) * laserProgress;
+
+      // Outer beam glow
+      ctx.save();
+      ctx.shadowColor = COLORS.orange;
+      ctx.shadowBlur = 15;
+      ctx.strokeStyle = 'rgba(255, 170, 85, 0.5)';
+      ctx.lineWidth = 8;
+      ctx.beginPath();
+      ctx.moveTo(startX, startY);
+      ctx.lineTo(currentX, currentY);
+      ctx.stroke();
+      ctx.restore();
+
+      // Inner beam
+      ctx.strokeStyle = '#FFCC88';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(startX, startY);
+      ctx.lineTo(currentX, currentY);
+      ctx.stroke();
+
+      // Core beam
+      ctx.strokeStyle = '#FFFFFF';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(startX, startY);
+      ctx.lineTo(currentX, currentY);
+      ctx.stroke();
+
+      // Beam tip sparkle
+      ctx.fillStyle = '#FFFFFF';
+      ctx.beginPath();
+      ctx.arc(currentX, currentY, 4, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // === SHIELD ANSWER BUTTONS ===
+    shields.forEach((s, i) => {
+      if (s.alpha <= 0) return;
+
+      ctx.save();
+      ctx.globalAlpha = s.alpha;
+      ctx.translate(s.x + s.w / 2 + s.offsetX, s.y + s.h / 2);
+      ctx.scale(s.scale, s.scale);
+      ctx.translate(-(s.x + s.w / 2), -(s.y + s.h / 2));
+
+      // Shield shape label letter
+      const labels = ['A', 'B', 'C', 'D'];
+      const isHovered = s.hovered && !laserFired;
+      const isSelected = selectedIdx === i;
+
+      // Determine colors
+      let bgColor = '#2A2420';
+      let borderColor = '#504540';
+      let textColor = '#F5F0E8';
+
+      if (isSelected && resultShowing) {
+        if (s.choice.is_correct) {
+          bgColor = '#1A3018';
+          borderColor = COLORS.success;
+        } else {
+          bgColor = '#3A1815';
+          borderColor = COLORS.error;
+        }
+      } else if (isHovered) {
+        bgColor = '#3A3025';
+        borderColor = COLORS.cyan;
+      }
+
+      // Shield background
+      ctx.fillStyle = bgColor;
+      ctx.beginPath();
+      ctx.roundRect(s.x, s.y, s.w, s.h, 8);
+      ctx.fill();
+
+      // Shield border
+      ctx.strokeStyle = borderColor;
+      ctx.lineWidth = isHovered || isSelected ? 2.5 : 1.5;
+      ctx.beginPath();
+      ctx.roundRect(s.x, s.y, s.w, s.h, 8);
+      ctx.stroke();
+
+      // Correct answer glow
+      if (isSelected && resultShowing && s.choice.is_correct && s.glowAlpha > 0) {
+        ctx.save();
+        ctx.shadowColor = COLORS.success;
+        ctx.shadowBlur = 12 * s.glowAlpha;
+        ctx.strokeStyle = `rgba(107, 191, 89, ${s.glowAlpha * 0.6})`;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.roundRect(s.x, s.y, s.w, s.h, 8);
+        ctx.stroke();
+        ctx.restore();
+      }
+
+      // Shield emblem (small shield icon on left)
+      const emblemX = s.x + 24;
+      const emblemY = s.y + s.h / 2;
+
+      // Mini shield shape
+      ctx.fillStyle = isHovered ? COLORS.cyan : (isSelected && resultShowing ? (s.choice.is_correct ? COLORS.success : COLORS.error) : COLORS.orange);
+      ctx.beginPath();
+      ctx.moveTo(emblemX, emblemY - 12);
+      ctx.lineTo(emblemX + 12, emblemY - 8);
+      ctx.lineTo(emblemX + 12, emblemY + 4);
+      ctx.quadraticCurveTo(emblemX, emblemY + 14, emblemX, emblemY + 14);
+      ctx.quadraticCurveTo(emblemX, emblemY + 14, emblemX - 12, emblemY + 4);
+      ctx.lineTo(emblemX - 12, emblemY - 8);
+      ctx.closePath();
+      ctx.fill();
+
+      // Label letter on emblem
+      ctx.fillStyle = '#FFFFFF';
+      ctx.font = "bold 14px 'Nunito Sans', sans-serif";
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(labels[i], emblemX, emblemY);
+
+      // Answer text with word wrap
+      const textX = s.x + 50;
+      const maxTextW = s.w - 65;
+      const answerFont = "400 16px 'Nunito', sans-serif";
+      const lines = wrapText(s.choice.text, maxTextW, answerFont);
+      ctx.font = answerFont;
+      ctx.fillStyle = textColor;
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
+
+      if (lines.length === 1) {
+        ctx.fillText(lines[0], textX, s.y + s.h / 2);
+      } else {
+        const lineH = 18;
+        const totalTextH = lines.length * lineH;
+        const textStartY = s.y + (s.h - totalTextH) / 2 + lineH / 2;
+        lines.forEach((line, li) => {
+          ctx.fillText(line, textX, textStartY + li * lineH);
+        });
+      }
+
+      ctx.restore();
+    });
+
+    // === AMBIENT SPARKS ===
+    ambientSparks.forEach(s => {
+      const alpha = s.life / s.maxLife;
+      ctx.globalAlpha = alpha;
+      ctx.fillStyle = s.color;
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, s.size, 0, Math.PI * 2);
+      ctx.fill();
+    });
+    ctx.globalAlpha = 1;
+
+    // === IMPACT SPARKS ===
+    sparks.forEach(s => {
+      const alpha = s.life / s.maxLife;
+      ctx.globalAlpha = alpha;
+      ctx.fillStyle = s.color;
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, s.size, 0, Math.PI * 2);
+      ctx.fill();
+    });
+    ctx.globalAlpha = 1;
+
+    // === SOOT/VIGNETTE OVERLAY ===
+    const vigGrad = ctx.createRadialGradient(W / 2, H / 2, 150, W / 2, H / 2, 420);
+    vigGrad.addColorStop(0, 'rgba(0, 0, 0, 0)');
+    vigGrad.addColorStop(1, 'rgba(0, 0, 0, 0.4)');
+    ctx.fillStyle = vigGrad;
+    ctx.fillRect(0, 0, W, H);
+
+    // Selected shield indicator arrow
+    if (!laserFired && shields[beam.targetIdx]) {
+      const target = shields[beam.targetIdx];
+      const arrowX = target.x - 15;
+      const arrowY = target.y + target.h / 2;
+      const bob = Math.sin(gameTime * 5) * 3;
+
+      ctx.fillStyle = COLORS.orange;
+      ctx.beginPath();
+      ctx.moveTo(arrowX + bob, arrowY);
+      ctx.lineTo(arrowX - 8 + bob, arrowY - 6);
+      ctx.lineTo(arrowX - 8 + bob, arrowY + 6);
+      ctx.closePath();
+      ctx.fill();
+    }
+  }
+
+  function handleInput(e) {
+    if (gameState !== 'playing') return;
+    if (laserFired) return;
+
+    const key = e.code;
+
+    // Navigation: Arrow keys or WASD
+    if (key === 'ArrowUp' || key === 'KeyW') {
+      e.preventDefault();
+      beam.targetIdx = Math.max(0, beam.targetIdx - 1);
+      playSound('aim');
+    } else if (key === 'ArrowDown' || key === 'KeyS') {
+      e.preventDefault();
+      beam.targetIdx = Math.min(shields.length - 1, beam.targetIdx + 1);
+      playSound('aim');
+    }
+
+    // Fire: Spacebar or Enter
+    if (key === 'Space' || key === 'Enter') {
+      e.preventDefault();
+      selectedIdx = beam.targetIdx;
+      laserFired = true;
+      laserProgress = 0;
+      playSound('fire');
+
+      // Move beam emitter towards target
+      const target = shields[selectedIdx];
+      beam.x = target.x + target.w / 2;
+    }
+  }
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 4: GAME LOOP - DO NOT MODIFY                                      ║
+  // ║  Standard loop with responsive scaling and DPR support.                    ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  let lastTime = performance.now();
+
+  function gameLoop(now) {
+    const dt = Math.min((now - lastTime) / 1000, 0.05); // Cap at 50ms
+    lastTime = now;
+
+    // Apply transform for logical coordinate system
+    ctx.setTransform(scale * dpr, 0, 0, scale * dpr, 0, 0);
+
+    if (gameState === 'playing') {
+      updateGame(dt);
+      drawGame();
+    } else {
+      drawGame(); // Draw game state behind overlay
+      drawEndScreen(dt);
+    }
+
+    // Reset transform for next frame
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+    requestAnimationFrame(gameLoop);
+  }
+
+  // Input handlers
+  document.addEventListener('keydown', (e) => {
+    if (gameState === 'ended' && (e.code === 'KeyR')) {
+      // Restart game
+      gameState = 'playing';
+      gameResult = null;
+      gameExplanation = '';
+      confettiParticles = [];
+      initGame();
+      return;
+    }
+    handleInput(e);
+  });
+
+  document.addEventListener('keyup', (e) => {
+    // Optional: handle key release in your handleInput
+  });
+
+  // Canvas click handler for end screen buttons
+  canvas.addEventListener('click', (e) => {
+    if (gameState !== 'ended') return;
+
+    const { x, y } = screenToLogical(e.clientX, e.clientY);
+
+    if (gameResult) {
+      // Correct answer: check both buttons
+      if (pointInRect(x, y, restartButton)) {
+        gameState = 'playing';
+        gameResult = null;
+        gameExplanation = '';
+        confettiParticles = [];
+        initGame();
+        return;
+      }
+      if (pointInRect(x, y, nextButton)) {
+        // Notify parent to go to next question
+        if (window.parent && window.parent !== window) {
+          window.parent.postMessage({ type: 'quiz-next' }, '*');
+        }
+        return;
+      }
+    } else {
+      // Wrong answer: check centered restart button
+      const centeredRestart = { x: W / 2 - 75, y: H / 2 + 60, w: 150, h: 48 };
+      if (pointInRect(x, y, centeredRestart)) {
+        gameState = 'playing';
+        gameResult = null;
+        gameExplanation = '';
+        confettiParticles = [];
+        initGame();
+        return;
+      }
+    }
+  });
+
+  // Handle resize
+  window.addEventListener('resize', resizeCanvas);
+
+  // Initialize
+  resizeCanvas();
+  initGame();
+  requestAnimationFrame(gameLoop);
+  </script>
+</body>
+</html>

@@ -1,0 +1,964 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <link href="https://fonts.googleapis.com/css2?family=Belanosima:wght@400;600;700&family=Nunito+Sans:wght@400;500;600;700&family=Nunito:wght@400;500;600&display=swap" rel="stylesheet">
+  <title>Colorful Paint Splatter</title>
+  <!--
+  ╔══════════════════════════════════════════════════════════════════════════════╗
+  ║  GAME FACTORY TEMPLATE - MOBILE                                              ║
+  ║  Fills 100% of container, non-uniform scaling, touch input.                  ║
+  ║  Logical dimensions: 360×640 (use aspectRatio for proportional shapes)       ║
+  ╚══════════════════════════════════════════════════════════════════════════════╝
+  -->
+  <style>
+    /* ═══════════════════════════════════════════════════════════════════════════
+       BASE STYLES - Can be extended, not removed
+       ═══════════════════════════════════════════════════════════════════════════ */
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      touch-action: none; /* Prevent default touch behaviors */
+      -webkit-touch-callout: none;
+      -webkit-user-select: none;
+      user-select: none;
+    }
+    body {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      background: #1a1a2e;
+      font-family: 'Nunito', system-ui, -apple-system, sans-serif;
+    }
+    #gameCanvas {
+      background: #FAFAF7;
+      /* Canvas fills viewport via JS, these are fallbacks */
+      width: 100vw;
+      height: 100vh;
+    }
+  </style>
+</head>
+<body>
+  <!-- ═══════════════════════════════════════════════════════════════════════════
+       CANVAS - Sized dynamically to fill viewport
+       ═══════════════════════════════════════════════════════════════════════════ -->
+  <canvas id="gameCanvas"></canvas>
+
+  <script>
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 1: QUESTION PLACEHOLDER - DO NOT MODIFY FORMAT                    ║
+  // ║  Platform replaces this at runtime. Use these exact 60-char answers.       ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  const QUESTION = {
+    type: "mcq",
+    prompt: "Sample question text",
+    choices: [
+      { text: "This is sample answer A which is long enough to test text overflow", is_correct: true, explanation: "Why A is correct" },
+      { text: "This is sample answer B which is long enough to test text overflow", is_correct: false, explanation: "Why B is wrong" },
+      { text: "This is sample answer C which is long enough to test text overflow", is_correct: false, explanation: "Why C is wrong" },
+      { text: "This is sample answer D which is long enough to test text overflow", is_correct: false, explanation: "Why D is wrong" }
+    ],
+    isLastQuestion: false
+  };
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 2: ENGINE CORE (MOBILE) - DO NOT MODIFY                           ║
+  // ║  Non-uniform scaling (fills container), touch input, tap-to-restart.       ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  const canvas = document.getElementById('gameCanvas');
+  const ctx = canvas.getContext('2d');
+
+  // Logical dimensions (game code works in this coordinate space)
+  const W = 360, H = 640;
+
+  // Scaling state (computed on resize)
+  let scaleX = 1;
+  let scaleY = 1;
+  let aspectRatio = 1;  // scaleX/scaleY - use for proportional shapes
+
+  // Game state
+  let gameState = 'playing'; // 'playing' | 'ended'
+  let gameResult = null;     // true (correct) | false (wrong)
+  let gameExplanation = '';
+  let endScreenTime = 0;
+  let confettiParticles = [];
+
+  // End screen button bounds (logical coordinates)
+  const restartButton = { x: 20, y: H / 2 + 50, w: 155, h: 56 };
+  const nextButton = { x: 185, y: H / 2 + 50, w: 155, h: 56 };
+  // Centered restart button for wrong answers
+  const centeredRestartButton = { x: W / 2 - 100, y: H / 2 + 50, w: 200, h: 56 };
+
+  /** Draw a styled button with aspect-ratio aware text */
+  function drawMobileButton(rect, label, color, pulse) {
+    const textAdj = getTextScaleAdjustment();
+    const p = pulse ? 1 + Math.sin(endScreenTime * 4) * 0.03 : 1;
+
+    ctx.save();
+    ctx.translate(rect.x + rect.w / 2, rect.y + rect.h / 2);
+    ctx.scale(p, p);
+    ctx.translate(-(rect.x + rect.w / 2), -(rect.y + rect.h / 2));
+
+    // Button background
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.roundRect(rect.x, rect.y, rect.w, rect.h, 12);
+    ctx.fill();
+
+    // Button text (aspect-ratio aware)
+    ctx.save();
+    ctx.translate(rect.x + rect.w / 2, rect.y + rect.h / 2);
+    ctx.scale(textAdj / aspectRatio, textAdj);
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = 'bold 18px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, 0, 0);
+    ctx.restore();
+
+    ctx.restore();
+  }
+
+  /**
+   * Resize canvas to fill viewport completely (no letterboxing).
+   * Uses non-uniform scaling - game code works in 360×640 logical space.
+   * Use aspectRatio to draw proportionally correct shapes.
+   */
+  function resizeCanvas() {
+    const dpr = window.devicePixelRatio || 1;
+
+    // Physical canvas size (actual pixels)
+    canvas.width = window.innerWidth * dpr;
+    canvas.height = window.innerHeight * dpr;
+
+    // CSS size (fills viewport)
+    canvas.style.width = window.innerWidth + 'px';
+    canvas.style.height = window.innerHeight + 'px';
+
+    // Non-uniform scaling to fill entire canvas
+    scaleX = canvas.width / W;
+    scaleY = canvas.height / H;
+
+    // Aspect ratio for proportional shape drawing
+    // >1 means container is wider than logical space
+    // <1 means container is taller than logical space
+    aspectRatio = scaleX / scaleY;
+
+    // Recalculate text sizing on resize (implement this in SECTION 3)
+    if (typeof recalculateTextSizing === 'function') {
+      recalculateTextSizing();
+    }
+  }
+
+  // === ASPECT-RATIO-AWARE TEXT WITH CLAMPED SCALING ===
+  // Text gets stretched by non-uniform scaling, so we compensate.
+  // Also clamp the effective scale to keep text legible at all sizes.
+  const TEXT_SCALE_MIN = 0.75;
+  const TEXT_SCALE_MAX = 1.4;
+
+  function getTextScaleAdjustment() {
+    const baseScale = window.innerHeight / H;
+    const clampedScale = Math.min(TEXT_SCALE_MAX, Math.max(TEXT_SCALE_MIN, baseScale));
+    return clampedScale / baseScale;
+  }
+
+  /**
+   * Draw text with aspect-ratio compensation and clamped scaling.
+   * Use this instead of raw ctx.fillText() to prevent text stretching.
+   * Default font is 16px (minimum for answer text). Use 18-20px for better readability.
+   */
+  function drawText(text, x, y, options = {}) {
+    const { font = "500 16px system-ui, sans-serif", color = '#F5F5F0', align = 'center', baseline = 'middle' } = options;
+    ctx.save();
+    ctx.translate(x, y);
+    const adj = getTextScaleAdjustment();
+    ctx.scale(adj / aspectRatio, adj);
+    ctx.font = font;
+    ctx.fillStyle = color;
+    ctx.textAlign = align;
+    ctx.textBaseline = baseline;
+    ctx.fillText(text, 0, 0);
+    ctx.restore();
+  }
+
+  /**
+   * Convert screen coordinates to logical coordinates.
+   * Use this in handleTouch to get positions in 360×640 space.
+   */
+  function screenToLogical(screenX, screenY) {
+    const dpr = window.devicePixelRatio || 1;
+    const rect = canvas.getBoundingClientRect();
+    const canvasX = (screenX - rect.left) * dpr;
+    const canvasY = (screenY - rect.top) * dpr;
+    return {
+      x: canvasX / scaleX,
+      y: canvasY / scaleY
+    };
+  }
+
+  /**
+   * Check if a point is inside a rectangle (logical coordinates).
+   */
+  function pointInRect(px, py, rect) {
+    return px >= rect.x && px <= rect.x + rect.w &&
+           py >= rect.y && py <= rect.y + rect.h;
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // TEXT UTILITIES - Dynamic wrapping and font sizing
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  /**
+   * Wrap text to fit within a maximum width (in logical coordinates).
+   * Accounts for canvas transforms applied by drawText().
+   */
+  function wrapText(text, maxWidth, font, maxLines = 3) {
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.font = font;
+    const adj = getTextScaleAdjustment();
+    const maxRawWidth = maxWidth * aspectRatio / adj;
+    const words = text.split(' ');
+    const lines = [];
+    let currentLine = '';
+    words.forEach(word => {
+      const testLine = currentLine ? currentLine + ' ' + word : word;
+      if (ctx.measureText(testLine).width > maxRawWidth && currentLine) {
+        lines.push(currentLine);
+        currentLine = word;
+      } else {
+        currentLine = testLine;
+      }
+    });
+    if (currentLine) lines.push(currentLine);
+    ctx.restore();
+    return lines.slice(0, maxLines);
+  }
+
+  /**
+   * Find the optimal font size to fit content in available space.
+   */
+  function findOptimalFontSize(options) {
+    const {
+      texts,
+      maxWidth,
+      availableHeight,
+      minFont = 12,
+      maxFont = 18,
+      itemPadding = 4,
+      fontFamily = "'Nunito Sans', sans-serif"
+    } = options;
+
+    let bestFontSize = minFont;
+    let bestWrappedTexts = [];
+
+    for (let fontSize = maxFont; fontSize >= minFont; fontSize -= 0.5) {
+      const font = `${fontSize}px ${fontFamily}`;
+      const lineHeight = fontSize + 2;
+
+      let totalHeight = 0;
+      const wrappedTexts = [];
+
+      for (const text of texts) {
+        const lines = wrapText(text, maxWidth, font);
+        wrappedTexts.push(lines);
+        totalHeight += itemPadding + lines.length * lineHeight;
+      }
+
+      if (totalHeight <= availableHeight) {
+        bestFontSize = fontSize;
+        bestWrappedTexts = wrappedTexts;
+        break;
+      }
+
+      bestWrappedTexts = wrappedTexts;
+    }
+
+    return { fontSize: bestFontSize, wrappedTexts: bestWrappedTexts };
+  }
+
+  const engine = {
+    /** Call this to end the game. DO NOT draw your own end screen. */
+    end(isCorrect, explanation) {
+      if (gameState === 'ended') return;
+      gameState = 'ended';
+      gameResult = isCorrect;
+      gameExplanation = explanation || '';
+      endScreenTime = 0;
+
+      // Spawn confetti for correct answers
+      if (isCorrect) {
+        for (let i = 0; i < 50; i++) {
+          confettiParticles.push({
+            x: W / 2,
+            y: H / 2,
+            vx: (Math.random() - 0.5) * 400,
+            vy: -Math.random() * 300 - 80,
+            size: 4 + Math.random() * 6,
+            color: ['#FFD700', '#FF6B6B', '#4ECDC4', '#95E1D3', '#F38181'][Math.floor(Math.random() * 5)],
+            rotation: Math.random() * Math.PI * 2,
+            rotationSpeed: (Math.random() - 0.5) * 10
+          });
+        }
+      }
+
+      // Notify parent frame
+      if (window.parent && window.parent !== window) {
+        window.parent.postMessage({
+          type: 'quiz-end',
+          isCorrect: isCorrect,
+          explanation: explanation || ''
+        }, '*');
+      }
+    }
+  };
+
+  /** STANDARD END SCREEN (MOBILE) - DO NOT MODIFY */
+  function drawEndScreen(dt) {
+    endScreenTime += dt;
+
+    // Update confetti
+    confettiParticles = confettiParticles.filter(p => {
+      p.vy += 600 * dt; // gravity
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.rotation += p.rotationSpeed * dt;
+      p.vx *= 0.99;
+      return p.y < H + 50;
+    });
+
+    // Dark overlay
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
+    ctx.fillRect(0, 0, W, H);
+
+    // Draw confetti
+    confettiParticles.forEach(p => {
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rotation);
+      ctx.fillStyle = p.color;
+      ctx.fillRect(-p.size / 2, -p.size / 4, p.size, p.size / 2);
+      ctx.restore();
+    });
+
+    // Result emoji (aspect-ratio aware)
+    const textAdj = getTextScaleAdjustment();
+    ctx.save();
+    ctx.translate(W / 2, H / 2 - 80);
+    ctx.scale(textAdj / aspectRatio, textAdj);
+    ctx.font = '64px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(gameResult ? '🎉' : '😢', 0, 0);
+    ctx.restore();
+
+    // Result text (aspect-ratio aware)
+    ctx.save();
+    ctx.translate(W / 2, H / 2 - 10);
+    ctx.scale(textAdj / aspectRatio, textAdj);
+    ctx.fillStyle = gameResult ? '#4ADE80' : '#F87171';
+    ctx.font = 'bold 32px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(gameResult ? 'Correct!' : 'Wrong!', 0, 0);
+    ctx.restore();
+
+    // Buttons
+    if (gameResult) {
+      // Correct: show both Restart and Next/Finish
+      drawMobileButton(restartButton, 'Restart', '#E87A3E', true);
+      const nextLabel = QUESTION.isLastQuestion ? 'Finish' : 'Next';
+      drawMobileButton(nextButton, nextLabel, '#4ECDC4', true);
+    } else {
+      // Wrong: show only centered Restart button
+      drawMobileButton(centeredRestartButton, 'Restart', '#E87A3E', true);
+    }
+  }
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 3: YOUR GAME CODE - IMPLEMENT THESE FUNCTIONS                     ║
+  // ║  Colorful Paint Splatter - Vibrant blobs on a digital canvas              ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+
+  // === COLORS ===
+  const COLORS = {
+    bgPrimary: '#FAFAF7',
+    bgCanvas: '#F5F5F0',
+    textPrimary: '#2B2B28',
+    textSecondary: '#5A5A54',
+    orange: '#E87A3E',
+    amber: '#F5A742',
+    cyan: '#4ECDC4',
+    peach: '#FFB89D',
+    success: '#6BBF59',
+    error: '#E85D4A',
+    borderSubtle: '#E6E6E0'
+  };
+
+  // Paint blob colors - vibrant and distinct
+  const BLOB_COLORS = [
+    { fill: '#E87A3E', shadow: '#C45E28', highlight: '#FF9A62' },  // Orange
+    { fill: '#4ECDC4', shadow: '#38A89E', highlight: '#7EEAE3' },  // Cyan
+    { fill: '#F5A742', shadow: '#D48B2E', highlight: '#FFCB7A' },  // Amber
+    { fill: '#9B6DD7', shadow: '#7B4DB7', highlight: '#BF99E8' }   // Purple
+  ];
+
+  // === GAME STATE ===
+  let blobs = [];
+  let splashParticles = [];
+  let ripples = [];
+  let selectedBlob = null;
+  let gameTime = 0;
+  let entranceProgress = 0;
+
+  // Web Audio context for sounds
+  let audioCtx = null;
+
+  function getAudioCtx() {
+    if (!audioCtx) {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    return audioCtx;
+  }
+
+  function playSound(type) {
+    try {
+      const ctx = getAudioCtx();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+
+      if (type === 'click') {
+        osc.frequency.setValueAtTime(600, ctx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(800, ctx.currentTime + 0.08);
+        gain.gain.setValueAtTime(0.15, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.12);
+        osc.start(ctx.currentTime);
+        osc.stop(ctx.currentTime + 0.12);
+      } else if (type === 'splash') {
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(300, ctx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(100, ctx.currentTime + 0.3);
+        gain.gain.setValueAtTime(0.12, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);
+        osc.start(ctx.currentTime);
+        osc.stop(ctx.currentTime + 0.3);
+      } else if (type === 'correct') {
+        osc.frequency.setValueAtTime(523, ctx.currentTime);
+        osc.frequency.setValueAtTime(659, ctx.currentTime + 0.1);
+        osc.frequency.setValueAtTime(784, ctx.currentTime + 0.2);
+        gain.gain.setValueAtTime(0.15, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.4);
+        osc.start(ctx.currentTime);
+        osc.stop(ctx.currentTime + 0.4);
+      } else if (type === 'wrong') {
+        osc.type = 'square';
+        osc.frequency.setValueAtTime(250, ctx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(150, ctx.currentTime + 0.3);
+        gain.gain.setValueAtTime(0.1, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);
+        osc.start(ctx.currentTime);
+        osc.stop(ctx.currentTime + 0.3);
+      }
+    } catch (e) { /* audio not available */ }
+  }
+
+  // Generate random blob edge points for organic shapes
+  function generateBlobPoints(numPoints) {
+    const points = [];
+    for (let i = 0; i < numPoints; i++) {
+      const angle = (i / numPoints) * Math.PI * 2;
+      const variation = 0.75 + Math.random() * 0.5;
+      points.push({ angle, radius: variation });
+    }
+    return points;
+  }
+
+  function recalculateTextSizing() {
+    if (!blobs || blobs.length === 0) return;
+
+    // Text area is to the right of the blob
+    // blobCenterX(50) + radius(36) + gap(14) = 100, right margin = 10
+    // Available: W - 100 - 10 = 250
+    const textMaxWidth = 245;
+
+    const { fontSize, wrappedTexts } = findOptimalFontSize({
+      texts: QUESTION.choices.map(c => c.text),
+      maxWidth: textMaxWidth,
+      availableHeight: 480,
+      minFont: 14,
+      maxFont: 18,
+      fontFamily: "'Nunito', sans-serif"
+    });
+
+    blobs.forEach((blob, i) => {
+      blob.wrappedText = wrappedTexts[i];
+      blob.fontSize = fontSize;
+    });
+  }
+
+  function initGame() {
+    blobs = [];
+    splashParticles = [];
+    ripples = [];
+    selectedBlob = null;
+    gameTime = 0;
+    entranceProgress = 0;
+
+    // Layout: blobs on left, text wrapping to right
+    const blobRadius = 36;
+    const blobCenterX = 50;
+    const rowHeight = 130;
+    const gap = 10;
+    const totalHeight = QUESTION.choices.length * rowHeight + (QUESTION.choices.length - 1) * gap;
+    const startY = (H - totalHeight) / 2 + 15;
+
+    QUESTION.choices.forEach((choice, i) => {
+      const cy = startY + i * (rowHeight + gap) + rowHeight / 2;
+
+      blobs.push({
+        x: blobCenterX,
+        y: cy,
+        baseRadius: blobRadius,
+        choice: choice,
+        color: BLOB_COLORS[i % BLOB_COLORS.length],
+        points: generateBlobPoints(12),
+        wobbleOffset: Math.random() * Math.PI * 2,
+        scale: 0,
+        alpha: 0,
+        entranceDelay: i * 0.1,
+        pressed: false,
+        shakeX: 0,
+        pulseScale: 1,
+        wrappedText: null,
+        fontSize: 16,
+        hitRect: {
+          x: 5,
+          y: cy - rowHeight / 2,
+          w: W - 10,
+          h: rowHeight
+        }
+      });
+    });
+
+    recalculateTextSizing();
+  }
+
+  function spawnSplash(blob) {
+    const count = 20;
+    const colors = [blob.color.fill, blob.color.highlight, blob.color.shadow];
+    for (let i = 0; i < count; i++) {
+      const angle = (i / count) * Math.PI * 2 + (Math.random() - 0.5) * 0.5;
+      const speed = 80 + Math.random() * 180;
+      splashParticles.push({
+        x: blob.x,
+        y: blob.y,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed - 40,
+        radius: 3 + Math.random() * 6,
+        color: colors[Math.floor(Math.random() * colors.length)],
+        alpha: 1,
+        gravity: 200
+      });
+    }
+  }
+
+  function spawnRipple(blob) {
+    ripples.push({
+      x: blob.x,
+      y: blob.y,
+      radius: blob.baseRadius * 0.5,
+      maxRadius: blob.baseRadius * 3,
+      alpha: 0.6,
+      color: blob.color.fill,
+      speed: 120
+    });
+    // Second delayed ripple
+    setTimeout(() => {
+      if (gameState === 'playing' || gameState === 'ended') {
+        ripples.push({
+          x: blob.x,
+          y: blob.y,
+          radius: blob.baseRadius * 0.3,
+          maxRadius: blob.baseRadius * 2.5,
+          alpha: 0.4,
+          color: blob.color.highlight,
+          speed: 90
+        });
+      }
+    }, 100);
+  }
+
+  function updateGame(dt) {
+    if (gameState !== 'playing') return;
+
+    gameTime += dt;
+    entranceProgress = Math.min(entranceProgress + dt, 2);
+
+    // Update blob entrance animations
+    blobs.forEach(blob => {
+      const t = Math.max(0, Math.min(1, (entranceProgress - blob.entranceDelay) / 0.4));
+      // Spring easing
+      if (t > 0 && t < 1) {
+        const spring = 1 + Math.sin(t * Math.PI * 2) * 0.2 * (1 - t);
+        blob.scale = t * spring;
+        blob.alpha = t;
+      } else if (t >= 1) {
+        blob.scale = 1;
+        blob.alpha = 1;
+      }
+
+      // Gentle wobble breathing
+      blob.pulseScale = 1 + Math.sin(gameTime * 1.5 + blob.wobbleOffset) * 0.02;
+
+      // Shake decay
+      if (blob.shakeX !== 0) {
+        blob.shakeX *= 0.9;
+        if (Math.abs(blob.shakeX) < 0.5) blob.shakeX = 0;
+      }
+    });
+
+    // Update splash particles
+    splashParticles = splashParticles.filter(p => {
+      p.vy += p.gravity * dt;
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.alpha -= dt * 1.8;
+      p.radius *= 0.98;
+      return p.alpha > 0 && p.radius > 0.5;
+    });
+
+    // Update ripples
+    ripples = ripples.filter(r => {
+      r.radius += r.speed * dt;
+      r.alpha -= dt * 1.2;
+      return r.alpha > 0;
+    });
+
+    // Handle selection result
+    if (selectedBlob) {
+      const blob = selectedBlob;
+      selectedBlob = null;
+
+      // Delay to show splash effect
+      setTimeout(() => {
+        if (blob.choice.is_correct) {
+          playSound('correct');
+        } else {
+          playSound('wrong');
+        }
+        engine.end(blob.choice.is_correct, blob.choice.explanation);
+      }, 350);
+    }
+  }
+
+  function drawBlobShape(blob, radius) {
+    ctx.beginPath();
+    const points = blob.points;
+    for (let i = 0; i <= points.length; i++) {
+      const p = points[i % points.length];
+      const pNext = points[(i + 1) % points.length];
+      const wobble = Math.sin(gameTime * 2 + p.angle + blob.wobbleOffset) * 0.05;
+      const r = radius * (p.radius + wobble);
+
+      const px = blob.x + blob.shakeX + Math.cos(p.angle) * r;
+      const py = blob.y + Math.sin(p.angle) * r * aspectRatio;
+
+      if (i === 0) {
+        ctx.moveTo(px, py);
+      } else {
+        const prevP = points[(i - 1) % points.length];
+        const prevWobble = Math.sin(gameTime * 2 + prevP.angle + blob.wobbleOffset) * 0.05;
+        const prevR = radius * (prevP.radius + prevWobble);
+        const prevPx = blob.x + blob.shakeX + Math.cos(prevP.angle) * prevR;
+        const prevPy = blob.y + Math.sin(prevP.angle) * prevR * aspectRatio;
+
+        const cpx = (prevPx + px) / 2;
+        const cpy = (prevPy + py) / 2;
+        ctx.quadraticCurveTo(prevPx, prevPy, cpx, cpy);
+      }
+    }
+    ctx.closePath();
+  }
+
+  function drawGame() {
+    // Canvas background - textured paper look
+    ctx.fillStyle = COLORS.bgPrimary;
+    ctx.fillRect(0, 0, W, H);
+
+    // Subtle canvas texture dots
+    ctx.fillStyle = 'rgba(0,0,0,0.02)';
+    for (let gx = 0; gx < W; gx += 8) {
+      for (let gy = 0; gy < H; gy += 8) {
+        if (Math.sin(gx * 17 + gy * 13) > 0.6) {
+          ctx.fillRect(gx, gy, 2, 2);
+        }
+      }
+    }
+
+    // Draw paint smear accents in corners
+    ctx.globalAlpha = 0.08;
+    ctx.fillStyle = COLORS.orange;
+    ctx.beginPath();
+    ctx.ellipse(0, 0, 80, 60 * aspectRatio, 0.4, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = COLORS.cyan;
+    ctx.beginPath();
+    ctx.ellipse(W, H, 70, 50 * aspectRatio, -0.3, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+
+    // Draw ripples behind blobs
+    ripples.forEach(r => {
+      ctx.beginPath();
+      ctx.ellipse(r.x, r.y, r.radius, r.radius * aspectRatio, 0, 0, Math.PI * 2);
+      ctx.strokeStyle = r.color;
+      ctx.globalAlpha = r.alpha;
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    });
+
+    // Draw blobs
+    blobs.forEach((blob, i) => {
+      if (blob.alpha <= 0) return;
+
+      ctx.save();
+      ctx.globalAlpha = blob.alpha;
+
+      const effectiveScale = blob.scale * blob.pulseScale;
+      const radius = blob.baseRadius * effectiveScale;
+
+      // Shadow under blob
+      ctx.fillStyle = 'rgba(0,0,0,0.1)';
+      ctx.beginPath();
+      ctx.ellipse(
+        blob.x + blob.shakeX + 2,
+        blob.y + 4,
+        radius * 0.9,
+        radius * 0.3 * aspectRatio,
+        0, 0, Math.PI * 2
+      );
+      ctx.fill();
+
+      // Main blob shape
+      ctx.fillStyle = blob.color.fill;
+      drawBlobShape(blob, radius);
+      ctx.fill();
+
+      // Highlight on blob (top-left shine)
+      ctx.fillStyle = blob.color.highlight;
+      ctx.globalAlpha = blob.alpha * 0.4;
+      ctx.beginPath();
+      ctx.ellipse(
+        blob.x + blob.shakeX - radius * 0.25,
+        blob.y - radius * 0.25 * aspectRatio,
+        radius * 0.35,
+        radius * 0.25 * aspectRatio,
+        -0.4, 0, Math.PI * 2
+      );
+      ctx.fill();
+      ctx.globalAlpha = blob.alpha;
+
+      // Small specular highlight
+      ctx.fillStyle = '#FFFFFF';
+      ctx.globalAlpha = blob.alpha * 0.6;
+      ctx.beginPath();
+      ctx.ellipse(
+        blob.x + blob.shakeX - radius * 0.2,
+        blob.y - radius * 0.3 * aspectRatio,
+        radius * 0.1,
+        radius * 0.08 * aspectRatio,
+        -0.3, 0, Math.PI * 2
+      );
+      ctx.fill();
+      ctx.globalAlpha = blob.alpha;
+
+      // Answer letter label (A, B, C, D) on the blob
+      const letter = String.fromCharCode(65 + i);
+      drawText(letter, blob.x + blob.shakeX, blob.y - 2, {
+        font: "700 20px 'Belanosima', sans-serif",
+        color: '#FFFFFF',
+        align: 'center',
+        baseline: 'middle'
+      });
+
+      ctx.restore();
+
+      // Draw answer text to the right of the blob
+      const lines = blob.wrappedText || [blob.choice.text];
+      const fontSize = blob.fontSize || 16;
+      const lineHeight = fontSize + 4;
+      const totalTextHeight = lines.length * lineHeight;
+      const textLeft = blob.x + blob.shakeX + radius + 14;
+      const textY = blob.y - totalTextHeight / 2 + lineHeight / 2;
+
+      lines.forEach((line, li) => {
+        drawText(line, textLeft, textY + li * lineHeight, {
+          font: `500 ${fontSize}px 'Nunito', sans-serif`,
+          color: COLORS.textPrimary,
+          align: 'left',
+          baseline: 'middle'
+        });
+      });
+    });
+
+    // Draw splash particles on top
+    splashParticles.forEach(p => {
+      ctx.globalAlpha = p.alpha;
+      ctx.fillStyle = p.color;
+      ctx.beginPath();
+      ctx.ellipse(p.x, p.y, p.radius, p.radius * aspectRatio, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.globalAlpha = 1;
+    });
+  }
+
+  function handleTouch(e, type) {
+    if (gameState !== 'playing') return;
+    if (type !== 'start') return;
+
+    const touch = e.touches[0] || e.changedTouches[0];
+    const { x, y } = screenToLogical(touch.clientX, touch.clientY);
+
+    // Check if touch is on any blob
+    for (let i = 0; i < blobs.length; i++) {
+      const blob = blobs[i];
+      if (blob.alpha < 0.5) continue;
+
+      // Check hit rect (wider area for touch)
+      if (pointInRect(x, y, blob.hitRect)) {
+        playSound('splash');
+        blob.pressed = true;
+        blob.pulseScale = 1.15;
+
+        // Spawn splash and ripple effects
+        spawnSplash(blob);
+        spawnRipple(blob);
+
+        // Shake other blobs
+        blobs.forEach((other, j) => {
+          if (j !== i) {
+            other.shakeX = (Math.random() - 0.5) * 10;
+          }
+        });
+
+        selectedBlob = blob;
+        break;
+      }
+    }
+  }
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 4: GAME LOOP - DO NOT MODIFY                                      ║
+  // ║  Standard loop with responsive scaling and touch handling.                 ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  let lastTime = performance.now();
+
+  function gameLoop(now) {
+    const dt = Math.min((now - lastTime) / 1000, 0.05); // Cap at 50ms
+    lastTime = now;
+
+    // Apply transform for logical coordinate system (non-uniform scaling)
+    ctx.setTransform(scaleX, 0, 0, scaleY, 0, 0);
+
+    if (gameState === 'playing') {
+      updateGame(dt);
+      drawGame();
+    } else {
+      drawGame(); // Draw game state behind overlay
+      drawEndScreen(dt);
+    }
+
+    // Reset transform for next frame
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+    requestAnimationFrame(gameLoop);
+  }
+
+  // Touch handlers
+  function onTouchStart(e) {
+    e.preventDefault();
+    if (gameState === 'ended') {
+      const touch = e.touches[0];
+      const { x, y } = screenToLogical(touch.clientX, touch.clientY);
+
+      if (gameResult) {
+        // Correct answer: check both buttons
+        if (pointInRect(x, y, restartButton)) {
+          gameState = 'playing';
+          gameResult = null;
+          gameExplanation = '';
+          confettiParticles = [];
+          initGame();
+          return;
+        }
+        if (pointInRect(x, y, nextButton)) {
+          // Notify parent to go to next question
+          if (window.parent && window.parent !== window) {
+            window.parent.postMessage({ type: 'quiz-next' }, '*');
+          }
+          return;
+        }
+      } else {
+        // Wrong answer: check centered restart button
+        if (pointInRect(x, y, centeredRestartButton)) {
+          gameState = 'playing';
+          gameResult = null;
+          gameExplanation = '';
+          confettiParticles = [];
+          initGame();
+          return;
+        }
+      }
+    }
+    handleTouch(e, 'start');
+  }
+
+  function onTouchMove(e) {
+    e.preventDefault();
+    handleTouch(e, 'move');
+  }
+
+  function onTouchEnd(e) {
+    e.preventDefault();
+    handleTouch(e, 'end');
+  }
+
+  canvas.addEventListener('touchstart', onTouchStart, { passive: false });
+  canvas.addEventListener('touchmove', onTouchMove, { passive: false });
+  canvas.addEventListener('touchend', onTouchEnd, { passive: false });
+
+  // Also support mouse for testing in browser
+  canvas.addEventListener('mousedown', (e) => {
+    const fakeTouch = { touches: [{ clientX: e.clientX, clientY: e.clientY }], changedTouches: [{ clientX: e.clientX, clientY: e.clientY }] };
+    onTouchStart(fakeTouch);
+  });
+
+  canvas.addEventListener('mouseup', (e) => {
+    const fakeTouch = { touches: [], changedTouches: [{ clientX: e.clientX, clientY: e.clientY }] };
+    onTouchEnd(fakeTouch);
+  });
+
+  // Handle resize
+  window.addEventListener('resize', resizeCanvas);
+  window.addEventListener('orientationchange', () => {
+    setTimeout(resizeCanvas, 100); // Delay for orientation change to complete
+  });
+
+  // Prevent pull-to-refresh and overscroll
+  document.body.addEventListener('touchmove', (e) => e.preventDefault(), { passive: false });
+
+  // Initialize
+  resizeCanvas();
+  initGame();
+  requestAnimationFrame(gameLoop);
+  </script>
+</body>
+</html>

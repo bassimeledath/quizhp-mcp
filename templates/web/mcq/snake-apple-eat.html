@@ -1,0 +1,873 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Snake Apple Eat</title>
+  <link href="https://fonts.googleapis.com/css2?family=Belanosima:wght@400;600;700&family=Nunito+Sans:wght@400;500;600;700&family=Nunito:wght@400;500;600&display=swap" rel="stylesheet">
+  <!--
+  +======================================================================+
+  |  GAME FACTORY TEMPLATE                                                |
+  |  This template enforces critical invariants. Follow the section markers.|
+  +======================================================================+
+  -->
+  <style>
+    /* ===================================================================
+       BASE STYLES - Can be extended, not removed
+       =================================================================== */
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+    }
+    body {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      background: #1a1a2e;
+      font-family: 'Nunito Sans', system-ui, -apple-system, sans-serif;
+    }
+    #gameCanvas {
+      background: #16213e;
+      border-radius: 8px;
+      display: block;
+    }
+  </style>
+</head>
+<body>
+  <!-- ===================================================================
+       CANVAS - Sized dynamically to fill available space
+       =================================================================== -->
+  <canvas id="gameCanvas"></canvas>
+
+  <script>
+  // +====================================================================+
+  // |  SECTION 1: QUESTION PLACEHOLDER - DO NOT MODIFY FORMAT             |
+  // |  Platform replaces this at runtime. Use these exact 60-char answers.|
+  // +====================================================================+
+  const QUESTION = {
+    type: "mcq",
+    prompt: "Sample question text",
+    choices: [
+      { text: "This is sample answer A which is long enough to test text overflow", is_correct: true, explanation: "Why A is correct" },
+      { text: "This is sample answer B which is long enough to test text overflow", is_correct: false, explanation: "Why B is wrong" },
+      { text: "This is sample answer C which is long enough to test text overflow", is_correct: false, explanation: "Why C is wrong" },
+      { text: "This is sample answer D which is long enough to test text overflow", is_correct: false, explanation: "Why D is wrong" }
+    ],
+    isLastQuestion: false
+  };
+
+  // +====================================================================+
+  // |  SECTION 2: ENGINE CORE - DO NOT MODIFY                             |
+  // |  Standard engine interface and end screen. This is sacred.         |
+  // +====================================================================+
+  const canvas = document.getElementById('gameCanvas');
+  const ctx = canvas.getContext('2d');
+
+  // Logical dimensions (game code works in this coordinate space)
+  const W = 720, H = 540;
+
+  // Scaling state (computed on resize)
+  let scale = 1;
+  let dpr = 1;
+
+  let gameState = 'playing'; // 'playing' | 'ended'
+  let gameResult = null;     // true (correct) | false (wrong)
+  let gameExplanation = '';
+  let endScreenTime = 0;
+  let confettiParticles = [];
+
+  // End screen button bounds (logical coordinates)
+  const restartButton = { x: W / 2 - 170, y: H / 2 + 60, w: 150, h: 48 };
+  const nextButton = { x: W / 2 + 20, y: H / 2 + 60, w: 150, h: 48 };
+
+  /** Check if point is inside rectangle */
+  function pointInRect(px, py, rect) {
+    return px >= rect.x && px <= rect.x + rect.w &&
+           py >= rect.y && py <= rect.y + rect.h;
+  }
+
+  /** Draw a styled button */
+  function drawButton(rect, label, color, pulse) {
+    const p = pulse ? 1 + Math.sin(endScreenTime * 4) * 0.03 : 1;
+    ctx.save();
+    ctx.translate(rect.x + rect.w / 2, rect.y + rect.h / 2);
+    ctx.scale(p, p);
+    ctx.translate(-(rect.x + rect.w / 2), -(rect.y + rect.h / 2));
+
+    // Button background
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.roundRect(rect.x, rect.y, rect.w, rect.h, 12);
+    ctx.fill();
+
+    // Button text
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = 'bold 18px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, rect.x + rect.w / 2, rect.y + rect.h / 2);
+
+    ctx.restore();
+  }
+
+  /**
+   * Resize canvas to fill available space with proper DPR scaling.
+   * Maintains logical coordinate system (720x540).
+   */
+  function resizeCanvas() {
+    dpr = window.devicePixelRatio || 1;
+
+    // Get available space
+    const availW = window.innerWidth;
+    const availH = window.innerHeight;
+
+    // Calculate scale to fit logical space (720x540) in available space
+    const scaleX = availW / W;
+    const scaleY = availH / H;
+    scale = Math.min(scaleX, scaleY);
+
+    // Physical canvas buffer (DPR-scaled for crisp rendering)
+    canvas.width = W * scale * dpr;
+    canvas.height = H * scale * dpr;
+
+    // CSS display size
+    canvas.style.width = (W * scale) + 'px';
+    canvas.style.height = (H * scale) + 'px';
+  }
+
+  /**
+   * Convert screen coordinates to logical coordinates.
+   * Use this for mouse/click events to get positions in 720x540 space.
+   */
+  function screenToLogical(screenX, screenY) {
+    const rect = canvas.getBoundingClientRect();
+    return {
+      x: (screenX - rect.left) * (W / rect.width),
+      y: (screenY - rect.top) * (H / rect.height)
+    };
+  }
+
+  const engine = {
+    /** Call this to end the game. DO NOT draw your own end screen. */
+    end(isCorrect, explanation) {
+      if (gameState === 'ended') return;
+      gameState = 'ended';
+      gameResult = isCorrect;
+      gameExplanation = explanation || '';
+      endScreenTime = 0;
+
+      // Spawn confetti for correct answers
+      if (isCorrect) {
+        for (let i = 0; i < 50; i++) {
+          confettiParticles.push({
+            x: W / 2,
+            y: H / 2,
+            vx: (Math.random() - 0.5) * 600,
+            vy: -Math.random() * 400 - 100,
+            size: 4 + Math.random() * 6,
+            color: ['#FFD700', '#FF6B6B', '#4ECDC4', '#95E1D3', '#F38181'][Math.floor(Math.random() * 5)],
+            rotation: Math.random() * Math.PI * 2,
+            rotationSpeed: (Math.random() - 0.5) * 10
+          });
+        }
+      }
+
+      // Notify parent frame
+      if (window.parent && window.parent !== window) {
+        window.parent.postMessage({
+          type: 'quiz-end',
+          isCorrect: isCorrect,
+          explanation: explanation || ''
+        }, '*');
+      }
+    }
+  };
+
+  /** STANDARD END SCREEN - DO NOT MODIFY */
+  function drawEndScreen(dt) {
+    endScreenTime += dt;
+
+    // Update confetti
+    confettiParticles = confettiParticles.filter(p => {
+      p.vy += 800 * dt; // gravity
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.rotation += p.rotationSpeed * dt;
+      p.vx *= 0.99;
+      return p.y < H + 50;
+    });
+
+    // Dark overlay
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
+    ctx.fillRect(0, 0, W, H);
+
+    // Draw confetti
+    confettiParticles.forEach(p => {
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rotation);
+      ctx.fillStyle = p.color;
+      ctx.fillRect(-p.size / 2, -p.size / 4, p.size, p.size / 2);
+      ctx.restore();
+    });
+
+    // Result emoji
+    ctx.font = '72px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(gameResult ? '\uD83C\uDF89' : '\uD83D\uDE22', W / 2, H / 2 - 50);
+
+    // Result text
+    ctx.fillStyle = gameResult ? '#4ADE80' : '#F87171';
+    ctx.font = 'bold 36px system-ui, sans-serif';
+    ctx.fillText(gameResult ? 'Correct!' : 'Wrong!', W / 2, H / 2 + 20);
+
+    // Buttons
+    if (gameResult) {
+      // Correct: show both Restart and Next/Finish
+      drawButton(restartButton, 'Restart', '#E87A3E', true);
+      const nextLabel = QUESTION.isLastQuestion ? 'Finish' : 'Next';
+      drawButton(nextButton, nextLabel, '#4ECDC4', true);
+    } else {
+      // Wrong: show only centered Restart button
+      const centeredRestart = { x: W / 2 - 75, y: H / 2 + 60, w: 150, h: 48 };
+      drawButton(centeredRestart, 'Restart', '#E87A3E', true);
+    }
+  }
+
+  // +====================================================================+
+  // |  SECTION 3: YOUR GAME CODE - IMPLEMENT THESE FUNCTIONS              |
+  // |  This is where your game logic goes. See requirements below.       |
+  // +====================================================================+
+
+  // === COLORS ===
+  const COLORS = {
+    bgPrimary: '#FAFAF7',
+    bgField: '#7BC950',
+    bgFieldDark: '#5DAA35',
+    bgFieldLight: '#8FD968',
+    surface: '#FFFFFF',
+    textPrimary: '#2B2B28',
+    textSecondary: '#5A5A54',
+    orange: '#E87A3E',
+    orangeHover: '#D66B31',
+    amber: '#F5A742',
+    cyan: '#4ECDC4',
+    success: '#6BBF59',
+    error: '#E85D4A',
+    borderSubtle: '#E6E6E0',
+    borderStrong: '#D4D4CC',
+    snakeHead: '#2B7A2B',
+    snakeBody: '#3DA33D',
+    snakeBodyAlt: '#4DB84D',
+    appleRed: '#E85D4A',
+    appleStem: '#8B6914'
+  };
+
+  // === GAME CONSTANTS ===
+  const GRID_SIZE = 20;
+  const COLS = Math.floor(W / GRID_SIZE);
+  const ROWS = Math.floor(H / GRID_SIZE);
+  const SNAKE_SPEED = 7; // cells per second
+  const APPLE_LABEL_W = 320;
+  const APPLE_LABEL_H = 48;
+
+  // === GAME STATE ===
+  let snake = [];
+  let snakeDir = { x: 1, y: 0 };
+  let nextDir = { x: 1, y: 0 };
+  let moveTimer = 0;
+  let apples = [];
+  let gameParticles = [];
+  let entranceAnim = 0;
+  let selectedApple = null;
+  let selectionTimer = 0;
+
+  // === AUDIO ===
+  const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+  function playSound(type) {
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+
+    if (type === 'eat') {
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(523, audioCtx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(784, audioCtx.currentTime + 0.1);
+      gain.gain.setValueAtTime(0.15, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.2);
+      osc.start(audioCtx.currentTime);
+      osc.stop(audioCtx.currentTime + 0.2);
+    } else if (type === 'correct') {
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(523, audioCtx.currentTime);
+      osc.frequency.setValueAtTime(659, audioCtx.currentTime + 0.1);
+      osc.frequency.setValueAtTime(784, audioCtx.currentTime + 0.2);
+      gain.gain.setValueAtTime(0.15, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.4);
+      osc.start(audioCtx.currentTime);
+      osc.stop(audioCtx.currentTime + 0.4);
+    } else if (type === 'wrong') {
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(200, audioCtx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(100, audioCtx.currentTime + 0.3);
+      gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.3);
+      osc.start(audioCtx.currentTime);
+      osc.stop(audioCtx.currentTime + 0.3);
+    } else if (type === 'move') {
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(220, audioCtx.currentTime);
+      gain.gain.setValueAtTime(0.03, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.05);
+      osc.start(audioCtx.currentTime);
+      osc.stop(audioCtx.currentTime + 0.05);
+    }
+  }
+
+  // === APPLE POSITIONS (corners with text labels) ===
+  // Apples in corners, labels drawn as boxes next to them
+  const cornerPositions = [
+    { gridX: 3, gridY: 3, labelX: 10, labelY: 10 },        // top-left
+    { gridX: COLS - 4, gridY: 3, labelX: W - APPLE_LABEL_W - 10, labelY: 10 },   // top-right
+    { gridX: 3, gridY: ROWS - 4, labelX: 10, labelY: H - APPLE_LABEL_H - 10 },   // bottom-left
+    { gridX: COLS - 4, gridY: ROWS - 4, labelX: W - APPLE_LABEL_W - 10, labelY: H - APPLE_LABEL_H - 10 } // bottom-right
+  ];
+
+  function wrapText(ctx, text, maxWidth) {
+    const words = text.split(' ');
+    const lines = [];
+    let currentLine = words[0];
+
+    for (let i = 1; i < words.length; i++) {
+      const testLine = currentLine + ' ' + words[i];
+      const metrics = ctx.measureText(testLine);
+      if (metrics.width > maxWidth) {
+        lines.push(currentLine);
+        currentLine = words[i];
+      } else {
+        currentLine = testLine;
+      }
+    }
+    lines.push(currentLine);
+    return lines;
+  }
+
+  function initGame() {
+    // Init snake at center
+    const startX = Math.floor(COLS / 2);
+    const startY = Math.floor(ROWS / 2);
+    snake = [];
+    for (let i = 0; i < 4; i++) {
+      snake.push({ x: startX - i, y: startY });
+    }
+    snakeDir = { x: 1, y: 0 };
+    nextDir = { x: 1, y: 0 };
+    moveTimer = 0;
+    selectedApple = null;
+    selectionTimer = 0;
+    gameParticles = [];
+    entranceAnim = 0;
+
+    // Create apples from choices
+    apples = QUESTION.choices.map((choice, i) => ({
+      choice: choice,
+      index: i,
+      gridX: cornerPositions[i].gridX,
+      gridY: cornerPositions[i].gridY,
+      labelX: cornerPositions[i].labelX,
+      labelY: cornerPositions[i].labelY,
+      scale: 0,
+      alpha: 0,
+      bobPhase: Math.random() * Math.PI * 2,
+      eaten: false,
+      pulseTimer: 0
+    }));
+  }
+
+  function spawnEatParticles(x, y, color) {
+    const colors = ['#E87A3E', '#F5A742', '#4ECDC4', '#6BBF59'];
+    for (let i = 0; i < 12; i++) {
+      const angle = (Math.PI * 2 / 12) * i + Math.random() * 0.3;
+      gameParticles.push({
+        x: x,
+        y: y,
+        vx: Math.cos(angle) * (100 + Math.random() * 150),
+        vy: Math.sin(angle) * (100 + Math.random() * 150),
+        size: 3 + Math.random() * 4,
+        color: colors[Math.floor(Math.random() * colors.length)],
+        alpha: 1,
+        gravity: 200
+      });
+    }
+  }
+
+  function updateGame(dt) {
+    if (gameState !== 'playing') return;
+
+    // Entrance animation
+    entranceAnim = Math.min(entranceAnim + dt * 2, 1);
+    apples.forEach((apple, i) => {
+      const delay = i * 0.12;
+      const t = Math.max(0, Math.min(1, (entranceAnim - delay) / 0.4));
+      // Spring easing
+      const spring = 1 + Math.sin(t * Math.PI * 2) * 0.2 * (1 - t);
+      apple.scale = t * spring;
+      apple.alpha = t;
+      apple.bobPhase += dt * 2;
+      apple.pulseTimer += dt;
+    });
+
+    // If an apple was selected, wait briefly then end
+    if (selectedApple !== null) {
+      selectionTimer += dt;
+      if (selectionTimer > 0.4) {
+        const apple = apples[selectedApple];
+        const choice = apple.choice;
+        if (choice.is_correct) {
+          playSound('correct');
+        } else {
+          playSound('wrong');
+        }
+        engine.end(choice.is_correct, choice.explanation);
+      }
+      return;
+    }
+
+    // Update snake movement
+    moveTimer += dt;
+    const moveInterval = 1 / SNAKE_SPEED;
+
+    if (moveTimer >= moveInterval) {
+      moveTimer -= moveInterval;
+
+      // Apply queued direction
+      snakeDir = { ...nextDir };
+
+      // Calculate new head position (wrap around)
+      const head = snake[0];
+      let newX = head.x + snakeDir.x;
+      let newY = head.y + snakeDir.y;
+
+      // Wrap around edges
+      if (newX < 0) newX = COLS - 1;
+      if (newX >= COLS) newX = 0;
+      if (newY < 0) newY = ROWS - 1;
+      if (newY >= ROWS) newY = 0;
+
+      // Add new head
+      snake.unshift({ x: newX, y: newY });
+
+      // Check apple collisions
+      let ate = false;
+      for (let i = 0; i < apples.length; i++) {
+        const apple = apples[i];
+        if (!apple.eaten && Math.abs(newX - apple.gridX) <= 1 && Math.abs(newY - apple.gridY) <= 1) {
+          // Eat this apple!
+          apple.eaten = true;
+          selectedApple = i;
+          selectionTimer = 0;
+          ate = true;
+          playSound('eat');
+          spawnEatParticles(apple.gridX * GRID_SIZE + GRID_SIZE / 2, apple.gridY * GRID_SIZE + GRID_SIZE / 2);
+          break;
+        }
+      }
+
+      // Remove tail (no growth, constant length)
+      if (!ate) {
+        snake.pop();
+      }
+    }
+
+    // Update particles
+    gameParticles.forEach(p => {
+      p.vy += p.gravity * dt;
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.alpha -= dt * 2;
+    });
+    gameParticles = gameParticles.filter(p => p.alpha > 0);
+  }
+
+  function drawGame() {
+    // Draw grass background
+    ctx.fillStyle = COLORS.bgField;
+    ctx.fillRect(0, 0, W, H);
+
+    // Draw grass pattern (checkerboard)
+    for (let col = 0; col < COLS; col++) {
+      for (let row = 0; row < ROWS; row++) {
+        if ((col + row) % 2 === 0) {
+          ctx.fillStyle = COLORS.bgFieldLight;
+          ctx.fillRect(col * GRID_SIZE, row * GRID_SIZE, GRID_SIZE, GRID_SIZE);
+        }
+      }
+    }
+
+    // Draw small grass tufts for decoration
+    ctx.strokeStyle = '#4CAF3A';
+    ctx.lineWidth = 1.5;
+    for (let i = 0; i < 20; i++) {
+      const gx = (i * 37 + 15) % W;
+      const gy = (i * 53 + 25) % H;
+      ctx.beginPath();
+      ctx.moveTo(gx, gy);
+      ctx.lineTo(gx - 3, gy - 8);
+      ctx.moveTo(gx, gy);
+      ctx.lineTo(gx + 2, gy - 10);
+      ctx.moveTo(gx, gy);
+      ctx.lineTo(gx + 5, gy - 7);
+      ctx.stroke();
+    }
+
+    // Draw apple labels (answer boxes in corners)
+    apples.forEach((apple, i) => {
+      if (apple.alpha <= 0) return;
+
+      ctx.save();
+      ctx.globalAlpha = apple.alpha;
+
+      // Scale entrance
+      const cx = apple.labelX + APPLE_LABEL_W / 2;
+      const cy = apple.labelY + APPLE_LABEL_H / 2;
+      ctx.translate(cx, cy);
+      ctx.scale(apple.scale, apple.scale);
+      ctx.translate(-cx, -cy);
+
+      // Label background
+      const isSelected = selectedApple === i;
+      let bgColor = COLORS.surface;
+      let borderColor = COLORS.borderSubtle;
+
+      if (isSelected) {
+        if (apple.choice.is_correct) {
+          bgColor = '#E8F8E5';
+          borderColor = COLORS.success;
+        } else {
+          bgColor = '#FDECEB';
+          borderColor = COLORS.error;
+        }
+      }
+
+      // Shadow
+      ctx.shadowColor = 'rgba(0,0,0,0.15)';
+      ctx.shadowBlur = 8;
+      ctx.shadowOffsetY = 2;
+
+      ctx.fillStyle = bgColor;
+      ctx.beginPath();
+      ctx.roundRect(apple.labelX, apple.labelY, APPLE_LABEL_W, APPLE_LABEL_H, 12);
+      ctx.fill();
+
+      ctx.shadowColor = 'transparent';
+      ctx.shadowBlur = 0;
+      ctx.shadowOffsetY = 0;
+
+      // Border
+      ctx.strokeStyle = borderColor;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.roundRect(apple.labelX, apple.labelY, APPLE_LABEL_W, APPLE_LABEL_H, 12);
+      ctx.stroke();
+
+      // Letter indicator
+      const letters = ['A', 'B', 'C', 'D'];
+      const letterCircleX = apple.labelX + 22;
+      const letterCircleY = apple.labelY + APPLE_LABEL_H / 2;
+      ctx.fillStyle = COLORS.orange;
+      ctx.beginPath();
+      ctx.arc(letterCircleX, letterCircleY, 14, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#FFFFFF';
+      ctx.font = "700 14px 'Nunito Sans', sans-serif";
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(letters[i], letterCircleX, letterCircleY);
+
+      // Answer text (wrap if needed)
+      ctx.font = "500 14px 'Nunito', sans-serif";
+      ctx.fillStyle = COLORS.textPrimary;
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
+      const textX = apple.labelX + 44;
+      const maxTextW = APPLE_LABEL_W - 54;
+      const lines = wrapText(ctx, apple.choice.text, maxTextW);
+
+      if (lines.length === 1) {
+        ctx.fillText(lines[0], textX, apple.labelY + APPLE_LABEL_H / 2);
+      } else {
+        const lineH = 16;
+        const startY = apple.labelY + APPLE_LABEL_H / 2 - (lines.length - 1) * lineH / 2;
+        lines.forEach((line, li) => {
+          ctx.fillText(line, textX, startY + li * lineH);
+        });
+      }
+
+      ctx.restore();
+    });
+
+    // Draw apples on the field
+    apples.forEach((apple, i) => {
+      if (apple.eaten || apple.alpha <= 0) return;
+
+      ctx.save();
+      ctx.globalAlpha = apple.alpha;
+
+      const ax = apple.gridX * GRID_SIZE + GRID_SIZE / 2;
+      const ay = apple.gridY * GRID_SIZE + GRID_SIZE / 2;
+      const bob = Math.sin(apple.bobPhase) * 2;
+
+      // Scale entrance
+      ctx.translate(ax, ay + bob);
+      ctx.scale(apple.scale, apple.scale);
+
+      // Apple body
+      const appleRadius = GRID_SIZE * 0.7;
+      const gradient = ctx.createRadialGradient(-2, -2, 2, 0, 0, appleRadius);
+      gradient.addColorStop(0, '#FF6B5B');
+      gradient.addColorStop(0.6, COLORS.appleRed);
+      gradient.addColorStop(1, '#C44A3A');
+      ctx.fillStyle = gradient;
+      ctx.beginPath();
+      ctx.arc(0, 0, appleRadius, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Apple highlight
+      ctx.fillStyle = 'rgba(255,255,255,0.3)';
+      ctx.beginPath();
+      ctx.arc(-3, -4, appleRadius * 0.35, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Apple stem
+      ctx.strokeStyle = COLORS.appleStem;
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      ctx.moveTo(0, -appleRadius + 2);
+      ctx.quadraticCurveTo(3, -appleRadius - 6, 5, -appleRadius - 4);
+      ctx.stroke();
+
+      // Apple leaf
+      ctx.fillStyle = '#4CAF50';
+      ctx.beginPath();
+      ctx.ellipse(4, -appleRadius - 2, 5, 3, 0.4, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Letter on apple
+      const letters = ['A', 'B', 'C', 'D'];
+      ctx.fillStyle = '#FFFFFF';
+      ctx.font = "700 16px 'Nunito Sans', sans-serif";
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(letters[i], 0, 1);
+
+      ctx.restore();
+    });
+
+    // Draw snake
+    snake.forEach((seg, i) => {
+      const sx = seg.x * GRID_SIZE;
+      const sy = seg.y * GRID_SIZE;
+      const isHead = i === 0;
+
+      if (isHead) {
+        // Snake head
+        ctx.fillStyle = COLORS.snakeHead;
+        ctx.beginPath();
+        ctx.roundRect(sx + 1, sy + 1, GRID_SIZE - 2, GRID_SIZE - 2, 6);
+        ctx.fill();
+
+        // Eyes
+        const eyeOffsetX = snakeDir.x !== 0 ? 5 * snakeDir.x : 0;
+        const eyeOffsetY = snakeDir.y !== 0 ? 5 * snakeDir.y : 0;
+        const eyeBaseX = sx + GRID_SIZE / 2;
+        const eyeBaseY = sy + GRID_SIZE / 2;
+
+        // Left eye
+        let leftEyeX, leftEyeY, rightEyeX, rightEyeY;
+        if (snakeDir.x !== 0) {
+          leftEyeX = eyeBaseX + eyeOffsetX;
+          leftEyeY = eyeBaseY - 4;
+          rightEyeX = eyeBaseX + eyeOffsetX;
+          rightEyeY = eyeBaseY + 4;
+        } else {
+          leftEyeX = eyeBaseX - 4;
+          leftEyeY = eyeBaseY + eyeOffsetY;
+          rightEyeX = eyeBaseX + 4;
+          rightEyeY = eyeBaseY + eyeOffsetY;
+        }
+
+        // Eye whites
+        ctx.fillStyle = '#FFFFFF';
+        ctx.beginPath();
+        ctx.arc(leftEyeX, leftEyeY, 3, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(rightEyeX, rightEyeY, 3, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Pupils
+        ctx.fillStyle = '#1A1A1A';
+        ctx.beginPath();
+        ctx.arc(leftEyeX + snakeDir.x * 1, leftEyeY + snakeDir.y * 1, 1.5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(rightEyeX + snakeDir.x * 1, rightEyeY + snakeDir.y * 1, 1.5, 0, Math.PI * 2);
+        ctx.fill();
+      } else {
+        // Snake body segments (alternating colors)
+        ctx.fillStyle = i % 2 === 0 ? COLORS.snakeBody : COLORS.snakeBodyAlt;
+        ctx.beginPath();
+        ctx.roundRect(sx + 2, sy + 2, GRID_SIZE - 4, GRID_SIZE - 4, 4);
+        ctx.fill();
+
+        // Scale pattern
+        if (i % 3 === 0) {
+          ctx.fillStyle = 'rgba(255,255,255,0.15)';
+          ctx.beginPath();
+          ctx.arc(sx + GRID_SIZE / 2, sy + GRID_SIZE / 2, 3, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+    });
+
+    // Draw particles
+    gameParticles.forEach(p => {
+      ctx.save();
+      ctx.globalAlpha = p.alpha;
+      ctx.fillStyle = p.color;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    });
+
+    // Selection flash effect
+    if (selectedApple !== null) {
+      const apple = apples[selectedApple];
+      const flashAlpha = Math.sin(selectionTimer * 15) * 0.15 + 0.1;
+      ctx.fillStyle = apple.choice.is_correct
+        ? `rgba(107, 191, 89, ${flashAlpha})`
+        : `rgba(232, 93, 74, ${flashAlpha})`;
+      ctx.fillRect(0, 0, W, H);
+    }
+  }
+
+  function handleInput(e) {
+    if (gameState !== 'playing') return;
+    if (selectedApple !== null) return;
+
+    // Resume audio context on first interaction
+    if (audioCtx.state === 'suspended') {
+      audioCtx.resume();
+    }
+
+    if (e.code === 'ArrowUp' || e.code === 'KeyW') {
+      if (snakeDir.y !== 1) nextDir = { x: 0, y: -1 };
+    } else if (e.code === 'ArrowDown' || e.code === 'KeyS') {
+      if (snakeDir.y !== -1) nextDir = { x: 0, y: 1 };
+    } else if (e.code === 'ArrowLeft' || e.code === 'KeyA') {
+      if (snakeDir.x !== 1) nextDir = { x: -1, y: 0 };
+    } else if (e.code === 'ArrowRight' || e.code === 'KeyD') {
+      if (snakeDir.x !== -1) nextDir = { x: 1, y: 0 };
+    }
+
+    e.preventDefault();
+  }
+
+  // +====================================================================+
+  // |  SECTION 4: GAME LOOP - DO NOT MODIFY                               |
+  // |  Standard loop with responsive scaling and DPR support.            |
+  // +====================================================================+
+  let lastTime = performance.now();
+
+  function gameLoop(now) {
+    const dt = Math.min((now - lastTime) / 1000, 0.05); // Cap at 50ms
+    lastTime = now;
+
+    // Apply transform for logical coordinate system
+    ctx.setTransform(scale * dpr, 0, 0, scale * dpr, 0, 0);
+
+    if (gameState === 'playing') {
+      updateGame(dt);
+      drawGame();
+    } else {
+      drawGame(); // Draw game state behind overlay
+      drawEndScreen(dt);
+    }
+
+    // Reset transform for next frame
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+    requestAnimationFrame(gameLoop);
+  }
+
+  // Input handlers
+  document.addEventListener('keydown', (e) => {
+    if (gameState === 'ended' && (e.code === 'KeyR')) {
+      // Restart game
+      gameState = 'playing';
+      gameResult = null;
+      gameExplanation = '';
+      confettiParticles = [];
+      initGame();
+      return;
+    }
+    handleInput(e);
+  });
+
+  document.addEventListener('keyup', (e) => {
+    // Optional: handle key release in your handleInput
+  });
+
+  // Canvas click handler for end screen buttons
+  canvas.addEventListener('click', (e) => {
+    if (gameState !== 'ended') return;
+
+    const { x, y } = screenToLogical(e.clientX, e.clientY);
+
+    if (gameResult) {
+      // Correct answer: check both buttons
+      if (pointInRect(x, y, restartButton)) {
+        gameState = 'playing';
+        gameResult = null;
+        gameExplanation = '';
+        confettiParticles = [];
+        initGame();
+        return;
+      }
+      if (pointInRect(x, y, nextButton)) {
+        // Notify parent to go to next question
+        if (window.parent && window.parent !== window) {
+          window.parent.postMessage({ type: 'quiz-next' }, '*');
+        }
+        return;
+      }
+    } else {
+      // Wrong answer: check centered restart button
+      const centeredRestart = { x: W / 2 - 75, y: H / 2 + 60, w: 150, h: 48 };
+      if (pointInRect(x, y, centeredRestart)) {
+        gameState = 'playing';
+        gameResult = null;
+        gameExplanation = '';
+        confettiParticles = [];
+        initGame();
+        return;
+      }
+    }
+  });
+
+  // Handle resize
+  window.addEventListener('resize', resizeCanvas);
+
+  // Initialize
+  resizeCanvas();
+  initGame();
+  requestAnimationFrame(gameLoop);
+  </script>
+</body>
+</html>

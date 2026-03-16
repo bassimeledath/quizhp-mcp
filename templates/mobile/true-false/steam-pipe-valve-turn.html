@@ -1,0 +1,1037 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <title>Steam Pipe Valve Turn</title>
+  <link href="https://fonts.googleapis.com/css2?family=Belanosima:wght@400;600;700&family=Nunito+Sans:wght@400;500;600;700&family=Nunito:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      touch-action: none;
+      -webkit-touch-callout: none;
+      -webkit-user-select: none;
+      user-select: none;
+    }
+    body {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      background: #1a1a2e;
+      font-family: 'Nunito Sans', system-ui, -apple-system, sans-serif;
+    }
+    #gameCanvas {
+      background: #16213e;
+      width: 100vw;
+      height: 100vh;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="gameCanvas"></canvas>
+
+  <script>
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 1: QUESTION PLACEHOLDER - DO NOT MODIFY FORMAT                    ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  const QUESTION = {
+    type: "true_false",
+    prompt: "Sample question text",
+    choices: [
+      { text: "This is sample answer A which is long enough to test text overflow", is_correct: true, explanation: "Why A is correct" },
+      { text: "This is sample answer B which is long enough to test text overflow", is_correct: false, explanation: "Why B is wrong" }
+    ],
+    isLastQuestion: false
+  };
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 2: ENGINE CORE (MOBILE) - DO NOT MODIFY                           ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  const canvas = document.getElementById('gameCanvas');
+  const ctx = canvas.getContext('2d');
+
+  const W = 360, H = 640;
+
+  let scaleX = 1;
+  let scaleY = 1;
+  let aspectRatio = 1;
+
+  let gameState = 'playing';
+  let gameResult = null;
+  let gameExplanation = '';
+  let endScreenTime = 0;
+  let confettiParticles = [];
+
+  const restartButton = { x: 20, y: H / 2 + 50, w: 155, h: 56 };
+  const nextButton = { x: 185, y: H / 2 + 50, w: 155, h: 56 };
+  const centeredRestartButton = { x: W / 2 - 100, y: H / 2 + 50, w: 200, h: 56 };
+
+  function drawMobileButton(rect, label, color, pulse) {
+    const textAdj = getTextScaleAdjustment();
+    const p = pulse ? 1 + Math.sin(endScreenTime * 4) * 0.03 : 1;
+
+    ctx.save();
+    ctx.translate(rect.x + rect.w / 2, rect.y + rect.h / 2);
+    ctx.scale(p, p);
+    ctx.translate(-(rect.x + rect.w / 2), -(rect.y + rect.h / 2));
+
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.roundRect(rect.x, rect.y, rect.w, rect.h, 12);
+    ctx.fill();
+
+    ctx.save();
+    ctx.translate(rect.x + rect.w / 2, rect.y + rect.h / 2);
+    ctx.scale(textAdj / aspectRatio, textAdj);
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = 'bold 18px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, 0, 0);
+    ctx.restore();
+
+    ctx.restore();
+  }
+
+  function resizeCanvas() {
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = window.innerWidth * dpr;
+    canvas.height = window.innerHeight * dpr;
+    canvas.style.width = window.innerWidth + 'px';
+    canvas.style.height = window.innerHeight + 'px';
+    scaleX = canvas.width / W;
+    scaleY = canvas.height / H;
+    aspectRatio = scaleX / scaleY;
+    if (typeof recalculateTextSizing === 'function') {
+      recalculateTextSizing();
+    }
+  }
+
+  const TEXT_SCALE_MIN = 0.75;
+  const TEXT_SCALE_MAX = 1.4;
+
+  function getTextScaleAdjustment() {
+    const baseScale = window.innerHeight / H;
+    const clampedScale = Math.min(TEXT_SCALE_MAX, Math.max(TEXT_SCALE_MIN, baseScale));
+    return clampedScale / baseScale;
+  }
+
+  function drawText(text, x, y, options = {}) {
+    const { font = "500 16px 'Nunito Sans', sans-serif", color = '#F5F5F0', align = 'center', baseline = 'middle' } = options;
+    ctx.save();
+    ctx.translate(x, y);
+    const adj = getTextScaleAdjustment();
+    ctx.scale(adj / aspectRatio, adj);
+    ctx.font = font;
+    ctx.fillStyle = color;
+    ctx.textAlign = align;
+    ctx.textBaseline = baseline;
+    ctx.fillText(text, 0, 0);
+    ctx.restore();
+  }
+
+  function screenToLogical(screenX, screenY) {
+    const dpr = window.devicePixelRatio || 1;
+    const rect = canvas.getBoundingClientRect();
+    const canvasX = (screenX - rect.left) * dpr;
+    const canvasY = (screenY - rect.top) * dpr;
+    return {
+      x: canvasX / scaleX,
+      y: canvasY / scaleY
+    };
+  }
+
+  function pointInRect(px, py, rect) {
+    return px >= rect.x && px <= rect.x + rect.w &&
+           py >= rect.y && py <= rect.y + rect.h;
+  }
+
+  function wrapText(text, maxWidth, font, maxLines = 3) {
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.font = font;
+    const adj = getTextScaleAdjustment();
+    const maxRawWidth = maxWidth * aspectRatio / adj;
+    const words = text.split(' ');
+    const lines = [];
+    let currentLine = '';
+    words.forEach(word => {
+      const testLine = currentLine ? currentLine + ' ' + word : word;
+      if (ctx.measureText(testLine).width > maxRawWidth && currentLine) {
+        lines.push(currentLine);
+        currentLine = word;
+      } else {
+        currentLine = testLine;
+      }
+    });
+    if (currentLine) lines.push(currentLine);
+    ctx.restore();
+    return lines.slice(0, maxLines);
+  }
+
+  function findOptimalFontSize(options) {
+    const {
+      texts,
+      maxWidth,
+      availableHeight,
+      minFont = 12,
+      maxFont = 18,
+      itemPadding = 4,
+      fontFamily = "'Nunito Sans', sans-serif"
+    } = options;
+
+    let bestFontSize = minFont;
+    let bestWrappedTexts = [];
+
+    for (let fontSize = maxFont; fontSize >= minFont; fontSize -= 0.5) {
+      const font = `${fontSize}px ${fontFamily}`;
+      const lineHeight = fontSize + 2;
+
+      let totalHeight = 0;
+      const wrappedTexts = [];
+
+      for (const text of texts) {
+        const lines = wrapText(text, maxWidth, font);
+        wrappedTexts.push(lines);
+        totalHeight += itemPadding + lines.length * lineHeight;
+      }
+
+      if (totalHeight <= availableHeight) {
+        bestFontSize = fontSize;
+        bestWrappedTexts = wrappedTexts;
+        break;
+      }
+
+      bestWrappedTexts = wrappedTexts;
+    }
+
+    return { fontSize: bestFontSize, wrappedTexts: bestWrappedTexts };
+  }
+
+  const engine = {
+    end(isCorrect, explanation) {
+      if (gameState === 'ended') return;
+      gameState = 'ended';
+      gameResult = isCorrect;
+      gameExplanation = explanation || '';
+      endScreenTime = 0;
+
+      if (isCorrect) {
+        for (let i = 0; i < 50; i++) {
+          confettiParticles.push({
+            x: W / 2,
+            y: H / 2,
+            vx: (Math.random() - 0.5) * 400,
+            vy: -Math.random() * 300 - 80,
+            size: 4 + Math.random() * 6,
+            color: ['#FFD700', '#FF6B6B', '#4ECDC4', '#95E1D3', '#F38181'][Math.floor(Math.random() * 5)],
+            rotation: Math.random() * Math.PI * 2,
+            rotationSpeed: (Math.random() - 0.5) * 10
+          });
+        }
+      }
+
+      if (window.parent && window.parent !== window) {
+        window.parent.postMessage({
+          type: 'quiz-end',
+          isCorrect: isCorrect,
+          explanation: explanation || ''
+        }, '*');
+      }
+    }
+  };
+
+  function drawEndScreen(dt) {
+    endScreenTime += dt;
+
+    confettiParticles = confettiParticles.filter(p => {
+      p.vy += 600 * dt;
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.rotation += p.rotationSpeed * dt;
+      p.vx *= 0.99;
+      return p.y < H + 50;
+    });
+
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
+    ctx.fillRect(0, 0, W, H);
+
+    confettiParticles.forEach(p => {
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rotation);
+      ctx.fillStyle = p.color;
+      ctx.fillRect(-p.size / 2, -p.size / 4, p.size, p.size / 2);
+      ctx.restore();
+    });
+
+    const textAdj = getTextScaleAdjustment();
+    ctx.save();
+    ctx.translate(W / 2, H / 2 - 80);
+    ctx.scale(textAdj / aspectRatio, textAdj);
+    ctx.font = '64px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(gameResult ? '🎉' : '😢', 0, 0);
+    ctx.restore();
+
+    ctx.save();
+    ctx.translate(W / 2, H / 2 - 10);
+    ctx.scale(textAdj / aspectRatio, textAdj);
+    ctx.fillStyle = gameResult ? '#4ADE80' : '#F87171';
+    ctx.font = 'bold 32px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(gameResult ? 'Correct!' : 'Wrong!', 0, 0);
+    ctx.restore();
+
+    if (gameResult) {
+      drawMobileButton(restartButton, 'Restart', '#E87A3E', true);
+      const nextLabel = QUESTION.isLastQuestion ? 'Finish' : 'Next';
+      drawMobileButton(nextButton, nextLabel, '#4ECDC4', true);
+    } else {
+      drawMobileButton(centeredRestartButton, 'Restart', '#E87A3E', true);
+    }
+  }
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 3: YOUR GAME CODE                                                ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+
+  // === COLORS ===
+  const COLORS = {
+    bgPrimary: '#2B2B28',
+    bgDark: '#1C1C1A',
+    pipeMetal: '#5A5A54',
+    pipeHighlight: '#8C8C84',
+    pipeShadow: '#363633',
+    valveTrue: '#4ECDC4',
+    valveFalse: '#E87A3E',
+    valveCenter: '#D4D4CC',
+    steamWhite: 'rgba(245, 245, 240, 0.3)',
+    orange: '#E87A3E',
+    cyan: '#4ECDC4',
+    amber: '#F5A742',
+    success: '#6BBF59',
+    error: '#E85D4A',
+    textPrimary: '#F5F5F0',
+    textSecondary: '#C2C2B8',
+    rivetColor: '#424240'
+  };
+
+  // === AUDIO ===
+  let audioCtx = null;
+  function getAudioCtx() {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    return audioCtx;
+  }
+
+  function playSound(type) {
+    try {
+      const ctx = getAudioCtx();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+
+      if (type === 'turn') {
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(120, ctx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(80, ctx.currentTime + 0.3);
+        gain.gain.setValueAtTime(0.15, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.3);
+        osc.start(ctx.currentTime);
+        osc.stop(ctx.currentTime + 0.3);
+      } else if (type === 'steam') {
+        const bufferSize = ctx.sampleRate * 0.4;
+        const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+        const data = buffer.getChannelData(0);
+        for (let i = 0; i < bufferSize; i++) {
+          data[i] = (Math.random() * 2 - 1) * 0.3;
+        }
+        const noise = ctx.createBufferSource();
+        noise.buffer = buffer;
+        const filter = ctx.createBiquadFilter();
+        filter.type = 'highpass';
+        filter.frequency.value = 2000;
+        const noiseGain = ctx.createGain();
+        noiseGain.gain.setValueAtTime(0.1, ctx.currentTime);
+        noiseGain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.4);
+        noise.connect(filter);
+        filter.connect(noiseGain);
+        noiseGain.connect(ctx.destination);
+        noise.start(ctx.currentTime);
+        noise.stop(ctx.currentTime + 0.4);
+      } else if (type === 'correct') {
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(523, ctx.currentTime);
+        osc.frequency.setValueAtTime(659, ctx.currentTime + 0.1);
+        osc.frequency.setValueAtTime(784, ctx.currentTime + 0.2);
+        gain.gain.setValueAtTime(0.2, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.4);
+        osc.start(ctx.currentTime);
+        osc.stop(ctx.currentTime + 0.4);
+      } else if (type === 'wrong') {
+        osc.type = 'square';
+        osc.frequency.setValueAtTime(200, ctx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(100, ctx.currentTime + 0.3);
+        gain.gain.setValueAtTime(0.15, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.3);
+        osc.start(ctx.currentTime);
+        osc.stop(ctx.currentTime + 0.3);
+      }
+    } catch(e) {}
+  }
+
+  // === GAME STATE ===
+  let valves = [];
+  let pipes = [];
+  let steamParticles = [];
+  let entranceTime = 0;
+  let answered = false;
+  let selectedValve = -1;
+  let gameTime = 0;
+
+  // Touch tracking
+  let touchStartX = 0;
+  let touchStartY = 0;
+  let touchActiveValve = -1;
+  let swipeProgress = 0; // -1 to 1 for swipe visualization
+
+  // Animation state
+  let shakeTime = 0;
+  let shakeValve = -1;
+  let celebrateTime = 0;
+  let celebrateValve = -1;
+
+  function initGame() {
+    answered = false;
+    selectedValve = -1;
+    touchActiveValve = -1;
+    swipeProgress = 0;
+    shakeTime = 0;
+    shakeValve = -1;
+    celebrateTime = 0;
+    celebrateValve = -1;
+    entranceTime = 0;
+    gameTime = 0;
+
+    // Create pipe network (background decoration)
+    pipes = [];
+    // Horizontal pipes
+    pipes.push({ x1: 0, y1: 140, x2: W, y2: 140, thickness: 14 });
+    pipes.push({ x1: 0, y1: 500, x2: W, y2: 500, thickness: 14 });
+    pipes.push({ x1: 30, y1: 280, x2: 330, y2: 280, thickness: 10 });
+    pipes.push({ x1: 50, y1: 400, x2: 310, y2: 400, thickness: 10 });
+    // Vertical pipes
+    pipes.push({ x1: 60, y1: 140, x2: 60, y2: 280, thickness: 10 });
+    pipes.push({ x1: 300, y1: 140, x2: 300, y2: 280, thickness: 10 });
+    pipes.push({ x1: 90, y1: 400, x2: 90, y2: 500, thickness: 10 });
+    pipes.push({ x1: 270, y1: 400, x2: 270, y2: 500, thickness: 10 });
+    // Diagonal accent pipes
+    pipes.push({ x1: 60, y1: 280, x2: 90, y2: 400, thickness: 8 });
+    pipes.push({ x1: 300, y1: 280, x2: 270, y2: 400, thickness: 8 });
+
+    // Valve setup - two big valves, left = choice[0], right = choice[1]
+    const valveRadius = 55;
+    const valveY = 320;
+    valves = QUESTION.choices.map((choice, i) => ({
+      x: i === 0 ? 95 : 265,
+      y: valveY,
+      radius: valveRadius,
+      choice: choice,
+      rotation: 0,        // current rotation angle
+      targetRotation: 0,  // target for animation
+      isOpen: false,
+      scale: 0,           // for entrance animation
+      alpha: 0,
+      color: i === 0 ? COLORS.valveTrue : COLORS.valveFalse,
+      label: choice.text,
+      wrappedText: [choice.text],
+      fontSize: 18,
+      offsetX: 0          // for shake animation
+    }));
+
+    // Steam particles
+    steamParticles = [];
+
+    recalculateTextSizing();
+  }
+
+  function recalculateTextSizing() {
+    if (!valves || valves.length === 0) return;
+
+    const { fontSize, wrappedTexts } = findOptimalFontSize({
+      texts: QUESTION.choices.map(c => c.text),
+      maxWidth: 140,
+      availableHeight: 80,
+      minFont: 14,
+      maxFont: 18,
+      fontFamily: "'Nunito', sans-serif"
+    });
+
+    valves.forEach((v, i) => {
+      v.wrappedText = wrappedTexts[i];
+      v.fontSize = fontSize;
+    });
+  }
+
+  function spawnSteam(x, y) {
+    for (let i = 0; i < 5; i++) {
+      steamParticles.push({
+        x: x + (Math.random() - 0.5) * 20,
+        y: y,
+        vx: (Math.random() - 0.5) * 30,
+        vy: -Math.random() * 60 - 20,
+        size: 3 + Math.random() * 6,
+        alpha: 0.4 + Math.random() * 0.3,
+        life: 1.0
+      });
+    }
+  }
+
+  function updateGame(dt) {
+    if (gameState !== 'playing') return;
+
+    gameTime += dt;
+    entranceTime += dt;
+
+    // Entrance animation
+    valves.forEach((v, i) => {
+      const delay = i * 0.15;
+      const t = Math.max(0, Math.min(1, (entranceTime - delay) / 0.4));
+      const spring = 1 + Math.sin(t * Math.PI * 2) * 0.2 * (1 - t);
+      v.scale = t * spring;
+      v.alpha = t;
+    });
+
+    // Valve rotation animation (smooth towards target)
+    valves.forEach(v => {
+      const diff = v.targetRotation - v.rotation;
+      v.rotation += diff * dt * 8;
+    });
+
+    // Shake animation
+    if (shakeTime > 0) {
+      shakeTime -= dt;
+      const decay = shakeTime / 0.4;
+      if (shakeValve >= 0 && shakeValve < valves.length) {
+        valves[shakeValve].offsetX = Math.sin(shakeTime * Math.PI * 20) * 6 * decay;
+      }
+    } else if (shakeValve >= 0 && shakeValve < valves.length) {
+      valves[shakeValve].offsetX = 0;
+      shakeValve = -1;
+    }
+
+    // Celebrate animation
+    if (celebrateTime > 0) {
+      celebrateTime -= dt;
+    }
+
+    // Update steam particles
+    steamParticles.forEach(p => {
+      p.vy -= 10 * dt;
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.life -= dt * 0.8;
+      p.alpha = p.life * 0.5;
+      p.size += dt * 3;
+    });
+    steamParticles = steamParticles.filter(p => p.life > 0);
+
+    // Ambient steam from pipe joints
+    if (Math.random() < dt * 3) {
+      const joints = [
+        { x: 60, y: 140 }, { x: 300, y: 140 },
+        { x: 60, y: 280 }, { x: 300, y: 280 },
+        { x: 90, y: 400 }, { x: 270, y: 400 }
+      ];
+      const j = joints[Math.floor(Math.random() * joints.length)];
+      steamParticles.push({
+        x: j.x + (Math.random() - 0.5) * 10,
+        y: j.y,
+        vx: (Math.random() - 0.5) * 15,
+        vy: -Math.random() * 30 - 10,
+        size: 2 + Math.random() * 4,
+        alpha: 0.2,
+        life: 0.8
+      });
+    }
+  }
+
+  function drawGame() {
+    // Background - industrial dark
+    ctx.fillStyle = COLORS.bgDark;
+    ctx.fillRect(0, 0, W, H);
+
+    // Subtle grid pattern for industrial feel
+    ctx.strokeStyle = 'rgba(90, 90, 84, 0.15)';
+    ctx.lineWidth = 0.5;
+    for (let x = 0; x < W; x += 20) {
+      ctx.beginPath();
+      ctx.moveTo(x, 0);
+      ctx.lineTo(x, H);
+      ctx.stroke();
+    }
+    for (let y = 0; y < H; y += 20) {
+      ctx.beginPath();
+      ctx.moveTo(0, y);
+      ctx.lineTo(W, y);
+      ctx.stroke();
+    }
+
+    // Draw pipes
+    pipes.forEach(pipe => {
+      const isVertical = pipe.x1 === pipe.x2;
+      const t = pipe.thickness;
+
+      // Pipe shadow
+      ctx.fillStyle = COLORS.pipeShadow;
+      if (isVertical) {
+        ctx.fillRect(pipe.x1 - t/2 + 2, pipe.y1, t, pipe.y2 - pipe.y1);
+      } else if (pipe.y1 === pipe.y2) {
+        ctx.fillRect(pipe.x1, pipe.y1 - t/2 + 2, pipe.x2 - pipe.x1, t);
+      }
+
+      // Pipe body
+      ctx.fillStyle = COLORS.pipeMetal;
+      if (isVertical) {
+        ctx.fillRect(pipe.x1 - t/2, pipe.y1, t, pipe.y2 - pipe.y1);
+      } else if (pipe.y1 === pipe.y2) {
+        ctx.fillRect(pipe.x1, pipe.y1 - t/2, pipe.x2 - pipe.x1, t);
+      } else {
+        // Diagonal
+        ctx.save();
+        ctx.lineWidth = t;
+        ctx.strokeStyle = COLORS.pipeMetal;
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.moveTo(pipe.x1, pipe.y1);
+        ctx.lineTo(pipe.x2, pipe.y2);
+        ctx.stroke();
+        ctx.restore();
+      }
+
+      // Pipe highlight (top edge)
+      ctx.fillStyle = COLORS.pipeHighlight;
+      if (isVertical) {
+        ctx.fillRect(pipe.x1 - t/2, pipe.y1, 2, pipe.y2 - pipe.y1);
+      } else if (pipe.y1 === pipe.y2) {
+        ctx.fillRect(pipe.x1, pipe.y1 - t/2, pipe.x2 - pipe.x1, 2);
+      }
+    });
+
+    // Draw rivets on pipe joints
+    const rivetSpots = [
+      { x: 60, y: 140 }, { x: 300, y: 140 },
+      { x: 60, y: 280 }, { x: 300, y: 280 },
+      { x: 90, y: 400 }, { x: 270, y: 400 },
+      { x: 90, y: 500 }, { x: 270, y: 500 },
+      { x: 30, y: 280 }, { x: 330, y: 280 },
+      { x: 50, y: 400 }, { x: 310, y: 400 }
+    ];
+    rivetSpots.forEach(r => {
+      ctx.fillStyle = COLORS.rivetColor;
+      ctx.beginPath();
+      ctx.ellipse(r.x, r.y, 4, 4 * aspectRatio, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = COLORS.pipeHighlight;
+      ctx.beginPath();
+      ctx.ellipse(r.x - 1, r.y - 1 * aspectRatio, 1.5, 1.5 * aspectRatio, 0, 0, Math.PI * 2);
+      ctx.fill();
+    });
+
+    // Draw steam particles
+    steamParticles.forEach(p => {
+      ctx.fillStyle = `rgba(245, 245, 240, ${p.alpha})`;
+      ctx.beginPath();
+      ctx.ellipse(p.x, p.y, p.size, p.size * aspectRatio, 0, 0, Math.PI * 2);
+      ctx.fill();
+    });
+
+    // Draw valves
+    valves.forEach((v, i) => {
+      if (v.alpha <= 0) return;
+
+      ctx.save();
+      ctx.globalAlpha = v.alpha;
+      ctx.translate(v.x + v.offsetX, v.y);
+
+      // Scale for entrance/celebrate
+      let s = v.scale;
+      if (celebrateTime > 0 && celebrateValve === i) {
+        s *= 1 + 0.15 * Math.sin((0.5 - celebrateTime) / 0.5 * Math.PI);
+      }
+      ctx.scale(s, s);
+
+      // Valve base plate (circle behind valve)
+      ctx.fillStyle = COLORS.pipeShadow;
+      ctx.beginPath();
+      ctx.ellipse(0, 0, v.radius + 8, (v.radius + 8) * aspectRatio, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Valve body ring
+      const gradient = ctx.createRadialGradient(0, 0, v.radius * 0.3, 0, 0, v.radius + 4);
+      gradient.addColorStop(0, v.color);
+      gradient.addColorStop(0.7, v.color);
+      gradient.addColorStop(1, COLORS.pipeShadow);
+      ctx.fillStyle = gradient;
+      ctx.beginPath();
+      ctx.ellipse(0, 0, v.radius + 4, (v.radius + 4) * aspectRatio, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Inner valve circle
+      ctx.fillStyle = COLORS.bgDark;
+      ctx.beginPath();
+      ctx.ellipse(0, 0, v.radius - 6, (v.radius - 6) * aspectRatio, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Valve spoke wheel (rotates)
+      ctx.save();
+      ctx.scale(1, aspectRatio);
+      ctx.rotate(v.rotation);
+
+      // Outer ring of the wheel
+      ctx.strokeStyle = v.color;
+      ctx.lineWidth = 5;
+      ctx.beginPath();
+      ctx.arc(0, 0, v.radius - 10, 0, Math.PI * 2);
+      ctx.stroke();
+
+      // Spokes (4 spokes forming a cross)
+      const spokeLen = v.radius - 10;
+      for (let s = 0; s < 4; s++) {
+        const angle = (s / 4) * Math.PI * 2;
+        ctx.strokeStyle = v.color;
+        ctx.lineWidth = 4;
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.lineTo(Math.cos(angle) * spokeLen, Math.sin(angle) * spokeLen);
+        ctx.stroke();
+      }
+
+      // Hub center
+      ctx.fillStyle = COLORS.valveCenter;
+      ctx.beginPath();
+      ctx.arc(0, 0, 10, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = v.color;
+      ctx.lineWidth = 2;
+      ctx.stroke();
+
+      // Small bolt marks on hub
+      for (let b = 0; b < 4; b++) {
+        const angle = (b / 4) * Math.PI * 2 + Math.PI / 4;
+        ctx.fillStyle = COLORS.pipeShadow;
+        ctx.beginPath();
+        ctx.arc(Math.cos(angle) * 6, Math.sin(angle) * 6, 1.5, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      ctx.restore();
+
+      // Active swipe indicator (glow when being swiped)
+      if (touchActiveValve === i && Math.abs(swipeProgress) > 0.05) {
+        ctx.strokeStyle = v.color;
+        ctx.lineWidth = 3;
+        ctx.globalAlpha = Math.abs(swipeProgress) * 0.6;
+        ctx.beginPath();
+        ctx.ellipse(0, 0, v.radius + 12, (v.radius + 12) * aspectRatio, 0, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.globalAlpha = v.alpha;
+      }
+
+      ctx.restore();
+
+      // Draw label below valve
+      const labelY = v.y + v.radius * aspectRatio + 24;
+      const lines = v.wrappedText || [v.label];
+      const fontSize = v.fontSize || 16;
+      const lineHeight = fontSize + 3;
+      const totalTextHeight = lines.length * lineHeight;
+      const startTextY = labelY - totalTextHeight / 2 + lineHeight / 2;
+
+      lines.forEach((line, li) => {
+        drawText(line, v.x, startTextY + li * lineHeight, {
+          font: `500 ${fontSize}px 'Nunito', sans-serif`,
+          color: COLORS.textPrimary,
+          align: 'center'
+        });
+      });
+    });
+
+    // Swipe hint arrows (subtle, pulsing)
+    if (!answered && entranceTime > 0.6) {
+      const hintAlpha = 0.3 + 0.15 * Math.sin(gameTime * 3);
+      valves.forEach((v, i) => {
+        // Curved arrow around valve
+        ctx.save();
+        ctx.translate(v.x, v.y);
+        ctx.globalAlpha = hintAlpha;
+        ctx.strokeStyle = v.color;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        const arrowR = v.radius + 20;
+        ctx.ellipse(0, 0, arrowR, arrowR * aspectRatio, 0, -Math.PI * 0.3, Math.PI * 0.3);
+        ctx.stroke();
+        // Arrowhead
+        const ax = Math.cos(Math.PI * 0.3) * arrowR;
+        const ay = Math.sin(Math.PI * 0.3) * arrowR * aspectRatio;
+        ctx.fillStyle = v.color;
+        ctx.beginPath();
+        ctx.moveTo(ax, ay);
+        ctx.lineTo(ax - 6, ay - 4 * aspectRatio);
+        ctx.lineTo(ax + 2, ay - 8 * aspectRatio);
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
+      });
+    }
+
+    // Pressure gauge decoration (top area)
+    drawPressureGauge(W / 2, 75, 30);
+  }
+
+  function drawPressureGauge(cx, cy, radius) {
+    ctx.save();
+    ctx.translate(cx, cy);
+
+    // Gauge backing
+    ctx.fillStyle = COLORS.pipeShadow;
+    ctx.beginPath();
+    ctx.ellipse(0, 0, radius + 3, (radius + 3) * aspectRatio, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = '#2A2A27';
+    ctx.beginPath();
+    ctx.ellipse(0, 0, radius, radius * aspectRatio, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Gauge border
+    ctx.strokeStyle = COLORS.pipeHighlight;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.ellipse(0, 0, radius, radius * aspectRatio, 0, 0, Math.PI * 2);
+    ctx.stroke();
+
+    // Gauge arc (green to red)
+    ctx.save();
+    ctx.scale(1, aspectRatio);
+    ctx.lineWidth = 3;
+
+    // Green zone
+    ctx.strokeStyle = COLORS.success;
+    ctx.beginPath();
+    ctx.arc(0, 0, radius - 6, Math.PI * 0.8, Math.PI * 1.1);
+    ctx.stroke();
+
+    // Yellow zone
+    ctx.strokeStyle = COLORS.amber;
+    ctx.beginPath();
+    ctx.arc(0, 0, radius - 6, Math.PI * 1.1, Math.PI * 1.4);
+    ctx.stroke();
+
+    // Red zone
+    ctx.strokeStyle = COLORS.error;
+    ctx.beginPath();
+    ctx.arc(0, 0, radius - 6, Math.PI * 1.4, Math.PI * 1.7);
+    ctx.stroke();
+
+    // Needle (wobbles slightly)
+    const needleAngle = Math.PI * 1.1 + Math.sin(gameTime * 2) * 0.15;
+    ctx.strokeStyle = '#E85D4A';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.lineTo(Math.cos(needleAngle) * (radius - 10), Math.sin(needleAngle) * (radius - 10));
+    ctx.stroke();
+
+    // Center dot
+    ctx.fillStyle = COLORS.valveCenter;
+    ctx.beginPath();
+    ctx.arc(0, 0, 3, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.restore();
+    ctx.restore();
+  }
+
+  function handleTouch(e, type) {
+    if (gameState !== 'playing' || answered) return;
+
+    const touch = e.touches[0] || e.changedTouches[0];
+    if (!touch) return;
+    const { x, y } = screenToLogical(touch.clientX, touch.clientY);
+
+    if (type === 'start') {
+      // Check if touch is on a valve
+      touchActiveValve = -1;
+      valves.forEach((v, i) => {
+        const dx = x - v.x;
+        const dy = (y - v.y) / aspectRatio;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist < v.radius + 20) {
+          touchActiveValve = i;
+          touchStartX = x;
+          touchStartY = y;
+          swipeProgress = 0;
+        }
+      });
+    } else if (type === 'move') {
+      if (touchActiveValve >= 0) {
+        const dx = x - touchStartX;
+        swipeProgress = Math.max(-1, Math.min(1, dx / 60));
+        // Rotate valve based on swipe
+        valves[touchActiveValve].targetRotation = swipeProgress * Math.PI * 0.8;
+      }
+    } else if (type === 'end') {
+      if (touchActiveValve >= 0 && Math.abs(swipeProgress) > 0.3) {
+        // Swipe completed - select this answer
+        answered = true;
+        selectedValve = touchActiveValve;
+        const choice = valves[touchActiveValve].choice;
+
+        // Full rotation animation
+        valves[touchActiveValve].targetRotation = swipeProgress > 0 ? Math.PI * 2 : -Math.PI * 2;
+
+        playSound('turn');
+        spawnSteam(valves[touchActiveValve].x, valves[touchActiveValve].y - valves[touchActiveValve].radius);
+
+        setTimeout(() => {
+          playSound('steam');
+        }, 150);
+
+        // Delay end to show animation
+        setTimeout(() => {
+          if (choice.is_correct) {
+            playSound('correct');
+            celebrateValve = touchActiveValve;
+            celebrateTime = 0.5;
+          } else {
+            playSound('wrong');
+            shakeValve = touchActiveValve;
+            shakeTime = 0.4;
+          }
+
+          setTimeout(() => {
+            engine.end(choice.is_correct, choice.explanation);
+          }, 400);
+        }, 350);
+      } else if (touchActiveValve >= 0) {
+        // Snap back - swipe not far enough
+        valves[touchActiveValve].targetRotation = 0;
+        swipeProgress = 0;
+      }
+      touchActiveValve = -1;
+    }
+  }
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 4: GAME LOOP - DO NOT MODIFY                                      ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  let lastTime = performance.now();
+
+  function gameLoop(now) {
+    const dt = Math.min((now - lastTime) / 1000, 0.05);
+    lastTime = now;
+
+    ctx.setTransform(scaleX, 0, 0, scaleY, 0, 0);
+
+    if (gameState === 'playing') {
+      updateGame(dt);
+      drawGame();
+    } else {
+      drawGame();
+      drawEndScreen(dt);
+    }
+
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+    requestAnimationFrame(gameLoop);
+  }
+
+  function onTouchStart(e) {
+    e.preventDefault();
+    if (gameState === 'ended') {
+      const touch = e.touches[0];
+      const { x, y } = screenToLogical(touch.clientX, touch.clientY);
+
+      if (gameResult) {
+        if (pointInRect(x, y, restartButton)) {
+          gameState = 'playing';
+          gameResult = null;
+          gameExplanation = '';
+          confettiParticles = [];
+          initGame();
+          return;
+        }
+        if (pointInRect(x, y, nextButton)) {
+          if (window.parent && window.parent !== window) {
+            window.parent.postMessage({ type: 'quiz-next' }, '*');
+          }
+          return;
+        }
+      } else {
+        if (pointInRect(x, y, centeredRestartButton)) {
+          gameState = 'playing';
+          gameResult = null;
+          gameExplanation = '';
+          confettiParticles = [];
+          initGame();
+          return;
+        }
+      }
+    }
+    handleTouch(e, 'start');
+  }
+
+  function onTouchMove(e) {
+    e.preventDefault();
+    handleTouch(e, 'move');
+  }
+
+  function onTouchEnd(e) {
+    e.preventDefault();
+    handleTouch(e, 'end');
+  }
+
+  canvas.addEventListener('touchstart', onTouchStart, { passive: false });
+  canvas.addEventListener('touchmove', onTouchMove, { passive: false });
+  canvas.addEventListener('touchend', onTouchEnd, { passive: false });
+
+  let mouseDown = false;
+  canvas.addEventListener('mousedown', (e) => {
+    mouseDown = true;
+    const fakeTouch = { touches: [{ clientX: e.clientX, clientY: e.clientY }], changedTouches: [{ clientX: e.clientX, clientY: e.clientY }] };
+    onTouchStart(fakeTouch);
+  });
+  canvas.addEventListener('mousemove', (e) => {
+    if (mouseDown) {
+      const fakeTouch = { touches: [{ clientX: e.clientX, clientY: e.clientY }], changedTouches: [{ clientX: e.clientX, clientY: e.clientY }] };
+      handleTouch(fakeTouch, 'move');
+    }
+  });
+  canvas.addEventListener('mouseup', (e) => {
+    mouseDown = false;
+    const fakeTouch = { touches: [], changedTouches: [{ clientX: e.clientX, clientY: e.clientY }] };
+    onTouchEnd(fakeTouch);
+  });
+
+  window.addEventListener('resize', resizeCanvas);
+  window.addEventListener('orientationchange', () => {
+    setTimeout(resizeCanvas, 100);
+  });
+
+  document.body.addEventListener('touchmove', (e) => e.preventDefault(), { passive: false });
+
+  resizeCanvas();
+  initGame();
+  requestAnimationFrame(gameLoop);
+  </script>
+</body>
+</html>

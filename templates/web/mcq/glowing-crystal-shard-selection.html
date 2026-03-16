@@ -1,0 +1,804 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Game Template</title>
+  <link href="https://fonts.googleapis.com/css2?family=Belanosima:wght@400;600;700&family=Nunito+Sans:wght@400;500;600;700&family=Nunito:wght@400;500;600&display=swap" rel="stylesheet">
+  <!--
+  ╔══════════════════════════════════════════════════════════════════════════════╗
+  ║  GAME FACTORY TEMPLATE                                                        ║
+  ║  This template enforces critical invariants. Follow the section markers.      ║
+  ╚══════════════════════════════════════════════════════════════════════════════╝
+  -->
+  <style>
+    /* ═══════════════════════════════════════════════════════════════════════════
+       BASE STYLES - Can be extended, not removed
+       ═══════════════════════════════════════════════════════════════════════════ */
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+    }
+    body {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      background: #1a1a2e;
+      font-family: 'Nunito Sans', system-ui, -apple-system, sans-serif;
+    }
+    #gameCanvas {
+      background: #16213e;
+      border-radius: 8px;
+      display: block;
+    }
+  </style>
+</head>
+<body>
+  <!-- ═══════════════════════════════════════════════════════════════════════════
+       CANVAS - Sized dynamically to fill available space
+       ═══════════════════════════════════════════════════════════════════════════ -->
+  <canvas id="gameCanvas"></canvas>
+
+  <script>
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 1: QUESTION PLACEHOLDER - DO NOT MODIFY FORMAT                    ║
+  // ║  Platform replaces this at runtime. Use these exact 60-char answers.       ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  const QUESTION = {
+    type: "mcq",
+    prompt: "Sample question text",
+    choices: [
+      { text: "This is sample answer A which is long enough to test text overflow", is_correct: true, explanation: "Why A is correct" },
+      { text: "This is sample answer B which is long enough to test text overflow", is_correct: false, explanation: "Why B is wrong" },
+      { text: "This is sample answer C which is long enough to test text overflow", is_correct: false, explanation: "Why C is wrong" },
+      { text: "This is sample answer D which is long enough to test text overflow", is_correct: false, explanation: "Why D is wrong" }
+    ],
+    isLastQuestion: false
+  };
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 2: ENGINE CORE - DO NOT MODIFY                                    ║
+  // ║  Standard engine interface and end screen. This is sacred.                 ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  const canvas = document.getElementById('gameCanvas');
+  const ctx = canvas.getContext('2d');
+
+  // Logical dimensions (game code works in this coordinate space)
+  const W = 720, H = 540;
+
+  // Scaling state (computed on resize)
+  let scale = 1;
+  let dpr = 1;
+
+  let gameState = 'playing'; // 'playing' | 'ended'
+  let gameResult = null;     // true (correct) | false (wrong)
+  let gameExplanation = '';
+  let endScreenTime = 0;
+  let confettiParticles = [];
+
+  // End screen button bounds (logical coordinates)
+  const restartButton = { x: W / 2 - 170, y: H / 2 + 60, w: 150, h: 48 };
+  const nextButton = { x: W / 2 + 20, y: H / 2 + 60, w: 150, h: 48 };
+
+  /** Check if point is inside rectangle */
+  function pointInRect(px, py, rect) {
+    return px >= rect.x && px <= rect.x + rect.w &&
+           py >= rect.y && py <= rect.y + rect.h;
+  }
+
+  /** Draw a styled button */
+  function drawButton(rect, label, color, pulse) {
+    const p = pulse ? 1 + Math.sin(endScreenTime * 4) * 0.03 : 1;
+    ctx.save();
+    ctx.translate(rect.x + rect.w / 2, rect.y + rect.h / 2);
+    ctx.scale(p, p);
+    ctx.translate(-(rect.x + rect.w / 2), -(rect.y + rect.h / 2));
+
+    // Button background
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.roundRect(rect.x, rect.y, rect.w, rect.h, 12);
+    ctx.fill();
+
+    // Button text
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = 'bold 18px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, rect.x + rect.w / 2, rect.y + rect.h / 2);
+
+    ctx.restore();
+  }
+
+  /**
+   * Resize canvas to fill available space with proper DPR scaling.
+   * Maintains logical coordinate system (720×540).
+   */
+  function resizeCanvas() {
+    dpr = window.devicePixelRatio || 1;
+
+    // Get available space
+    const availW = window.innerWidth;
+    const availH = window.innerHeight;
+
+    // Calculate scale to fit logical space (720×540) in available space
+    const scaleX = availW / W;
+    const scaleY = availH / H;
+    scale = Math.min(scaleX, scaleY);
+
+    // Physical canvas buffer (DPR-scaled for crisp rendering)
+    canvas.width = W * scale * dpr;
+    canvas.height = H * scale * dpr;
+
+    // CSS display size
+    canvas.style.width = (W * scale) + 'px';
+    canvas.style.height = (H * scale) + 'px';
+  }
+
+  /**
+   * Convert screen coordinates to logical coordinates.
+   * Use this for mouse/click events to get positions in 720×540 space.
+   */
+  function screenToLogical(screenX, screenY) {
+    const rect = canvas.getBoundingClientRect();
+    return {
+      x: (screenX - rect.left) * (W / rect.width),
+      y: (screenY - rect.top) * (H / rect.height)
+    };
+  }
+
+  const engine = {
+    /** Call this to end the game. DO NOT draw your own end screen. */
+    end(isCorrect, explanation) {
+      if (gameState === 'ended') return;
+      gameState = 'ended';
+      gameResult = isCorrect;
+      gameExplanation = explanation || '';
+      endScreenTime = 0;
+
+      // Spawn confetti for correct answers
+      if (isCorrect) {
+        for (let i = 0; i < 50; i++) {
+          confettiParticles.push({
+            x: W / 2,
+            y: H / 2,
+            vx: (Math.random() - 0.5) * 600,
+            vy: -Math.random() * 400 - 100,
+            size: 4 + Math.random() * 6,
+            color: ['#FFD700', '#FF6B6B', '#4ECDC4', '#95E1D3', '#F38181'][Math.floor(Math.random() * 5)],
+            rotation: Math.random() * Math.PI * 2,
+            rotationSpeed: (Math.random() - 0.5) * 10
+          });
+        }
+      }
+
+      // Notify parent frame
+      if (window.parent && window.parent !== window) {
+        window.parent.postMessage({
+          type: 'quiz-end',
+          isCorrect: isCorrect,
+          explanation: explanation || ''
+        }, '*');
+      }
+    }
+  };
+
+  /** STANDARD END SCREEN - DO NOT MODIFY */
+  function drawEndScreen(dt) {
+    endScreenTime += dt;
+
+    // Update confetti
+    confettiParticles = confettiParticles.filter(p => {
+      p.vy += 800 * dt; // gravity
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.rotation += p.rotationSpeed * dt;
+      p.vx *= 0.99;
+      return p.y < H + 50;
+    });
+
+    // Dark overlay
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
+    ctx.fillRect(0, 0, W, H);
+
+    // Draw confetti
+    confettiParticles.forEach(p => {
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rotation);
+      ctx.fillStyle = p.color;
+      ctx.fillRect(-p.size / 2, -p.size / 4, p.size, p.size / 2);
+      ctx.restore();
+    });
+
+    // Result emoji
+    ctx.font = '72px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(gameResult ? '🎉' : '😢', W / 2, H / 2 - 50);
+
+    // Result text
+    ctx.fillStyle = gameResult ? '#4ADE80' : '#F87171';
+    ctx.font = 'bold 36px system-ui, sans-serif';
+    ctx.fillText(gameResult ? 'Correct!' : 'Wrong!', W / 2, H / 2 + 20);
+
+    // Buttons
+    if (gameResult) {
+      // Correct: show both Restart and Next/Finish
+      drawButton(restartButton, 'Restart', '#E87A3E', true);
+      const nextLabel = QUESTION.isLastQuestion ? 'Finish' : 'Next';
+      drawButton(nextButton, nextLabel, '#4ECDC4', true);
+    } else {
+      // Wrong: show only centered Restart button
+      const centeredRestart = { x: W / 2 - 75, y: H / 2 + 60, w: 150, h: 48 };
+      drawButton(centeredRestart, 'Restart', '#E87A3E', true);
+    }
+  }
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 3: YOUR GAME CODE - IMPLEMENT THESE FUNCTIONS                     ║
+  // ║  This is where your game logic goes. See requirements below.               ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+
+  // === COLORS ===
+  const COLORS = {
+    bgPrimary: '#FAFAF7',
+    bgSurface: '#FFFFFF',
+    textPrimary: '#2B2B28',
+    textSecondary: '#5A5A54',
+    orange: '#E87A3E',
+    orangeHover: '#D66B31',
+    amber: '#F5A742',
+    cyan: '#4ECDC4',
+    success: '#6BBF59',
+    error: '#E85D4A',
+    borderSubtle: '#E6E6E0',
+    borderStrong: '#D4D4CC'
+  };
+
+  // Crystal colors - each shard has a unique hue
+  const CRYSTAL_COLORS = [
+    { base: '#E87A3E', glow: '#FFB89D', inner: '#F5A742', dark: '#D66B31' }, // Orange/Amber
+    { base: '#4ECDC4', glow: '#A8EDE8', inner: '#7EDDD7', dark: '#45B8B0' }, // Cyan/Teal
+    { base: '#9B6BFF', glow: '#C9ABFF', inner: '#B58AFF', dark: '#7E4FE0' }, // Purple
+    { base: '#6BBF59', glow: '#A8E09A', inner: '#8DD07D', dark: '#5AAF4A' }, // Green
+  ];
+
+  // === GAME STATE ===
+  let shards = [];
+  let cavernParticles = [];
+  let selectedShard = -1;
+  let selectionTime = 0;
+  let gameTime = 0;
+  let hoveredShard = -1;
+
+  // Entrance animation
+  let entranceProgress = [];
+
+  // Sound system
+  const AudioCtx = window.AudioContext || window.webkitAudioContext;
+  let audioCtx = null;
+
+  function playSound(type) {
+    try {
+      if (!audioCtx) audioCtx = new AudioCtx();
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+
+      if (type === 'select') {
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(520, audioCtx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(780, audioCtx.currentTime + 0.15);
+        gain.gain.setValueAtTime(0.15, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.3);
+        osc.start(audioCtx.currentTime);
+        osc.stop(audioCtx.currentTime + 0.3);
+      } else if (type === 'hover') {
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(440 + hoveredShard * 80, audioCtx.currentTime);
+        gain.gain.setValueAtTime(0.06, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.1);
+        osc.start(audioCtx.currentTime);
+        osc.stop(audioCtx.currentTime + 0.1);
+      } else if (type === 'correct') {
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(523, audioCtx.currentTime);
+        osc.frequency.setValueAtTime(659, audioCtx.currentTime + 0.12);
+        osc.frequency.setValueAtTime(784, audioCtx.currentTime + 0.24);
+        gain.gain.setValueAtTime(0.18, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.5);
+        osc.start(audioCtx.currentTime);
+        osc.stop(audioCtx.currentTime + 0.5);
+      } else if (type === 'wrong') {
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(200, audioCtx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(100, audioCtx.currentTime + 0.3);
+        gain.gain.setValueAtTime(0.12, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.4);
+        osc.start(audioCtx.currentTime);
+        osc.stop(audioCtx.currentTime + 0.4);
+      }
+    } catch (e) {}
+  }
+
+  // Word-wrap helper for answer text
+  function wrapText(text, maxWidth, font) {
+    ctx.font = font;
+    const words = text.split(' ');
+    const lines = [];
+    let currentLine = words[0];
+
+    for (let i = 1; i < words.length; i++) {
+      const testLine = currentLine + ' ' + words[i];
+      if (ctx.measureText(testLine).width <= maxWidth) {
+        currentLine = testLine;
+      } else {
+        lines.push(currentLine);
+        currentLine = words[i];
+      }
+    }
+    lines.push(currentLine);
+    return lines;
+  }
+
+  function initGame() {
+    gameTime = 0;
+    selectedShard = -1;
+    selectionTime = 0;
+    hoveredShard = -1;
+
+    // 4 crystal shards positioned in the cavern
+    // Using vertical stack layout for best text readability (min width 450px)
+    const shardW = 500;
+    const shardH = 80;
+    const gap = 16;
+    const totalH = shardH * 4 + gap * 3;
+    const startY = (H - totalH) / 2 + 20;
+    const startX = (W - shardW) / 2;
+
+    shards = QUESTION.choices.map((choice, i) => ({
+      x: startX,
+      y: startY + i * (shardH + gap),
+      w: shardW,
+      h: shardH,
+      choice: choice,
+      index: i,
+      color: CRYSTAL_COLORS[i],
+      // Float animation offset
+      floatOffset: Math.random() * Math.PI * 2,
+      floatAmp: 3 + Math.random() * 2,
+      // Glow pulse offset
+      glowOffset: Math.random() * Math.PI * 2,
+      // Scale for animations
+      scale: 0,
+      alpha: 0,
+      // Shake for wrong answer
+      shakeX: 0,
+      shakeTime: 0,
+      // Pulse for correct
+      pulseScale: 1,
+      pulseTime: 0,
+    }));
+
+    // Entrance animation timers
+    entranceProgress = shards.map(() => 0);
+
+    // Cavern ambient particles
+    cavernParticles = [];
+    for (let i = 0; i < 25; i++) {
+      cavernParticles.push({
+        x: Math.random() * W,
+        y: Math.random() * H,
+        size: 1 + Math.random() * 3,
+        speed: 10 + Math.random() * 20,
+        alpha: 0.2 + Math.random() * 0.4,
+        drift: (Math.random() - 0.5) * 15,
+        color: CRYSTAL_COLORS[Math.floor(Math.random() * 4)].glow
+      });
+    }
+  }
+
+  function updateGame(dt) {
+    if (gameState !== 'playing') return;
+
+    gameTime += dt;
+
+    // Entrance animation (staggered bounce-in)
+    for (let i = 0; i < shards.length; i++) {
+      const delay = i * 0.12;
+      const elapsed = gameTime - delay;
+      if (elapsed > 0) {
+        const t = Math.min(elapsed / 0.4, 1);
+        // Spring easing
+        const spring = 1 + Math.sin(t * Math.PI * 2) * 0.2 * (1 - t);
+        shards[i].scale = t * spring;
+        shards[i].alpha = Math.min(t * 1.5, 1);
+      }
+    }
+
+    // Update floating animation
+    for (const shard of shards) {
+      shard.floatOffset += dt * 1.5;
+      shard.glowOffset += dt * 2;
+
+      // Shake decay
+      if (shard.shakeTime > 0) {
+        shard.shakeTime -= dt;
+        const decay = shard.shakeTime / 0.4;
+        shard.shakeX = Math.sin(shard.shakeTime * Math.PI * 20) * 8 * decay;
+      } else {
+        shard.shakeX = 0;
+      }
+
+      // Pulse decay
+      if (shard.pulseTime > 0) {
+        shard.pulseTime -= dt;
+        const t = shard.pulseTime / 0.5;
+        shard.pulseScale = 1 + Math.sin((1 - t) * Math.PI) * 0.06;
+      } else {
+        shard.pulseScale = 1;
+      }
+    }
+
+    // Selection delay (visual feedback before ending)
+    if (selectedShard >= 0) {
+      selectionTime += dt;
+      if (selectionTime > 0.6) {
+        const choice = shards[selectedShard].choice;
+        if (choice.is_correct) {
+          playSound('correct');
+        } else {
+          playSound('wrong');
+        }
+        engine.end(choice.is_correct, choice.explanation);
+      }
+    }
+
+    // Update cavern particles
+    for (const p of cavernParticles) {
+      p.y -= p.speed * dt;
+      p.x += p.drift * dt;
+      p.alpha += Math.sin(gameTime * 2 + p.x * 0.01) * dt * 0.3;
+      p.alpha = Math.max(0.1, Math.min(0.6, p.alpha));
+      if (p.y < -10) {
+        p.y = H + 10;
+        p.x = Math.random() * W;
+      }
+      if (p.x < -10) p.x = W + 10;
+      if (p.x > W + 10) p.x = -10;
+    }
+  }
+
+  function drawGame() {
+    // Cavern background - dark gradient
+    const bgGrad = ctx.createLinearGradient(0, 0, 0, H);
+    bgGrad.addColorStop(0, '#0D0D1A');
+    bgGrad.addColorStop(0.5, '#1A1A2E');
+    bgGrad.addColorStop(1, '#0D0D1A');
+    ctx.fillStyle = bgGrad;
+    ctx.fillRect(0, 0, W, H);
+
+    // Subtle cavern rock texture (darker patches)
+    ctx.globalAlpha = 0.08;
+    for (let i = 0; i < 12; i++) {
+      const rx = (i * 137.5) % W;
+      const ry = (i * 89.3) % H;
+      const rr = 40 + (i * 23) % 60;
+      ctx.fillStyle = '#000000';
+      ctx.beginPath();
+      ctx.ellipse(rx, ry, rr, rr * 0.6, (i * 0.5), 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+
+    // Ambient particles (dust/sparkle in cavern)
+    for (const p of cavernParticles) {
+      ctx.globalAlpha = p.alpha;
+      ctx.fillStyle = p.color;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+
+    // Draw each crystal shard
+    for (let i = 0; i < shards.length; i++) {
+      const shard = shards[i];
+      if (shard.alpha <= 0) continue;
+
+      const floatY = Math.sin(shard.floatOffset) * shard.floatAmp;
+      const glowIntensity = 0.3 + Math.sin(shard.glowOffset) * 0.15;
+
+      ctx.save();
+      ctx.globalAlpha = shard.alpha;
+
+      const cx = shard.x + shard.w / 2 + shard.shakeX;
+      const cy = shard.y + shard.h / 2 + floatY;
+
+      // Scale transform for entrance / pulse
+      const sc = shard.scale * shard.pulseScale;
+      ctx.translate(cx, cy);
+      ctx.scale(sc, sc);
+      ctx.translate(-cx, -cy);
+
+      const sx = shard.x + shard.shakeX;
+      const sy = shard.y + floatY;
+
+      // Outer glow
+      ctx.shadowColor = shard.color.glow;
+      ctx.shadowBlur = 20 + glowIntensity * 15;
+
+      // Highlight on hover
+      const isHovered = (hoveredShard === i && selectedShard < 0);
+      const isSelected = (selectedShard === i);
+
+      // Crystal shard shape (hexagonal/gem-like)
+      ctx.beginPath();
+      const r = 12;
+      // Slightly pointed left and right edges for crystal feel
+      const lx = sx;
+      const rx2 = sx + shard.w;
+      const ty = sy;
+      const by = sy + shard.h;
+      const midY = sy + shard.h / 2;
+      const pointInset = 15;
+
+      ctx.moveTo(lx + pointInset, ty);
+      ctx.lineTo(rx2 - pointInset, ty);
+      ctx.lineTo(rx2, midY);
+      ctx.lineTo(rx2 - pointInset, by);
+      ctx.lineTo(lx + pointInset, by);
+      ctx.lineTo(lx, midY);
+      ctx.closePath();
+
+      // Crystal body gradient
+      const bodyGrad = ctx.createLinearGradient(sx, sy, sx, by);
+      if (isSelected) {
+        bodyGrad.addColorStop(0, shard.color.base);
+        bodyGrad.addColorStop(0.5, shard.color.inner);
+        bodyGrad.addColorStop(1, shard.color.dark);
+      } else if (isHovered) {
+        bodyGrad.addColorStop(0, shard.color.inner);
+        bodyGrad.addColorStop(0.5, shard.color.glow);
+        bodyGrad.addColorStop(1, shard.color.inner);
+      } else {
+        bodyGrad.addColorStop(0, shard.color.dark + 'CC');
+        bodyGrad.addColorStop(0.4, shard.color.base + 'DD');
+        bodyGrad.addColorStop(1, shard.color.dark + 'AA');
+      }
+      ctx.fillStyle = bodyGrad;
+      ctx.fill();
+
+      // Crystal border
+      ctx.strokeStyle = isHovered ? shard.color.glow : shard.color.base;
+      ctx.lineWidth = isHovered ? 3 : 2;
+      ctx.stroke();
+
+      // Inner light refraction lines
+      ctx.globalAlpha = shard.alpha * (0.15 + glowIntensity * 0.15);
+      ctx.strokeStyle = shard.color.glow;
+      ctx.lineWidth = 1;
+      // Diagonal refraction line 1
+      ctx.beginPath();
+      ctx.moveTo(sx + 40, sy + 10);
+      ctx.lineTo(sx + shard.w * 0.4, sy + shard.h - 10);
+      ctx.stroke();
+      // Diagonal refraction line 2
+      ctx.beginPath();
+      ctx.moveTo(sx + shard.w * 0.6, sy + 10);
+      ctx.lineTo(sx + shard.w - 40, sy + shard.h - 10);
+      ctx.stroke();
+
+      ctx.globalAlpha = shard.alpha;
+      ctx.shadowBlur = 0;
+
+      // Number badge (1-4)
+      const badgeX = sx + 35;
+      const badgeY = midY;
+      const badgeR = 16;
+
+      ctx.fillStyle = shard.color.base;
+      ctx.beginPath();
+      ctx.arc(badgeX, badgeY, badgeR, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.fillStyle = '#FFFFFF';
+      ctx.font = "700 16px 'Nunito Sans', sans-serif";
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(String(i + 1), badgeX, badgeY);
+
+      // Answer text
+      const textX = sx + 65;
+      const textMaxW = shard.w - 90;
+      const textFont = "400 16px 'Nunito', sans-serif";
+      const lines = wrapText(shard.choice.text, textMaxW, textFont);
+
+      ctx.fillStyle = '#F5F5F0';
+      ctx.font = textFont;
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
+
+      const lineHeight = 20;
+      const totalTextH = lines.length * lineHeight;
+      const textStartY = midY - totalTextH / 2 + lineHeight / 2;
+
+      for (let l = 0; l < lines.length; l++) {
+        ctx.fillText(lines[l], textX, textStartY + l * lineHeight);
+      }
+
+      ctx.restore();
+    }
+  }
+
+  function handleInput(e) {
+    if (gameState !== 'playing') return;
+    if (selectedShard >= 0) return; // Already selected
+
+    const key = e.key;
+    let index = -1;
+
+    if (key === '1') index = 0;
+    else if (key === '2') index = 1;
+    else if (key === '3') index = 2;
+    else if (key === '4') index = 3;
+
+    if (index >= 0 && index < shards.length && shards[index].alpha > 0.5) {
+      selectedShard = index;
+      selectionTime = 0;
+      playSound('select');
+
+      // Visual feedback
+      if (shards[index].choice.is_correct) {
+        shards[index].pulseTime = 0.5;
+      } else {
+        shards[index].shakeTime = 0.4;
+      }
+    }
+  }
+
+  // Mouse hover tracking for glow effect
+  canvas.addEventListener('mousemove', (e) => {
+    if (gameState !== 'playing' || selectedShard >= 0) return;
+    const { x, y } = screenToLogical(e.clientX, e.clientY);
+
+    let newHovered = -1;
+    for (let i = 0; i < shards.length; i++) {
+      const shard = shards[i];
+      const floatY = Math.sin(shard.floatOffset) * shard.floatAmp;
+      if (x >= shard.x && x <= shard.x + shard.w &&
+          y >= shard.y + floatY - 5 && y <= shard.y + shard.h + floatY + 5) {
+        newHovered = i;
+        break;
+      }
+    }
+
+    if (newHovered !== hoveredShard) {
+      hoveredShard = newHovered;
+      if (hoveredShard >= 0) {
+        playSound('hover');
+      }
+    }
+  });
+
+  // Click to select as well
+  canvas.addEventListener('click', (e) => {
+    if (gameState !== 'playing' || selectedShard >= 0) return;
+    const { x, y } = screenToLogical(e.clientX, e.clientY);
+
+    for (let i = 0; i < shards.length; i++) {
+      const shard = shards[i];
+      const floatY = Math.sin(shard.floatOffset) * shard.floatAmp;
+      if (x >= shard.x && x <= shard.x + shard.w &&
+          y >= shard.y + floatY - 5 && y <= shard.y + shard.h + floatY + 5 &&
+          shard.alpha > 0.5) {
+        selectedShard = i;
+        selectionTime = 0;
+        playSound('select');
+
+        if (shard.choice.is_correct) {
+          shard.pulseTime = 0.5;
+        } else {
+          shard.shakeTime = 0.4;
+        }
+        break;
+      }
+    }
+  });
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 4: GAME LOOP - DO NOT MODIFY                                      ║
+  // ║  Standard loop with responsive scaling and DPR support.                    ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  let lastTime = performance.now();
+
+  function gameLoop(now) {
+    const dt = Math.min((now - lastTime) / 1000, 0.05); // Cap at 50ms
+    lastTime = now;
+
+    // Apply transform for logical coordinate system
+    ctx.setTransform(scale * dpr, 0, 0, scale * dpr, 0, 0);
+
+    if (gameState === 'playing') {
+      updateGame(dt);
+      drawGame();
+    } else {
+      drawGame(); // Draw game state behind overlay
+      drawEndScreen(dt);
+    }
+
+    // Reset transform for next frame
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+    requestAnimationFrame(gameLoop);
+  }
+
+  // Input handlers
+  document.addEventListener('keydown', (e) => {
+    if (gameState === 'ended' && (e.code === 'KeyR')) {
+      // Restart game
+      gameState = 'playing';
+      gameResult = null;
+      gameExplanation = '';
+      confettiParticles = [];
+      initGame();
+      return;
+    }
+    handleInput(e);
+  });
+
+  document.addEventListener('keyup', (e) => {
+    // Optional: handle key release in your handleInput
+  });
+
+  // Canvas click handler for end screen buttons
+  canvas.addEventListener('click', (e) => {
+    if (gameState !== 'ended') return;
+
+    const { x, y } = screenToLogical(e.clientX, e.clientY);
+
+    if (gameResult) {
+      // Correct answer: check both buttons
+      if (pointInRect(x, y, restartButton)) {
+        gameState = 'playing';
+        gameResult = null;
+        gameExplanation = '';
+        confettiParticles = [];
+        initGame();
+        return;
+      }
+      if (pointInRect(x, y, nextButton)) {
+        // Notify parent to go to next question
+        if (window.parent && window.parent !== window) {
+          window.parent.postMessage({ type: 'quiz-next' }, '*');
+        }
+        return;
+      }
+    } else {
+      // Wrong answer: check centered restart button
+      const centeredRestart = { x: W / 2 - 75, y: H / 2 + 60, w: 150, h: 48 };
+      if (pointInRect(x, y, centeredRestart)) {
+        gameState = 'playing';
+        gameResult = null;
+        gameExplanation = '';
+        confettiParticles = [];
+        initGame();
+        return;
+      }
+    }
+  });
+
+  // Handle resize
+  window.addEventListener('resize', resizeCanvas);
+
+  // Initialize
+  resizeCanvas();
+  initGame();
+  requestAnimationFrame(gameLoop);
+  </script>
+</body>
+</html>

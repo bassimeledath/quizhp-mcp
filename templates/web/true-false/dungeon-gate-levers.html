@@ -1,0 +1,1034 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Game Template</title>
+  <link href="https://fonts.googleapis.com/css2?family=Belanosima:wght@400;600;700&family=Nunito+Sans:wght@400;500;600;700&family=Nunito:wght@400;500;600&display=swap" rel="stylesheet">
+  <!--
+  ╔══════════════════════════════════════════════════════════════════════════════╗
+  ║  GAME FACTORY TEMPLATE                                                        ║
+  ║  This template enforces critical invariants. Follow the section markers.      ║
+  ╚══════════════════════════════════════════════════════════════════════════════╝
+  -->
+  <style>
+    /* ═══════════════════════════════════════════════════════════════════════════
+       BASE STYLES - Can be extended, not removed
+       ═══════════════════════════════════════════════════════════════════════════ */
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+    }
+    body {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      background: #1a1a2e;
+      font-family: 'Nunito', system-ui, -apple-system, sans-serif;
+    }
+    #gameCanvas {
+      background: #16213e;
+      border-radius: 8px;
+      display: block;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+  <!-- ═══════════════════════════════════════════════════════════════════════════
+       CANVAS - Sized dynamically to fill available space
+       ═══════════════════════════════════════════════════════════════════════════ -->
+  <canvas id="gameCanvas"></canvas>
+
+  <script>
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 1: QUESTION PLACEHOLDER - DO NOT MODIFY FORMAT                    ║
+  // ║  Platform replaces this at runtime. Use these exact 60-char answers.       ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  const QUESTION = {
+    type: "mcq",
+    prompt: "Sample question text",
+    choices: [
+      { text: "This is sample answer A which is long enough to test text overflow", is_correct: true, explanation: "Why A is correct" },
+      { text: "This is sample answer B which is long enough to test text overflow", is_correct: false, explanation: "Why B is wrong" },
+      { text: "This is sample answer C which is long enough to test text overflow", is_correct: false, explanation: "Why C is wrong" },
+      { text: "This is sample answer D which is long enough to test text overflow", is_correct: false, explanation: "Why D is wrong" }
+    ],
+    isLastQuestion: false
+  };
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 2: ENGINE CORE - DO NOT MODIFY                                    ║
+  // ║  Standard engine interface and end screen. This is sacred.                 ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  const canvas = document.getElementById('gameCanvas');
+  const ctx = canvas.getContext('2d');
+
+  // Logical dimensions (game code works in this coordinate space)
+  const W = 720, H = 540;
+
+  // Scaling state (computed on resize)
+  let scale = 1;
+  let dpr = 1;
+
+  let gameState = 'playing'; // 'playing' | 'ended'
+  let gameResult = null;     // true (correct) | false (wrong)
+  let gameExplanation = '';
+  let endScreenTime = 0;
+  let confettiParticles = [];
+
+  // End screen button bounds (logical coordinates)
+  const restartButton = { x: W / 2 - 170, y: H / 2 + 60, w: 150, h: 48 };
+  const nextButton = { x: W / 2 + 20, y: H / 2 + 60, w: 150, h: 48 };
+
+  /** Check if point is inside rectangle */
+  function pointInRect(px, py, rect) {
+    return px >= rect.x && px <= rect.x + rect.w &&
+           py >= rect.y && py <= rect.y + rect.h;
+  }
+
+  /** Draw a styled button */
+  function drawButton(rect, label, color, pulse) {
+    const p = pulse ? 1 + Math.sin(endScreenTime * 4) * 0.03 : 1;
+    ctx.save();
+    ctx.translate(rect.x + rect.w / 2, rect.y + rect.h / 2);
+    ctx.scale(p, p);
+    ctx.translate(-(rect.x + rect.w / 2), -(rect.y + rect.h / 2));
+
+    // Button background
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.roundRect(rect.x, rect.y, rect.w, rect.h, 12);
+    ctx.fill();
+
+    // Button text
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = 'bold 18px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, rect.x + rect.w / 2, rect.y + rect.h / 2);
+
+    ctx.restore();
+  }
+
+  /**
+   * Resize canvas to fill available space with proper DPR scaling.
+   * Maintains logical coordinate system (720×540).
+   */
+  function resizeCanvas() {
+    dpr = window.devicePixelRatio || 1;
+
+    // Get available space
+    const availW = window.innerWidth;
+    const availH = window.innerHeight;
+
+    // Calculate scale to fit logical space (720×540) in available space
+    const scaleX = availW / W;
+    const scaleY = availH / H;
+    scale = Math.min(scaleX, scaleY);
+
+    // Physical canvas buffer (DPR-scaled for crisp rendering)
+    canvas.width = W * scale * dpr;
+    canvas.height = H * scale * dpr;
+
+    // CSS display size
+    canvas.style.width = (W * scale) + 'px';
+    canvas.style.height = (H * scale) + 'px';
+  }
+
+  /**
+   * Convert screen coordinates to logical coordinates.
+   * Use this for mouse/click events to get positions in 720×540 space.
+   */
+  function screenToLogical(screenX, screenY) {
+    const rect = canvas.getBoundingClientRect();
+    return {
+      x: (screenX - rect.left) * (W / rect.width),
+      y: (screenY - rect.top) * (H / rect.height)
+    };
+  }
+
+  const engine = {
+    /** Call this to end the game. DO NOT draw your own end screen. */
+    end(isCorrect, explanation) {
+      if (gameState === 'ended') return;
+      gameState = 'ended';
+      gameResult = isCorrect;
+      gameExplanation = explanation || '';
+      endScreenTime = 0;
+
+      // Spawn confetti for correct answers
+      if (isCorrect) {
+        for (let i = 0; i < 50; i++) {
+          confettiParticles.push({
+            x: W / 2,
+            y: H / 2,
+            vx: (Math.random() - 0.5) * 600,
+            vy: -Math.random() * 400 - 100,
+            size: 4 + Math.random() * 6,
+            color: ['#FFD700', '#FF6B6B', '#4ECDC4', '#95E1D3', '#F38181'][Math.floor(Math.random() * 5)],
+            rotation: Math.random() * Math.PI * 2,
+            rotationSpeed: (Math.random() - 0.5) * 10
+          });
+        }
+      }
+
+      // Notify parent frame
+      if (window.parent && window.parent !== window) {
+        window.parent.postMessage({
+          type: 'quiz-end',
+          isCorrect: isCorrect,
+          explanation: explanation || ''
+        }, '*');
+      }
+    }
+  };
+
+  /** STANDARD END SCREEN - DO NOT MODIFY */
+  function drawEndScreen(dt) {
+    endScreenTime += dt;
+
+    // Update confetti
+    confettiParticles = confettiParticles.filter(p => {
+      p.vy += 800 * dt; // gravity
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.rotation += p.rotationSpeed * dt;
+      p.vx *= 0.99;
+      return p.y < H + 50;
+    });
+
+    // Dark overlay
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
+    ctx.fillRect(0, 0, W, H);
+
+    // Draw confetti
+    confettiParticles.forEach(p => {
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rotation);
+      ctx.fillStyle = p.color;
+      ctx.fillRect(-p.size / 2, -p.size / 4, p.size, p.size / 2);
+      ctx.restore();
+    });
+
+    // Result emoji
+    ctx.font = '72px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(gameResult ? '🎉' : '😢', W / 2, H / 2 - 50);
+
+    // Result text
+    ctx.fillStyle = gameResult ? '#4ADE80' : '#F87171';
+    ctx.font = 'bold 36px system-ui, sans-serif';
+    ctx.fillText(gameResult ? 'Correct!' : 'Wrong!', W / 2, H / 2 + 20);
+
+    // Buttons
+    if (gameResult) {
+      // Correct: show both Restart and Next/Finish
+      drawButton(restartButton, 'Restart', '#E87A3E', true);
+      const nextLabel = QUESTION.isLastQuestion ? 'Finish' : 'Next';
+      drawButton(nextButton, nextLabel, '#4ECDC4', true);
+    } else {
+      // Wrong: show only centered Restart button
+      const centeredRestart = { x: W / 2 - 75, y: H / 2 + 60, w: 150, h: 48 };
+      drawButton(centeredRestart, 'Restart', '#E87A3E', true);
+    }
+  }
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 3: YOUR GAME CODE - IMPLEMENT THESE FUNCTIONS                     ║
+  // ║  This is where your game logic goes. See requirements below.               ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+
+  // === COLORS ===
+  const COLORS = {
+    bgPrimary: '#FAFAF7',
+    bgDark: '#1C1C1A',
+    surface: '#2A2A27',
+    surfaceSecondary: '#363633',
+    textPrimary: '#F5F5F0',
+    textSecondary: '#C2C2B8',
+    orange: '#E87A3E',
+    orangeHover: '#D66B31',
+    amber: '#F5A742',
+    cyan: '#4ECDC4',
+    success: '#6BBF59',
+    error: '#E85D4A',
+    borderSubtle: '#424240',
+    borderStrong: '#5A5A56'
+  };
+
+  // === GAME STATE ===
+  let levers = [];
+  let gates = [];
+  let torches = [];
+  let particles = [];
+  let hoveredLever = -1;
+  let selectedLever = -1;
+  let animTime = 0;
+  let entranceProgress = 0;
+  let selectionAnim = { active: false, time: 0, leverIdx: -1, correct: false };
+
+  // Audio context for sound effects
+  let audioCtx = null;
+  function getAudioCtx() {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    return audioCtx;
+  }
+
+  function playSound(type) {
+    try {
+      const ctx = getAudioCtx();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+
+      if (type === 'click') {
+        osc.frequency.value = 220;
+        osc.type = 'square';
+        gain.gain.setValueAtTime(0.08, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.1);
+        osc.start(ctx.currentTime);
+        osc.stop(ctx.currentTime + 0.1);
+      } else if (type === 'correct') {
+        osc.frequency.value = 440;
+        osc.type = 'sine';
+        gain.gain.setValueAtTime(0.12, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.5);
+        osc.frequency.setValueAtTime(440, ctx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(880, ctx.currentTime + 0.2);
+        osc.start(ctx.currentTime);
+        osc.stop(ctx.currentTime + 0.5);
+      } else if (type === 'wrong') {
+        osc.frequency.value = 200;
+        osc.type = 'sawtooth';
+        gain.gain.setValueAtTime(0.1, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.4);
+        osc.frequency.setValueAtTime(200, ctx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(100, ctx.currentTime + 0.3);
+        osc.start(ctx.currentTime);
+        osc.stop(ctx.currentTime + 0.4);
+      } else if (type === 'lever') {
+        osc.frequency.value = 120;
+        osc.type = 'square';
+        gain.gain.setValueAtTime(0.06, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);
+        osc.frequency.setValueAtTime(120, ctx.currentTime);
+        osc.frequency.setValueAtTime(80, ctx.currentTime + 0.1);
+        osc.frequency.setValueAtTime(60, ctx.currentTime + 0.2);
+        osc.start(ctx.currentTime);
+        osc.stop(ctx.currentTime + 0.3);
+      }
+    } catch (e) {}
+  }
+
+  // Word wrap helper for answer text
+  function wrapText(text, maxWidth, font) {
+    ctx.font = font;
+    const words = text.split(' ');
+    const lines = [];
+    let currentLine = '';
+
+    for (const word of words) {
+      const testLine = currentLine ? currentLine + ' ' + word : word;
+      if (ctx.measureText(testLine).width > maxWidth) {
+        if (currentLine) lines.push(currentLine);
+        currentLine = word;
+      } else {
+        currentLine = testLine;
+      }
+    }
+    if (currentLine) lines.push(currentLine);
+    return lines;
+  }
+
+  function initGame() {
+    const choices = QUESTION.choices.slice(0, 2);
+    animTime = 0;
+    entranceProgress = 0;
+    hoveredLever = -1;
+    selectedLever = -1;
+    particles = [];
+    selectionAnim = { active: false, time: 0, leverIdx: -1, correct: false };
+
+    // Two levers, one on each side
+    const leverWidth = 40;
+    const leverHeight = 120;
+    const gateWidth = 200;
+    const gateHeight = 260;
+
+    levers = [
+      {
+        x: 130, y: 260,
+        width: leverWidth, height: leverHeight,
+        pulled: false,
+        choice: choices[0],
+        scale: 0, alpha: 0,
+        shakeX: 0
+      },
+      {
+        x: 550, y: 260,
+        width: leverWidth, height: leverHeight,
+        pulled: false,
+        choice: choices[1],
+        scale: 0, alpha: 0,
+        shakeX: 0
+      }
+    ];
+
+    gates = [
+      { x: 60, y: 80, width: gateWidth, height: gateHeight, openProgress: 0 },
+      { x: 460, y: 80, width: gateWidth, height: gateHeight, openProgress: 0 }
+    ];
+
+    // Torch positions for ambiance
+    torches = [
+      { x: 30, y: 130, flickerOffset: Math.random() * Math.PI * 2 },
+      { x: 290, y: 100, flickerOffset: Math.random() * Math.PI * 2 },
+      { x: 430, y: 100, flickerOffset: Math.random() * Math.PI * 2 },
+      { x: 690, y: 130, flickerOffset: Math.random() * Math.PI * 2 }
+    ];
+  }
+
+  function updateGame(dt) {
+    if (gameState !== 'playing') return;
+
+    animTime += dt;
+
+    // Entrance animation
+    if (entranceProgress < 1) {
+      entranceProgress = Math.min(1, entranceProgress + dt * 2.5);
+      const t = entranceProgress;
+      const spring = 1 + Math.sin(t * Math.PI * 2) * 0.2 * (1 - t);
+
+      levers[0].scale = Math.min(1, t * spring);
+      levers[0].alpha = t;
+
+      const t2 = Math.max(0, (entranceProgress - 0.15) / 0.85);
+      const spring2 = 1 + Math.sin(t2 * Math.PI * 2) * 0.2 * (1 - t2);
+      levers[1].scale = Math.min(1, t2 * spring2);
+      levers[1].alpha = t2;
+    }
+
+    // Selection animation
+    if (selectionAnim.active) {
+      selectionAnim.time += dt;
+      const idx = selectionAnim.leverIdx;
+      const lever = levers[idx];
+
+      // Animate gate opening
+      gates[idx].openProgress = Math.min(1, selectionAnim.time * 2);
+
+      if (selectionAnim.correct) {
+        // Celebration pulse
+        const pulseT = selectionAnim.time;
+        lever.scale = 1 + Math.sin(pulseT * Math.PI * 4) * 0.08 * Math.max(0, 1 - pulseT);
+      } else {
+        // Shake animation
+        const shakeT = selectionAnim.time;
+        const decay = Math.max(0, 1 - shakeT * 2.5);
+        lever.shakeX = Math.sin(shakeT * Math.PI * 16) * 8 * decay;
+      }
+
+      // End after animation plays
+      if (selectionAnim.time > 0.7) {
+        const choice = lever.choice;
+        if (selectionAnim.correct) {
+          playSound('correct');
+        } else {
+          playSound('wrong');
+        }
+        engine.end(choice.is_correct, choice.explanation);
+      }
+    }
+
+    // Spawn torch particles
+    torches.forEach(torch => {
+      if (Math.random() < dt * 8) {
+        particles.push({
+          x: torch.x + (Math.random() - 0.5) * 8,
+          y: torch.y - 10,
+          vx: (Math.random() - 0.5) * 20,
+          vy: -Math.random() * 40 - 20,
+          life: 1,
+          size: 2 + Math.random() * 3,
+          color: Math.random() > 0.5 ? COLORS.orange : COLORS.amber
+        });
+      }
+    });
+
+    // Update particles
+    particles.forEach(p => {
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.life -= dt * 2;
+      p.size *= 0.98;
+    });
+    particles = particles.filter(p => p.life > 0);
+  }
+
+  function drawGame() {
+    // Dark dungeon background
+    ctx.fillStyle = '#0D0D12';
+    ctx.fillRect(0, 0, W, H);
+
+    // Draw stone wall texture
+    drawStoneWall();
+
+    // Draw passage (dark center)
+    drawPassage();
+
+    // Draw torches
+    torches.forEach(torch => drawTorch(torch));
+
+    // Draw particles
+    particles.forEach(p => {
+      ctx.globalAlpha = p.life * 0.8;
+      ctx.fillStyle = p.color;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+      ctx.fill();
+    });
+    ctx.globalAlpha = 1;
+
+    // Draw gates
+    gates.forEach((gate, i) => drawGate(gate, i));
+
+    // Draw levers
+    levers.forEach((lever, i) => drawLever(lever, i));
+
+    // Draw answer text panels below each lever
+    drawAnswerPanels();
+  }
+
+  function drawStoneWall() {
+    // Stone wall gradient
+    const wallGrad = ctx.createLinearGradient(0, 0, 0, H);
+    wallGrad.addColorStop(0, '#1A1A1F');
+    wallGrad.addColorStop(0.5, '#151518');
+    wallGrad.addColorStop(1, '#0D0D12');
+    ctx.fillStyle = wallGrad;
+    ctx.fillRect(0, 0, W, H);
+
+    // Stone brick pattern
+    ctx.strokeStyle = 'rgba(40, 40, 50, 0.4)';
+    ctx.lineWidth = 1;
+    for (let row = 0; row < 12; row++) {
+      const y = row * 48;
+      ctx.beginPath();
+      ctx.moveTo(0, y);
+      ctx.lineTo(W, y);
+      ctx.stroke();
+
+      const offset = row % 2 === 0 ? 0 : 60;
+      for (let col = 0; col < 8; col++) {
+        const x = col * 120 + offset;
+        ctx.beginPath();
+        ctx.moveTo(x, y);
+        ctx.lineTo(x, y + 48);
+        ctx.stroke();
+      }
+    }
+  }
+
+  function drawPassage() {
+    // Dark passage in the center
+    const passX = 280;
+    const passW = 160;
+    const passGrad = ctx.createLinearGradient(passX, 60, passX, 340);
+    passGrad.addColorStop(0, '#050508');
+    passGrad.addColorStop(1, '#0A0A10');
+    ctx.fillStyle = passGrad;
+
+    // Arched passage
+    ctx.beginPath();
+    ctx.moveTo(passX, 340);
+    ctx.lineTo(passX, 140);
+    ctx.quadraticCurveTo(passX, 60, passX + passW / 2, 60);
+    ctx.quadraticCurveTo(passX + passW, 60, passX + passW, 140);
+    ctx.lineTo(passX + passW, 340);
+    ctx.closePath();
+    ctx.fill();
+
+    // Arch border
+    ctx.strokeStyle = '#3A3A42';
+    ctx.lineWidth = 3;
+    ctx.stroke();
+
+    // Inner arch highlight
+    ctx.strokeStyle = 'rgba(232, 122, 62, 0.15)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(passX + 4, 340);
+    ctx.lineTo(passX + 4, 142);
+    ctx.quadraticCurveTo(passX + 4, 64, passX + passW / 2, 64);
+    ctx.quadraticCurveTo(passX + passW - 4, 64, passX + passW - 4, 142);
+    ctx.lineTo(passX + passW - 4, 340);
+    ctx.stroke();
+  }
+
+  function drawTorch(torch) {
+    const flicker = Math.sin(animTime * 6 + torch.flickerOffset) * 0.3 + 0.7;
+    const flicker2 = Math.sin(animTime * 8.5 + torch.flickerOffset + 1) * 0.2;
+
+    // Torch glow
+    const glowGrad = ctx.createRadialGradient(
+      torch.x, torch.y - 10, 0,
+      torch.x, torch.y - 10, 60 * flicker
+    );
+    glowGrad.addColorStop(0, `rgba(232, 122, 62, ${0.25 * flicker})`);
+    glowGrad.addColorStop(0.5, `rgba(245, 167, 66, ${0.1 * flicker})`);
+    glowGrad.addColorStop(1, 'rgba(232, 122, 62, 0)');
+    ctx.fillStyle = glowGrad;
+    ctx.fillRect(torch.x - 70, torch.y - 80, 140, 140);
+
+    // Torch bracket (wall mount)
+    ctx.fillStyle = '#4A4A50';
+    ctx.fillRect(torch.x - 3, torch.y, 6, 30);
+    ctx.fillStyle = '#3A3A40';
+    ctx.fillRect(torch.x - 6, torch.y + 26, 12, 6);
+
+    // Flame
+    ctx.fillStyle = COLORS.orange;
+    ctx.beginPath();
+    ctx.ellipse(torch.x, torch.y - 8, 5 + flicker2 * 2, 10 * flicker, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = COLORS.amber;
+    ctx.beginPath();
+    ctx.ellipse(torch.x, torch.y - 6, 3, 6 * flicker, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Flame tip
+    ctx.fillStyle = '#FFF4ED';
+    ctx.beginPath();
+    ctx.ellipse(torch.x, torch.y - 4, 1.5, 3, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  function drawGate(gate, idx) {
+    const openOffset = gate.openProgress * gate.height * 0.8;
+
+    ctx.save();
+
+    // Gate frame (stone archway)
+    ctx.fillStyle = '#2A2A30';
+    ctx.fillRect(gate.x - 8, gate.y - 10, gate.width + 16, 16);
+    ctx.fillRect(gate.x - 8, gate.y - 10, 12, gate.height + 20);
+    ctx.fillRect(gate.x + gate.width - 4, gate.y - 10, 12, gate.height + 20);
+
+    // Gate bars (iron portcullis)
+    const barCount = 8;
+    const barSpacing = gate.width / (barCount + 1);
+
+    ctx.strokeStyle = '#5A5A60';
+    ctx.lineWidth = 5;
+
+    // Horizontal bars
+    for (let h = 0; h < 6; h++) {
+      const barY = gate.y + 20 + h * 44 - openOffset;
+      if (barY > gate.y - 20 && barY < gate.y + gate.height) {
+        ctx.beginPath();
+        ctx.moveTo(gate.x, barY);
+        ctx.lineTo(gate.x + gate.width, barY);
+        ctx.stroke();
+      }
+    }
+
+    // Vertical bars
+    ctx.lineWidth = 4;
+    for (let v = 1; v <= barCount; v++) {
+      const barX = gate.x + v * barSpacing;
+      const topY = Math.max(gate.y, gate.y - openOffset);
+      ctx.beginPath();
+      ctx.moveTo(barX, topY);
+      ctx.lineTo(barX, gate.y + gate.height - openOffset);
+      ctx.stroke();
+
+      // Iron spikes at bottom
+      if (gate.openProgress < 0.5) {
+        const spikeY = gate.y + gate.height - openOffset;
+        ctx.fillStyle = '#5A5A60';
+        ctx.beginPath();
+        ctx.moveTo(barX - 4, spikeY);
+        ctx.lineTo(barX, spikeY + 12);
+        ctx.lineTo(barX + 4, spikeY);
+        ctx.closePath();
+        ctx.fill();
+      }
+    }
+
+    // Rust/age details on bars
+    ctx.fillStyle = 'rgba(139, 90, 43, 0.3)';
+    for (let v = 1; v <= barCount; v += 2) {
+      const barX = gate.x + v * barSpacing;
+      ctx.fillRect(barX - 3, gate.y + 40 - openOffset, 6, 20);
+    }
+
+    ctx.restore();
+  }
+
+  function drawLever(lever, idx) {
+    if (lever.alpha <= 0) return;
+
+    ctx.save();
+    ctx.globalAlpha = lever.alpha;
+
+    const cx = lever.x + lever.width / 2 + lever.shakeX;
+    const cy = lever.y + lever.height;
+
+    // Scale for entrance animation
+    ctx.translate(cx, cy);
+    ctx.scale(lever.scale, lever.scale);
+    ctx.translate(-cx, -cy);
+
+    const isHovered = hoveredLever === idx && !selectionAnim.active;
+    const isSelected = selectedLever === idx;
+
+    // Lever base (stone platform)
+    ctx.fillStyle = '#3A3A42';
+    ctx.beginPath();
+    ctx.roundRect(cx - 30, cy - 10, 60, 24, 6);
+    ctx.fill();
+    ctx.strokeStyle = '#4A4A52';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+
+    // Lever slot
+    ctx.fillStyle = '#1A1A20';
+    ctx.fillRect(cx - 4, cy - 14, 8, 10);
+
+    // Lever arm angle
+    const leverAngle = lever.pulled ? 0.5 : -0.5;
+    const armLength = 80;
+
+    ctx.save();
+    ctx.translate(cx, cy - 10);
+    ctx.rotate(leverAngle);
+
+    // Lever arm shadow
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
+    ctx.fillRect(-4, -armLength + 2, 10, armLength + 2);
+
+    // Lever arm
+    const armColor = isSelected
+      ? (selectionAnim.correct ? COLORS.success : COLORS.error)
+      : isHovered ? COLORS.cyan : '#6A6A72';
+    ctx.fillStyle = armColor;
+    ctx.beginPath();
+    ctx.roundRect(-3, -armLength, 8, armLength, 3);
+    ctx.fill();
+
+    // Metal highlights
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.1)';
+    ctx.fillRect(-1, -armLength + 5, 2, armLength - 10);
+
+    // Lever knob (handle ball)
+    const knobColor = isSelected
+      ? (selectionAnim.correct ? COLORS.success : COLORS.error)
+      : isHovered ? COLORS.amber : COLORS.orange;
+    ctx.fillStyle = knobColor;
+    ctx.beginPath();
+    ctx.arc(1, -armLength, isHovered ? 14 : 12, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Knob highlight
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.25)';
+    ctx.beginPath();
+    ctx.arc(-1, -armLength - 3, 4, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Knob glow when hovered
+    if (isHovered) {
+      const glowGrad = ctx.createRadialGradient(1, -armLength, 5, 1, -armLength, 25);
+      glowGrad.addColorStop(0, 'rgba(245, 167, 66, 0.3)');
+      glowGrad.addColorStop(1, 'rgba(245, 167, 66, 0)');
+      ctx.fillStyle = glowGrad;
+      ctx.beginPath();
+      ctx.arc(1, -armLength, 25, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    ctx.restore();
+
+    // Chain detail from lever to gate
+    ctx.strokeStyle = '#5A5A60';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([4, 4]);
+    const chainEndX = idx === 0 ? 160 : 560;
+    const chainEndY = 100;
+    ctx.beginPath();
+    ctx.moveTo(cx, cy - 50);
+    ctx.quadraticCurveTo(cx + (idx === 0 ? -30 : 30), 150, chainEndX, chainEndY);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    ctx.globalAlpha = 1;
+    ctx.restore();
+  }
+
+  function drawAnswerPanels() {
+    const panelWidth = 280;
+    const panelHeight = 110;
+    const panelY = 395;
+    const panelPositions = [
+      { x: 20, y: panelY },
+      { x: 420, y: panelY }
+    ];
+
+    levers.forEach((lever, i) => {
+      if (lever.alpha <= 0) return;
+
+      const pos = panelPositions[i];
+      const isHovered = hoveredLever === i && !selectionAnim.active;
+      const isSelected = selectedLever === i;
+
+      ctx.save();
+      ctx.globalAlpha = lever.alpha;
+
+      // Panel background
+      const panelGrad = ctx.createLinearGradient(pos.x, pos.y, pos.x, pos.y + panelHeight);
+      if (isSelected && selectionAnim.active) {
+        if (selectionAnim.correct) {
+          panelGrad.addColorStop(0, 'rgba(107, 191, 89, 0.25)');
+          panelGrad.addColorStop(1, 'rgba(107, 191, 89, 0.15)');
+        } else {
+          panelGrad.addColorStop(0, 'rgba(232, 93, 74, 0.25)');
+          panelGrad.addColorStop(1, 'rgba(232, 93, 74, 0.15)');
+        }
+      } else if (isHovered) {
+        panelGrad.addColorStop(0, 'rgba(78, 205, 196, 0.2)');
+        panelGrad.addColorStop(1, 'rgba(78, 205, 196, 0.1)');
+      } else {
+        panelGrad.addColorStop(0, 'rgba(42, 42, 39, 0.85)');
+        panelGrad.addColorStop(1, 'rgba(28, 28, 26, 0.9)');
+      }
+      ctx.fillStyle = panelGrad;
+      ctx.beginPath();
+      ctx.roundRect(pos.x, pos.y, panelWidth, panelHeight, 12);
+      ctx.fill();
+
+      // Panel border
+      const borderColor = isSelected && selectionAnim.active
+        ? (selectionAnim.correct ? COLORS.success : COLORS.error)
+        : isHovered ? COLORS.cyan : '#424240';
+      ctx.strokeStyle = borderColor;
+      ctx.lineWidth = isHovered ? 2 : 1.5;
+      ctx.stroke();
+
+      // Answer text with word wrap
+      const font = "400 16px 'Nunito', sans-serif";
+      const textMaxWidth = panelWidth - 32;
+      const lines = wrapText(lever.choice.text, textMaxWidth, font);
+
+      ctx.font = font;
+      ctx.fillStyle = COLORS.textPrimary;
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'top';
+
+      const lineHeight = 22;
+      const totalTextHeight = lines.length * lineHeight;
+      const textStartY = pos.y + (panelHeight - totalTextHeight) / 2;
+
+      lines.forEach((line, lineIdx) => {
+        ctx.fillText(line, pos.x + 16, textStartY + lineIdx * lineHeight);
+      });
+
+      ctx.globalAlpha = 1;
+      ctx.restore();
+    });
+  }
+
+  // Click areas for levers (includes both lever and answer panel)
+  function getLeverClickArea(idx) {
+    const lever = levers[idx];
+    const panelPositions = [
+      { x: 20, y: 395 },
+      { x: 420, y: 395 }
+    ];
+    const panelWidth = 280;
+    const panelHeight = 110;
+
+    return {
+      // Lever area
+      leverRect: {
+        x: lever.x - 20 + lever.shakeX,
+        y: lever.y - 100,
+        w: lever.width + 40,
+        h: lever.height + 120
+      },
+      // Panel area
+      panelRect: {
+        x: panelPositions[idx].x,
+        y: panelPositions[idx].y,
+        w: panelWidth,
+        h: panelHeight
+      }
+    };
+  }
+
+  function handleInput(e) {
+    if (gameState !== 'playing') return;
+    if (selectionAnim.active) return;
+  }
+
+  // Mouse move for hover effects
+  canvas.addEventListener('mousemove', (e) => {
+    if (gameState !== 'playing' || selectionAnim.active) {
+      hoveredLever = -1;
+      canvas.style.cursor = 'default';
+      return;
+    }
+
+    const { x, y } = screenToLogical(e.clientX, e.clientY);
+    hoveredLever = -1;
+
+    for (let i = 0; i < levers.length; i++) {
+      const areas = getLeverClickArea(i);
+      if (pointInRect(x, y, areas.leverRect) || pointInRect(x, y, areas.panelRect)) {
+        hoveredLever = i;
+        break;
+      }
+    }
+    canvas.style.cursor = hoveredLever >= 0 ? 'pointer' : 'default';
+  });
+
+  // Click handler for lever selection
+  canvas.addEventListener('click', (e) => {
+    if (gameState !== 'playing' || selectionAnim.active) return;
+
+    const { x, y } = screenToLogical(e.clientX, e.clientY);
+
+    for (let i = 0; i < levers.length; i++) {
+      const areas = getLeverClickArea(i);
+      if (pointInRect(x, y, areas.leverRect) || pointInRect(x, y, areas.panelRect)) {
+        // Select this lever
+        selectedLever = i;
+        levers[i].pulled = true;
+
+        playSound('lever');
+
+        // Start selection animation
+        selectionAnim = {
+          active: true,
+          time: 0,
+          leverIdx: i,
+          correct: levers[i].choice.is_correct
+        };
+
+        // Spawn particles at lever
+        const cx = levers[i].x + levers[i].width / 2;
+        const cy = levers[i].y;
+        for (let p = 0; p < 12; p++) {
+          particles.push({
+            x: cx + (Math.random() - 0.5) * 20,
+            y: cy,
+            vx: (Math.random() - 0.5) * 80,
+            vy: -Math.random() * 60 - 20,
+            life: 1,
+            size: 2 + Math.random() * 4,
+            color: levers[i].choice.is_correct ? COLORS.success : COLORS.error
+          });
+        }
+
+        break;
+      }
+    }
+  });
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 4: GAME LOOP - DO NOT MODIFY                                      ║
+  // ║  Standard loop with responsive scaling and DPR support.                    ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  let lastTime = performance.now();
+
+  function gameLoop(now) {
+    const dt = Math.min((now - lastTime) / 1000, 0.05); // Cap at 50ms
+    lastTime = now;
+
+    // Apply transform for logical coordinate system
+    ctx.setTransform(scale * dpr, 0, 0, scale * dpr, 0, 0);
+
+    if (gameState === 'playing') {
+      updateGame(dt);
+      drawGame();
+    } else {
+      drawGame(); // Draw game state behind overlay
+      drawEndScreen(dt);
+    }
+
+    // Reset transform for next frame
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+    requestAnimationFrame(gameLoop);
+  }
+
+  // Input handlers
+  document.addEventListener('keydown', (e) => {
+    if (gameState === 'ended' && (e.code === 'KeyR')) {
+      // Restart game
+      gameState = 'playing';
+      gameResult = null;
+      gameExplanation = '';
+      confettiParticles = [];
+      initGame();
+      return;
+    }
+    handleInput(e);
+  });
+
+  document.addEventListener('keyup', (e) => {
+    // Optional: handle key release in your handleInput
+  });
+
+  // Canvas click handler for end screen buttons
+  canvas.addEventListener('click', (e) => {
+    if (gameState !== 'ended') return;
+
+    const { x, y } = screenToLogical(e.clientX, e.clientY);
+
+    if (gameResult) {
+      // Correct answer: check both buttons
+      if (pointInRect(x, y, restartButton)) {
+        gameState = 'playing';
+        gameResult = null;
+        gameExplanation = '';
+        confettiParticles = [];
+        initGame();
+        return;
+      }
+      if (pointInRect(x, y, nextButton)) {
+        // Notify parent to go to next question
+        if (window.parent && window.parent !== window) {
+          window.parent.postMessage({ type: 'quiz-next' }, '*');
+        }
+        return;
+      }
+    } else {
+      // Wrong answer: check centered restart button
+      const centeredRestart = { x: W / 2 - 75, y: H / 2 + 60, w: 150, h: 48 };
+      if (pointInRect(x, y, centeredRestart)) {
+        gameState = 'playing';
+        gameResult = null;
+        gameExplanation = '';
+        confettiParticles = [];
+        initGame();
+        return;
+      }
+    }
+  });
+
+  // Handle resize
+  window.addEventListener('resize', resizeCanvas);
+
+  // Initialize
+  resizeCanvas();
+  initGame();
+  requestAnimationFrame(gameLoop);
+  </script>
+</body>
+</html>

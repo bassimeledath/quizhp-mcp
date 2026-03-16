@@ -1,0 +1,1326 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <title>Cup Shuffle Game</title>
+  <link href="https://fonts.googleapis.com/css2?family=Belanosima:wght@400;600;700&family=Nunito+Sans:wght@400;500;600;700&family=Nunito:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      touch-action: none;
+      -webkit-touch-callout: none;
+      -webkit-user-select: none;
+      user-select: none;
+    }
+    body {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      background: #1C1C1A;
+      font-family: 'Nunito Sans', system-ui, -apple-system, sans-serif;
+    }
+    #gameCanvas {
+      background: #2A2A27;
+      width: 100vw;
+      height: 100vh;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="gameCanvas"></canvas>
+
+  <script>
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 1: QUESTION PLACEHOLDER - DO NOT MODIFY FORMAT                    ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  const QUESTION = {
+    type: "mcq",
+    prompt: "Sample question text",
+    choices: [
+      { text: "This is sample answer A which is long enough to test text overflow", is_correct: true, explanation: "Why A is correct" },
+      { text: "This is sample answer B which is long enough to test text overflow", is_correct: false, explanation: "Why B is wrong" },
+      { text: "This is sample answer C which is long enough to test text overflow", is_correct: false, explanation: "Why C is wrong" },
+      { text: "This is sample answer D which is long enough to test text overflow", is_correct: false, explanation: "Why D is wrong" }
+    ],
+    isLastQuestion: false
+  };
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 2: ENGINE CORE (MOBILE) - DO NOT MODIFY                           ║
+  // ║  Non-uniform scaling (fills container), touch input, tap-to-restart.       ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  const canvas = document.getElementById('gameCanvas');
+  const ctx = canvas.getContext('2d');
+
+  // Logical dimensions (game code works in this coordinate space)
+  const W = 360, H = 640;
+
+  // Scaling state (computed on resize)
+  let scaleX = 1;
+  let scaleY = 1;
+  let aspectRatio = 1;  // scaleX/scaleY - use for proportional shapes
+
+  // Game state
+  let gameState = 'playing'; // 'playing' | 'ended'
+  let gameResult = null;     // true (correct) | false (wrong)
+  let gameExplanation = '';
+  let endScreenTime = 0;
+  let confettiParticles = [];
+
+  // End screen button bounds (logical coordinates)
+  const restartButton = { x: 20, y: H / 2 + 50, w: 155, h: 56 };
+  const nextButton = { x: 185, y: H / 2 + 50, w: 155, h: 56 };
+  // Centered restart button for wrong answers
+  const centeredRestartButton = { x: W / 2 - 100, y: H / 2 + 50, w: 200, h: 56 };
+
+  /** Draw a styled button with aspect-ratio aware text */
+  function drawMobileButton(rect, label, color, pulse) {
+    const textAdj = getTextScaleAdjustment();
+    const p = pulse ? 1 + Math.sin(endScreenTime * 4) * 0.03 : 1;
+
+    ctx.save();
+    ctx.translate(rect.x + rect.w / 2, rect.y + rect.h / 2);
+    ctx.scale(p, p);
+    ctx.translate(-(rect.x + rect.w / 2), -(rect.y + rect.h / 2));
+
+    // Button background
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.roundRect(rect.x, rect.y, rect.w, rect.h, 12);
+    ctx.fill();
+
+    // Button text (aspect-ratio aware)
+    ctx.save();
+    ctx.translate(rect.x + rect.w / 2, rect.y + rect.h / 2);
+    ctx.scale(textAdj / aspectRatio, textAdj);
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = 'bold 18px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, 0, 0);
+    ctx.restore();
+
+    ctx.restore();
+  }
+
+  /**
+   * Resize canvas to fill viewport completely (no letterboxing).
+   * Uses non-uniform scaling - game code works in 360×640 logical space.
+   * Use aspectRatio to draw proportionally correct shapes.
+   */
+  function resizeCanvas() {
+    const dpr = window.devicePixelRatio || 1;
+
+    // Physical canvas size (actual pixels)
+    canvas.width = window.innerWidth * dpr;
+    canvas.height = window.innerHeight * dpr;
+
+    // CSS size (fills viewport)
+    canvas.style.width = window.innerWidth + 'px';
+    canvas.style.height = window.innerHeight + 'px';
+
+    // Non-uniform scaling to fill entire canvas
+    scaleX = canvas.width / W;
+    scaleY = canvas.height / H;
+
+    // Aspect ratio for proportional shape drawing
+    // >1 means container is wider than logical space
+    // <1 means container is taller than logical space
+    aspectRatio = scaleX / scaleY;
+
+    // Recalculate text sizing on resize (implement this in SECTION 3)
+    if (typeof recalculateTextSizing === 'function') {
+      recalculateTextSizing();
+    }
+  }
+
+  // === ASPECT-RATIO-AWARE TEXT WITH CLAMPED SCALING ===
+  // Text gets stretched by non-uniform scaling, so we compensate.
+  // Also clamp the effective scale to keep text legible at all sizes.
+  const TEXT_SCALE_MIN = 0.75;
+  const TEXT_SCALE_MAX = 1.4;
+
+  function getTextScaleAdjustment() {
+    const baseScale = window.innerHeight / H;
+    const clampedScale = Math.min(TEXT_SCALE_MAX, Math.max(TEXT_SCALE_MIN, baseScale));
+    return clampedScale / baseScale;
+  }
+
+  /**
+   * Draw text with aspect-ratio compensation and clamped scaling.
+   * Use this instead of raw ctx.fillText() to prevent text stretching.
+   * Default font is 16px (minimum for answer text). Use 18-20px for better readability.
+   */
+  function drawText(text, x, y, options = {}) {
+    const { font = "500 16px system-ui, sans-serif", color = '#F5F5F0', align = 'center', baseline = 'middle' } = options;
+    ctx.save();
+    ctx.translate(x, y);
+    const adj = getTextScaleAdjustment();
+    ctx.scale(adj / aspectRatio, adj);
+    ctx.font = font;
+    ctx.fillStyle = color;
+    ctx.textAlign = align;
+    ctx.textBaseline = baseline;
+    ctx.fillText(text, 0, 0);
+    ctx.restore();
+  }
+
+  /**
+   * Convert screen coordinates to logical coordinates.
+   * Use this in handleTouch to get positions in 360×640 space.
+   */
+  function screenToLogical(screenX, screenY) {
+    const dpr = window.devicePixelRatio || 1;
+    const rect = canvas.getBoundingClientRect();
+    const canvasX = (screenX - rect.left) * dpr;
+    const canvasY = (screenY - rect.top) * dpr;
+    return {
+      x: canvasX / scaleX,
+      y: canvasY / scaleY
+    };
+  }
+
+  /**
+   * Check if a point is inside a rectangle (logical coordinates).
+   */
+  function pointInRect(px, py, rect) {
+    return px >= rect.x && px <= rect.x + rect.w &&
+           py >= rect.y && py <= rect.y + rect.h;
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // TEXT UTILITIES - Dynamic wrapping and font sizing
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  /**
+   * Wrap text to fit within a maximum width (in logical coordinates).
+   * Accounts for canvas transforms applied by drawText().
+   *
+   * @param {string} text - The text to wrap
+   * @param {number} maxWidth - Maximum width in logical coordinates
+   * @param {string} font - CSS font string (e.g., "16px 'Nunito', sans-serif")
+   * @param {number} maxLines - Maximum number of lines (default 3)
+   * @returns {string[]} Array of text lines
+   */
+  function wrapText(text, maxWidth, font, maxLines = 3) {
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.font = font;
+    const adj = getTextScaleAdjustment();
+    const maxRawWidth = maxWidth * aspectRatio / adj;
+    const words = text.split(' ');
+    const lines = [];
+    let currentLine = '';
+    words.forEach(word => {
+      const testLine = currentLine ? currentLine + ' ' + word : word;
+      if (ctx.measureText(testLine).width > maxRawWidth && currentLine) {
+        lines.push(currentLine);
+        currentLine = word;
+      } else {
+        currentLine = testLine;
+      }
+    });
+    if (currentLine) lines.push(currentLine);
+    ctx.restore();
+    return lines.slice(0, maxLines);
+  }
+
+  /**
+   * Find the optimal font size to fit content in available space.
+   * Tries font sizes from max to min until content fits.
+   *
+   * @param {Object} options
+   * @param {string[]} options.texts - Array of text strings to fit
+   * @param {number} options.maxWidth - Maximum width for text wrapping
+   * @param {number} options.availableHeight - Total height available for all texts
+   * @param {number} options.minFont - Minimum font size (default 12)
+   * @param {number} options.maxFont - Maximum font size (default 18)
+   * @param {number} options.itemPadding - Vertical padding per text item (default 4)
+   * @param {string} options.fontFamily - Font family (default "'Nunito Sans', sans-serif")
+   * @returns {{ fontSize: number, wrappedTexts: string[][] }} Optimal font size and pre-wrapped texts
+   */
+  function findOptimalFontSize(options) {
+    const {
+      texts,
+      maxWidth,
+      availableHeight,
+      minFont = 12,
+      maxFont = 18,
+      itemPadding = 4,
+      fontFamily = "'Nunito Sans', sans-serif"
+    } = options;
+
+    let bestFontSize = minFont;
+    let bestWrappedTexts = [];
+
+    for (let fontSize = maxFont; fontSize >= minFont; fontSize -= 0.5) {
+      const font = `${fontSize}px ${fontFamily}`;
+      const lineHeight = fontSize + 2;
+
+      let totalHeight = 0;
+      const wrappedTexts = [];
+
+      for (const text of texts) {
+        const lines = wrapText(text, maxWidth, font);
+        wrappedTexts.push(lines);
+        totalHeight += itemPadding + lines.length * lineHeight;
+      }
+
+      if (totalHeight <= availableHeight) {
+        bestFontSize = fontSize;
+        bestWrappedTexts = wrappedTexts;
+        break;
+      }
+
+      bestWrappedTexts = wrappedTexts;
+    }
+
+    return { fontSize: bestFontSize, wrappedTexts: bestWrappedTexts };
+  }
+
+  const engine = {
+    /** Call this to end the game. DO NOT draw your own end screen. */
+    end(isCorrect, explanation) {
+      if (gameState === 'ended') return;
+      gameState = 'ended';
+      gameResult = isCorrect;
+      gameExplanation = explanation || '';
+      endScreenTime = 0;
+
+      // Spawn confetti for correct answers
+      if (isCorrect) {
+        for (let i = 0; i < 50; i++) {
+          confettiParticles.push({
+            x: W / 2,
+            y: H / 2,
+            vx: (Math.random() - 0.5) * 400,
+            vy: -Math.random() * 300 - 80,
+            size: 4 + Math.random() * 6,
+            color: ['#FFD700', '#FF6B6B', '#4ECDC4', '#95E1D3', '#F38181'][Math.floor(Math.random() * 5)],
+            rotation: Math.random() * Math.PI * 2,
+            rotationSpeed: (Math.random() - 0.5) * 10
+          });
+        }
+      }
+
+      // Notify parent frame
+      if (window.parent && window.parent !== window) {
+        window.parent.postMessage({
+          type: 'quiz-end',
+          isCorrect: isCorrect,
+          explanation: explanation || ''
+        }, '*');
+      }
+    }
+  };
+
+  /** STANDARD END SCREEN (MOBILE) - DO NOT MODIFY */
+  function drawEndScreen(dt) {
+    endScreenTime += dt;
+
+    // Update confetti
+    confettiParticles = confettiParticles.filter(p => {
+      p.vy += 600 * dt; // gravity
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.rotation += p.rotationSpeed * dt;
+      p.vx *= 0.99;
+      return p.y < H + 50;
+    });
+
+    // Dark overlay
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
+    ctx.fillRect(0, 0, W, H);
+
+    // Draw confetti
+    confettiParticles.forEach(p => {
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rotation);
+      ctx.fillStyle = p.color;
+      ctx.fillRect(-p.size / 2, -p.size / 4, p.size, p.size / 2);
+      ctx.restore();
+    });
+
+    // Result emoji (aspect-ratio aware)
+    const textAdj = getTextScaleAdjustment();
+    ctx.save();
+    ctx.translate(W / 2, H / 2 - 80);
+    ctx.scale(textAdj / aspectRatio, textAdj);
+    ctx.font = '64px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(gameResult ? '🎉' : '😢', 0, 0);
+    ctx.restore();
+
+    // Result text (aspect-ratio aware)
+    ctx.save();
+    ctx.translate(W / 2, H / 2 - 10);
+    ctx.scale(textAdj / aspectRatio, textAdj);
+    ctx.fillStyle = gameResult ? '#4ADE80' : '#F87171';
+    ctx.font = 'bold 32px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(gameResult ? 'Correct!' : 'Wrong!', 0, 0);
+    ctx.restore();
+
+    // Buttons
+    if (gameResult) {
+      // Correct: show both Restart and Next/Finish
+      drawMobileButton(restartButton, 'Restart', '#E87A3E', true);
+      const nextLabel = QUESTION.isLastQuestion ? 'Finish' : 'Next';
+      drawMobileButton(nextButton, nextLabel, '#4ECDC4', true);
+    } else {
+      // Wrong: show only centered Restart button
+      drawMobileButton(centeredRestartButton, 'Restart', '#E87A3E', true);
+    }
+  }
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 3: YOUR GAME CODE - CUP SHUFFLE GAME                              ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // QuizHP Styleguide Colors
+  // ─────────────────────────────────────────────────────────────────────────────
+  const COLORS = {
+    bgPrimary: '#1C1C1A',
+    bgSurface: '#2A2A27',
+    bgSurfaceSecondary: '#363633',
+    textPrimary: '#F5F5F0',
+    textSecondary: '#C2C2B8',
+    textTertiary: '#8C8C84',
+    orange: '#E87A3E',
+    orangeHover: '#D66B31',
+    amber: '#F5A742',
+    cyan: '#4ECDC4',
+    success: '#6BBF59',
+    error: '#E85D4A',
+    borderSubtle: '#424240',
+    borderStrong: '#5A5A56'
+  };
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Reduced Motion Detection
+  // ─────────────────────────────────────────────────────────────────────────────
+  const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Sound Effects (Web Audio API)
+  // ─────────────────────────────────────────────────────────────────────────────
+  let audioCtx = null;
+
+  function initAudio() {
+    if (!audioCtx) {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    if (audioCtx.state === 'suspended') {
+      audioCtx.resume();
+    }
+  }
+
+  function playSound(type) {
+    if (!audioCtx) return;
+    try {
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+
+      if (type === 'correct') {
+        osc.frequency.setValueAtTime(523, audioCtx.currentTime);
+        osc.frequency.setValueAtTime(659, audioCtx.currentTime + 0.1);
+        osc.frequency.setValueAtTime(784, audioCtx.currentTime + 0.2);
+        gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
+        gain.gain.exponentialDecayTo = (v, t) => gain.gain.setTargetAtTime(v, t, 0.1);
+        gain.gain.setTargetAtTime(0.01, audioCtx.currentTime + 0.3, 0.1);
+        osc.start();
+        osc.stop(audioCtx.currentTime + 0.4);
+      } else if (type === 'wrong') {
+        osc.frequency.setValueAtTime(200, audioCtx.currentTime);
+        osc.frequency.setValueAtTime(150, audioCtx.currentTime + 0.1);
+        gain.gain.setValueAtTime(0.2, audioCtx.currentTime);
+        gain.gain.setTargetAtTime(0.01, audioCtx.currentTime + 0.2, 0.05);
+        osc.start();
+        osc.stop(audioCtx.currentTime + 0.3);
+      } else if (type === 'click') {
+        osc.frequency.setValueAtTime(800, audioCtx.currentTime);
+        gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
+        gain.gain.setTargetAtTime(0.01, audioCtx.currentTime + 0.05, 0.02);
+        osc.start();
+        osc.stop(audioCtx.currentTime + 0.08);
+      } else if (type === 'shuffle') {
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(300 + Math.random() * 200, audioCtx.currentTime);
+        gain.gain.setValueAtTime(0.08, audioCtx.currentTime);
+        gain.gain.setTargetAtTime(0.01, audioCtx.currentTime + 0.05, 0.02);
+        osc.start();
+        osc.stop(audioCtx.currentTime + 0.06);
+      } else if (type === 'reveal') {
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(400, audioCtx.currentTime);
+        osc.frequency.linearRampToValueAtTime(600, audioCtx.currentTime + 0.15);
+        gain.gain.setValueAtTime(0.15, audioCtx.currentTime);
+        gain.gain.setTargetAtTime(0.01, audioCtx.currentTime + 0.2, 0.05);
+        osc.start();
+        osc.stop(audioCtx.currentTime + 0.25);
+      }
+    } catch (e) {
+      // Audio failed, continue silently
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Particle Systems
+  // ─────────────────────────────────────────────────────────────────────────────
+  let gameParticles = [];
+
+  function spawnConfetti(x, y, count = 25) {
+    if (prefersReducedMotion) return;
+    const colors = [COLORS.orange, COLORS.amber, COLORS.cyan, COLORS.success];
+    for (let i = 0; i < count; i++) {
+      gameParticles.push({
+        x, y,
+        vx: (Math.random() - 0.5) * 350,
+        vy: -Math.random() * 250 - 80,
+        color: colors[Math.floor(Math.random() * colors.length)],
+        size: Math.random() * 7 + 3,
+        rotation: Math.random() * Math.PI * 2,
+        rotationSpeed: (Math.random() - 0.5) * 10,
+        gravity: 500,
+        alpha: 1,
+        type: 'confetti'
+      });
+    }
+  }
+
+  function spawnErrorRing(x, y) {
+    if (prefersReducedMotion) return;
+    for (let i = 0; i < 8; i++) {
+      const angle = (i / 8) * Math.PI * 2;
+      gameParticles.push({
+        x, y,
+        vx: Math.cos(angle) * 100,
+        vy: Math.sin(angle) * 100,
+        color: COLORS.error,
+        size: 6,
+        alpha: 1,
+        gravity: 0,
+        type: 'ring'
+      });
+    }
+  }
+
+  function updateGameParticles(dt) {
+    gameParticles = gameParticles.filter(p => {
+      if (p.type === 'confetti') {
+        p.vy += p.gravity * dt;
+        p.x += p.vx * dt;
+        p.y += p.vy * dt;
+        p.rotation += p.rotationSpeed * dt;
+        p.alpha -= dt * 0.6;
+      } else if (p.type === 'ring') {
+        p.x += p.vx * dt;
+        p.y += p.vy * dt;
+        p.alpha -= dt * 2;
+        p.size += dt * 20;
+      }
+      return p.alpha > 0 && p.y < H + 50;
+    });
+  }
+
+  function drawGameParticles() {
+    gameParticles.forEach(p => {
+      ctx.save();
+      ctx.globalAlpha = p.alpha;
+      ctx.translate(p.x, p.y);
+      if (p.rotation) ctx.rotate(p.rotation);
+      ctx.fillStyle = p.color;
+      if (p.type === 'confetti') {
+        ctx.fillRect(-p.size / 2, -p.size / 4, p.size, p.size / 2);
+      } else if (p.type === 'ring') {
+        ctx.beginPath();
+        ctx.arc(0, 0, p.size, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.restore();
+    });
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Entrance Animations
+  // ─────────────────────────────────────────────────────────────────────────────
+  let entranceProgress = 0;
+  let entranceComplete = false;
+  let cupEntranceDelays = [0, 0.08, 0.16, 0.24];
+  let buttonEntranceDelays = [0.3, 0.38, 0.46, 0.54];
+
+  function getEntranceScale(delay) {
+    if (prefersReducedMotion) return 1;
+    const t = Math.max(0, Math.min(1, (entranceProgress - delay) / 0.35));
+    if (t <= 0) return 0;
+    if (t >= 1) return 1;
+    // Spring easing
+    const spring = 1 + Math.sin(t * Math.PI * 2) * 0.2 * (1 - t);
+    return t * spring;
+  }
+
+  function getEntranceAlpha(delay) {
+    if (prefersReducedMotion) return 1;
+    const t = Math.max(0, Math.min(1, (entranceProgress - delay) / 0.35));
+    return t;
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Feedback Animations
+  // ─────────────────────────────────────────────────────────────────────────────
+  function celebrateButton(button) {
+    if (prefersReducedMotion) return;
+    const start = performance.now();
+    const animate = (now) => {
+      const t = Math.min((now - start) / 500, 1);
+      button.scale = 1 + 0.15 * Math.sin(t * Math.PI);
+      if (t < 1) requestAnimationFrame(animate);
+      else button.scale = 1;
+    };
+    requestAnimationFrame(animate);
+  }
+
+  function shakeButton(button) {
+    if (prefersReducedMotion) return;
+    const start = performance.now();
+    const animate = (now) => {
+      const t = Math.min((now - start) / 400, 1);
+      button.shakeOffset = Math.sin(t * Math.PI * 10) * 8 * (1 - t);
+      if (t < 1) requestAnimationFrame(animate);
+      else button.shakeOffset = 0;
+    };
+    requestAnimationFrame(animate);
+  }
+
+  // Game constants
+  const CUP_WIDTH = 60;
+  const CUP_HEIGHT = 80;
+  const CUP_POSITIONS = [
+    { x: 45, label: 'A' },
+    { x: 120, label: 'B' },
+    { x: 195, label: 'C' },
+    { x: 270, label: 'D' }
+  ];
+  const CUP_Y = 180;
+  const BALL_RADIUS = 15;
+
+  // Game state
+  let cups = [];
+  let ballCupIndex = 0; // Which cup has the ball (0-3)
+  let phase = 'reveal'; // 'reveal', 'lowering', 'shuffling', 'settling', 'waiting', 'revealing', 'done'
+  let phaseTimer = 0;
+  let shuffleMoves = [];
+  let currentShuffleMove = 0;
+  let shuffleProgress = 0;
+  let selectedCupIndex = -1;
+  let revealProgress = 0;
+  let answers = [];
+  let lastShuffleSoundTime = 0;
+  let feedbackTriggered = false;
+
+  // Generate shuffle moves
+  function generateShuffleMoves(count) {
+    const moves = [];
+    for (let i = 0; i < count; i++) {
+      const a = Math.floor(Math.random() * 4);
+      let b = Math.floor(Math.random() * 4);
+      while (b === a) b = Math.floor(Math.random() * 4);
+      moves.push({ a, b });
+    }
+    return moves;
+  }
+
+  function initGame() {
+    // Find which choice is correct
+    const correctIndex = QUESTION.choices.findIndex(c => c.is_correct);
+    ballCupIndex = correctIndex >= 0 ? correctIndex : 0;
+
+    // Initialize cups at their positions
+    cups = CUP_POSITIONS.map((pos, i) => ({
+      x: pos.x,
+      targetX: pos.x,
+      startX: pos.x,
+      label: pos.label,
+      originalIndex: i,
+      liftAmount: 0,
+      scale: 1
+    }));
+
+    // Generate shuffle moves (20-30 rapid swaps)
+    shuffleMoves = generateShuffleMoves(25);
+    currentShuffleMove = 0;
+    shuffleProgress = 0;
+
+    phase = 'reveal';
+    phaseTimer = 0;
+    selectedCupIndex = -1;
+    revealProgress = 0;
+
+    // Reset entrance animation
+    entranceProgress = 0;
+    entranceComplete = false;
+    gameParticles = [];
+    lastShuffleSoundTime = 0;
+    feedbackTriggered = false;
+
+    // Create answer buttons
+    const BUTTON_HEIGHT = 70;
+    const BUTTON_GAP = 8;
+    const START_Y = 340;
+
+    answers = QUESTION.choices.map((choice, i) => ({
+      x: 20,
+      y: START_Y + i * (BUTTON_HEIGHT + BUTTON_GAP),
+      w: 320,
+      h: BUTTON_HEIGHT,
+      choice: choice,
+      label: ['A', 'B', 'C', 'D'][i],
+      cupIndex: i,
+      scale: 1,
+      shakeOffset: 0
+    }));
+  }
+
+  function updateGame(dt) {
+    if (gameState !== 'playing') return;
+
+    // Update entrance animation
+    if (!entranceComplete) {
+      entranceProgress += dt;
+      if (entranceProgress > 1) {
+        entranceComplete = true;
+      }
+    }
+
+    // Update particles
+    updateGameParticles(dt);
+
+    phaseTimer += dt;
+
+    if (phase === 'reveal') {
+      // Show ball under cup briefly (cup lifted)
+      cups[ballCupIndex].liftAmount = Math.min(1, phaseTimer * 2) * 50;
+      if (phaseTimer > 1.5) {
+        phase = 'lowering';
+        phaseTimer = 0;
+      }
+    } else if (phase === 'lowering') {
+      // Lower cup back down
+      cups[ballCupIndex].liftAmount = Math.max(0, 50 - phaseTimer * 100);
+      if (phaseTimer > 0.5) {
+        phase = 'shuffling';
+        phaseTimer = 0;
+      }
+    } else if (phase === 'shuffling') {
+      // Rapid shuffling
+      const SHUFFLE_SPEED = 12; // Moves per second (very fast!)
+      shuffleProgress += dt * SHUFFLE_SPEED;
+
+      while (shuffleProgress >= 1 && currentShuffleMove < shuffleMoves.length) {
+        // Complete current swap
+        const move = shuffleMoves[currentShuffleMove];
+        const tempX = cups[move.a].x;
+        cups[move.a].x = cups[move.b].x;
+        cups[move.b].x = tempX;
+
+        // Note: We do NOT track ball position during shuffle
+        // The shuffle is purely visual - ball stays with the correct answer cup
+        // After settling, cups return to their labeled positions (A, B, C, D)
+
+        // Play shuffle sound (throttled)
+        const now = performance.now();
+        if (now - lastShuffleSoundTime > 80) {
+          playSound('shuffle');
+          lastShuffleSoundTime = now;
+        }
+
+        currentShuffleMove++;
+        shuffleProgress -= 1;
+
+        // Set up next animation
+        if (currentShuffleMove < shuffleMoves.length) {
+          const nextMove = shuffleMoves[currentShuffleMove];
+          cups[nextMove.a].startX = cups[nextMove.a].x;
+          cups[nextMove.a].targetX = cups[nextMove.b].x;
+          cups[nextMove.b].startX = cups[nextMove.b].x;
+          cups[nextMove.b].targetX = cups[nextMove.a].x;
+        }
+      }
+
+      // Animate current swap
+      if (currentShuffleMove < shuffleMoves.length) {
+        const move = shuffleMoves[currentShuffleMove];
+        const t = shuffleProgress;
+        const easeT = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+
+        // Arc motion for visual clarity
+        const arcHeight = 30 * Math.sin(t * Math.PI);
+        cups[move.a].arcY = -arcHeight;
+        cups[move.b].arcY = arcHeight;
+
+        cups[move.a].x = cups[move.a].startX + (cups[move.a].targetX - cups[move.a].startX) * easeT;
+        cups[move.b].x = cups[move.b].startX + (cups[move.b].targetX - cups[move.b].startX) * easeT;
+      }
+
+      if (currentShuffleMove >= shuffleMoves.length) {
+        phase = 'settling';
+        phaseTimer = 0;
+        // Clear arc offsets and set up settling animation
+        cups.forEach((c, i) => {
+          c.arcY = 0;
+          c.startX = c.x;  // Current position after shuffle
+          c.targetX = CUP_POSITIONS[i].x;  // Target evenly spaced position
+        });
+      }
+    } else if (phase === 'settling') {
+      // Smoothly animate cups to evenly spaced positions
+      const SETTLE_DURATION = 0.4; // seconds
+      const t = Math.min(1, phaseTimer / SETTLE_DURATION);
+      // Ease out cubic for smooth deceleration
+      const easeT = 1 - Math.pow(1 - t, 3);
+
+      cups.forEach(c => {
+        c.x = c.startX + (c.targetX - c.startX) * easeT;
+      });
+
+      if (t >= 1) {
+        phase = 'waiting';
+        phaseTimer = 0;
+        // Snap to final positions
+        cups.forEach((c, i) => {
+          c.x = CUP_POSITIONS[i].x;
+        });
+      }
+    } else if (phase === 'revealing') {
+      revealProgress = Math.min(1, phaseTimer * 3);
+      cups[selectedCupIndex].liftAmount = revealProgress * 60;
+
+      // Trigger feedback once when reveal is mostly complete
+      if (revealProgress >= 0.9 && !feedbackTriggered) {
+        feedbackTriggered = true;
+        const selected = answers.find(a => a.cupIndex === selectedCupIndex);
+        if (selected) {
+          const isCorrect = selected.choice.is_correct;
+          const cup = cups[selectedCupIndex];
+          const cupCenterX = cup.x + CUP_WIDTH / 2;
+          const cupCenterY = CUP_Y + CUP_HEIGHT / 2;
+
+          if (isCorrect) {
+            playSound('correct');
+            spawnConfetti(cupCenterX, cupCenterY - 30, 35);
+            // Celebrate animation on the selected button
+            celebrateButton(selected);
+          } else {
+            playSound('wrong');
+            spawnErrorRing(cupCenterX, cupCenterY);
+            // Shake animation on the selected button
+            shakeButton(selected);
+          }
+        }
+      }
+
+      if (revealProgress >= 1 && phaseTimer > 1.2) {
+        const selected = answers.find(a => a.cupIndex === selectedCupIndex);
+        if (selected) {
+          engine.end(selected.choice.is_correct, selected.choice.explanation);
+        }
+        phase = 'done';
+      }
+    }
+  }
+
+  function drawCup(x, y, label, liftAmount, arcY = 0, cupIndex = 0) {
+    const centerX = x + CUP_WIDTH / 2;
+
+    // The entire cup moves up by liftAmount
+    const liftOffset = liftAmount + (arcY || 0);
+    const cupTop = y - liftOffset;
+    const cupBottom = y + CUP_HEIGHT - liftOffset;
+
+    // Cup dimensions - wider at bottom (opening), narrower at top
+    const topWidth = CUP_WIDTH * 0.55;
+    const bottomWidth = CUP_WIDTH + 16;
+
+    // Apply entrance animation
+    const entranceScale = getEntranceScale(cupEntranceDelays[cupIndex]);
+    const entranceAlpha = getEntranceAlpha(cupEntranceDelays[cupIndex]);
+
+    if (entranceAlpha <= 0) return;
+
+    ctx.save();
+    ctx.globalAlpha = entranceAlpha;
+    ctx.translate(centerX, y + CUP_HEIGHT);
+    ctx.scale(entranceScale, entranceScale);
+    ctx.translate(-centerX, -(y + CUP_HEIGHT));
+
+    // Cup shadow on table (stays on table, fades when lifted)
+    const shadowAlpha = Math.max(0.1, 0.4 - liftAmount * 0.006);
+    const shadowSize = Math.max(0.5, 1 - liftAmount * 0.01);
+    ctx.fillStyle = `rgba(0, 0, 0, ${shadowAlpha})`;
+    ctx.beginPath();
+    ctx.ellipse(centerX, y + CUP_HEIGHT + 2, (bottomWidth / 2 + 4) * shadowSize, 6 * aspectRatio * shadowSize, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Main cup body gradient (left-to-right for 3D effect)
+    const bodyGradient = ctx.createLinearGradient(centerX - bottomWidth/2, 0, centerX + bottomWidth/2, 0);
+    bodyGradient.addColorStop(0, '#8B0000');
+    bodyGradient.addColorStop(0.15, '#CD2626');
+    bodyGradient.addColorStop(0.4, '#EE3B3B');
+    bodyGradient.addColorStop(0.5, '#FF4040');
+    bodyGradient.addColorStop(0.6, '#EE3B3B');
+    bodyGradient.addColorStop(0.85, '#CD2626');
+    bodyGradient.addColorStop(1, '#8B0000');
+
+    // Draw cup body (trapezoid - wide at bottom, narrow at top)
+    // Entire cup moves together
+    ctx.fillStyle = bodyGradient;
+    ctx.beginPath();
+    ctx.moveTo(centerX - bottomWidth/2, cupBottom);  // Bottom left
+    ctx.lineTo(centerX - topWidth/2, cupTop);        // Top left
+    ctx.lineTo(centerX + topWidth/2, cupTop);        // Top right
+    ctx.lineTo(centerX + bottomWidth/2, cupBottom);  // Bottom right
+    ctx.closePath();
+    ctx.fill();
+
+    // Top rim (narrow end - the actual cup bottom)
+    ctx.fillStyle = '#B22222';
+    ctx.beginPath();
+    ctx.ellipse(centerX, cupTop, topWidth/2, 4 * aspectRatio, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Top rim highlight
+    ctx.fillStyle = '#DC3030';
+    ctx.beginPath();
+    ctx.ellipse(centerX, cupTop, topWidth/2 - 2, 2.5 * aspectRatio, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Horizontal ridges (Solo cup style)
+    ctx.strokeStyle = '#A02020';
+    ctx.lineWidth = 1.5;
+
+    // Ridge 1 (upper)
+    const ridge1Y = cupTop + CUP_HEIGHT * 0.25;
+    const ridge1Width = topWidth + (bottomWidth - topWidth) * 0.25;
+    ctx.beginPath();
+    ctx.moveTo(centerX - ridge1Width/2, ridge1Y);
+    ctx.lineTo(centerX + ridge1Width/2, ridge1Y);
+    ctx.stroke();
+
+    // Ridge 2 (middle)
+    const ridge2Y = cupTop + CUP_HEIGHT * 0.5;
+    const ridge2Width = topWidth + (bottomWidth - topWidth) * 0.5;
+    ctx.beginPath();
+    ctx.moveTo(centerX - ridge2Width/2, ridge2Y);
+    ctx.lineTo(centerX + ridge2Width/2, ridge2Y);
+    ctx.stroke();
+
+    // Ridge 3 (lower)
+    const ridge3Y = cupTop + CUP_HEIGHT * 0.75;
+    const ridge3Width = topWidth + (bottomWidth - topWidth) * 0.75;
+    ctx.beginPath();
+    ctx.moveTo(centerX - ridge3Width/2, ridge3Y);
+    ctx.lineTo(centerX + ridge3Width/2, ridge3Y);
+    ctx.stroke();
+
+    // Bottom rim/lip (moves with cup)
+    ctx.fillStyle = '#9A1A1A';
+    ctx.beginPath();
+    ctx.ellipse(centerX, cupBottom, bottomWidth/2, 5 * aspectRatio, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Bottom rim inner edge (the dark opening)
+    ctx.fillStyle = '#222';
+    ctx.beginPath();
+    ctx.ellipse(centerX, cupBottom, bottomWidth/2 - 3, 3 * aspectRatio, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Vertical highlight (shiny plastic effect)
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.moveTo(centerX - topWidth/2 + 8, cupTop + 8);
+    ctx.lineTo(centerX - bottomWidth/2 + 12, cupBottom - 8);
+    ctx.stroke();
+
+    // Secondary highlight
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(centerX - topWidth/2 + 14, cupTop + 8);
+    ctx.lineTo(centerX - bottomWidth/2 + 20, cupBottom - 8);
+    ctx.stroke();
+
+    ctx.restore();
+
+    // Label (only in waiting phase)
+    if ((phase === 'waiting' || phase === 'revealing' || phase === 'done') && entranceAlpha > 0.5) {
+      drawText(label, centerX, y + CUP_HEIGHT + 22, {
+        font: "bold 20px 'Nunito Sans', sans-serif",
+        color: COLORS.textPrimary
+      });
+    }
+  }
+
+  function drawBall(x, y) {
+    // Ball shadow
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.4)';
+    ctx.beginPath();
+    ctx.ellipse(x, y + 5, BALL_RADIUS, BALL_RADIUS * 0.4 * aspectRatio, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Ball - using QuizHP amber/orange gradient
+    const gradient = ctx.createRadialGradient(x - 5, y - 5, 0, x, y, BALL_RADIUS);
+    gradient.addColorStop(0, '#FFE066');
+    gradient.addColorStop(0.5, COLORS.amber);
+    gradient.addColorStop(1, COLORS.orange);
+
+    ctx.fillStyle = gradient;
+    ctx.beginPath();
+    ctx.ellipse(x, y, BALL_RADIUS, BALL_RADIUS * aspectRatio, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Ball highlight
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
+    ctx.beginPath();
+    ctx.ellipse(x - 5, y - 5, 4, 4 * aspectRatio, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  function drawAnswerButton(ans, isHovered, buttonIndex) {
+    const enabled = phase === 'waiting';
+    const opacity = enabled ? 1 : 0.5;
+
+    // Apply entrance animation
+    const entranceScale = getEntranceScale(buttonEntranceDelays[buttonIndex]);
+    const entranceAlpha = getEntranceAlpha(buttonEntranceDelays[buttonIndex]);
+
+    if (entranceAlpha <= 0) return;
+
+    // Combine entrance scale with feedback scale
+    const totalScale = entranceScale * (ans.scale || 1);
+    const shakeOffset = ans.shakeOffset || 0;
+
+    // Determine button state colors
+    let bgColor = COLORS.bgSurfaceSecondary;
+    let borderColor = COLORS.borderSubtle;
+    const isSelected = phase === 'revealing' && selectedCupIndex === ans.cupIndex;
+
+    if (isSelected) {
+      const isCorrect = ans.choice.is_correct;
+      bgColor = isCorrect ? COLORS.success : COLORS.error;
+      borderColor = isCorrect ? '#5AAF4A' : '#D04A3A';
+    } else if (isHovered && enabled) {
+      bgColor = COLORS.orange;
+      borderColor = COLORS.orangeHover;
+    }
+
+    ctx.save();
+    ctx.globalAlpha = entranceAlpha * opacity;
+    ctx.translate(ans.x + ans.w / 2 + shakeOffset, ans.y + ans.h / 2);
+    ctx.scale(totalScale, totalScale);
+    ctx.translate(-(ans.x + ans.w / 2), -(ans.y + ans.h / 2));
+
+    // Button background
+    ctx.fillStyle = bgColor;
+    ctx.beginPath();
+    ctx.roundRect(ans.x, ans.y, ans.w, ans.h, 12);
+    ctx.fill();
+
+    // Button border
+    ctx.strokeStyle = borderColor;
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    // Label circle
+    ctx.fillStyle = isSelected ? 'rgba(255,255,255,0.3)' : COLORS.orange;
+    ctx.beginPath();
+    ctx.ellipse(ans.x + 30, ans.y + ans.h / 2, 18, 18 * aspectRatio, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.restore();
+
+    // Draw text outside of save/restore for proper rendering
+    if (entranceAlpha > 0.3) {
+      // Label text
+      drawText(ans.label, ans.x + 30 + shakeOffset, ans.y + ans.h / 2, {
+        font: "bold 16px 'Nunito Sans', sans-serif",
+        color: '#FFFFFF'
+      });
+
+      // Answer text (wrap if needed)
+      const maxWidth = ans.w - 70;
+      const text = ans.choice.text;
+
+      ctx.save();
+      ctx.globalAlpha = entranceAlpha * opacity;
+      ctx.translate(ans.x + 55 + shakeOffset, ans.y + ans.h / 2);
+      const adj = getTextScaleAdjustment();
+      ctx.scale(adj / aspectRatio, adj);
+      ctx.font = "500 16px 'Nunito', sans-serif";
+      ctx.fillStyle = COLORS.textPrimary;
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
+
+      // Simple text wrapping
+      const words = text.split(' ');
+      let lines = [];
+      let currentLine = '';
+
+      words.forEach(word => {
+        const testLine = currentLine ? currentLine + ' ' + word : word;
+        const metrics = ctx.measureText(testLine);
+        if (metrics.width > maxWidth && currentLine) {
+          lines.push(currentLine);
+          currentLine = word;
+        } else {
+          currentLine = testLine;
+        }
+      });
+      if (currentLine) lines.push(currentLine);
+
+      // Draw lines
+      const lineHeight = 16;
+      const startY = -((lines.length - 1) * lineHeight) / 2;
+      lines.forEach((line, i) => {
+        ctx.fillText(line, 0, startY + i * lineHeight);
+      });
+
+      ctx.restore();
+    }
+  }
+
+  function drawGame() {
+    // Background gradient - using QuizHP dark palette
+    const bgGradient = ctx.createLinearGradient(0, 0, 0, H);
+    bgGradient.addColorStop(0, COLORS.bgPrimary);
+    bgGradient.addColorStop(1, COLORS.bgSurface);
+    ctx.fillStyle = bgGradient;
+    ctx.fillRect(0, 0, W, H);
+
+    // Table surface
+    ctx.fillStyle = COLORS.bgSurfaceSecondary;
+    ctx.beginPath();
+    ctx.ellipse(W / 2, CUP_Y + CUP_HEIGHT + 10, 170, 25 * aspectRatio, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Draw ball if visible (under lifted cup)
+    const ballCup = cups[ballCupIndex];
+    if (ballCup && ballCup.liftAmount > 20) {
+      const ballX = ballCup.x + CUP_WIDTH / 2;
+      const ballY = CUP_Y + CUP_HEIGHT - BALL_RADIUS - 5;
+      drawBall(ballX, ballY);
+    }
+
+    // If revealing wrong answer, show empty spot
+    if (phase === 'revealing' && selectedCupIndex !== ballCupIndex) {
+      const wrongCup = cups[selectedCupIndex];
+      if (wrongCup && wrongCup.liftAmount > 20) {
+        // Show empty spot (just shadow)
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.2)';
+        ctx.beginPath();
+        ctx.ellipse(wrongCup.x + CUP_WIDTH / 2, CUP_Y + CUP_HEIGHT - 10, 20, 8 * aspectRatio, 0, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+
+    // Sort cups by x position for proper drawing order during shuffle
+    const sortedCups = [...cups].sort((a, b) => a.x - b.x);
+
+    // Draw cups
+    sortedCups.forEach((cup, i) => {
+      const cupIndex = cups.indexOf(cup);
+      const label = ['A', 'B', 'C', 'D'][cupIndex];
+      drawCup(cup.x, CUP_Y, label, cup.liftAmount || 0, cup.arcY || 0, cupIndex);
+    });
+
+    // Phase indicator
+    if (phase === 'reveal' || phase === 'lowering') {
+      drawText('Watch the ball...', W / 2, 100, {
+        font: "bold 22px 'Nunito Sans', sans-serif",
+        color: COLORS.amber
+      });
+    } else if (phase === 'shuffling') {
+      drawText('Shuffling!', W / 2, 100, {
+        font: "bold 24px 'Belanosima', sans-serif",
+        color: COLORS.orange
+      });
+    } else if (phase === 'waiting') {
+      drawText('Where is the ball?', W / 2, 100, {
+        font: "bold 22px 'Nunito Sans', sans-serif",
+        color: COLORS.cyan
+      });
+    }
+
+    // Draw answer buttons
+    answers.forEach((ans, i) => {
+      drawAnswerButton(ans, false, i);
+    });
+
+    // Draw particles on top
+    drawGameParticles();
+  }
+
+  function handleTouch(e, type) {
+    if (gameState !== 'playing') return;
+    if (phase !== 'waiting') return;
+
+    if (type === 'start') {
+      // Initialize audio on first interaction
+      initAudio();
+
+      const touch = e.touches[0] || e.changedTouches[0];
+      const { x, y } = screenToLogical(touch.clientX, touch.clientY);
+
+      answers.forEach(ans => {
+        if (pointInRect(x, y, ans)) {
+          playSound('click');
+          playSound('reveal');
+          selectedCupIndex = ans.cupIndex;
+          phase = 'revealing';
+          phaseTimer = 0;
+        }
+      });
+    }
+  }
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 4: GAME LOOP - DO NOT MODIFY                                      ║
+  // ║  Standard loop with responsive scaling and touch handling.                 ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  let lastTime = performance.now();
+
+  function gameLoop(now) {
+    const dt = Math.min((now - lastTime) / 1000, 0.05); // Cap at 50ms
+    lastTime = now;
+
+    // Apply transform for logical coordinate system (non-uniform scaling)
+    ctx.setTransform(scaleX, 0, 0, scaleY, 0, 0);
+
+    if (gameState === 'playing') {
+      updateGame(dt);
+      drawGame();
+    } else {
+      drawGame(); // Draw game state behind overlay
+      drawEndScreen(dt);
+    }
+
+    // Reset transform for next frame
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+    requestAnimationFrame(gameLoop);
+  }
+
+  // Touch handlers
+  function onTouchStart(e) {
+    e.preventDefault();
+    if (gameState === 'ended') {
+      const touch = e.touches[0];
+      const { x, y } = screenToLogical(touch.clientX, touch.clientY);
+
+      if (gameResult) {
+        // Correct answer: check both buttons
+        if (pointInRect(x, y, restartButton)) {
+          gameState = 'playing';
+          gameResult = null;
+          gameExplanation = '';
+          confettiParticles = [];
+          initGame();
+          return;
+        }
+        if (pointInRect(x, y, nextButton)) {
+          // Notify parent to go to next question
+          if (window.parent && window.parent !== window) {
+            window.parent.postMessage({ type: 'quiz-next' }, '*');
+          }
+          return;
+        }
+      } else {
+        // Wrong answer: check centered restart button
+        if (pointInRect(x, y, centeredRestartButton)) {
+          gameState = 'playing';
+          gameResult = null;
+          gameExplanation = '';
+          confettiParticles = [];
+          initGame();
+          return;
+        }
+      }
+    }
+    handleTouch(e, 'start');
+  }
+
+  function onTouchMove(e) {
+    e.preventDefault();
+    handleTouch(e, 'move');
+  }
+
+  function onTouchEnd(e) {
+    e.preventDefault();
+    handleTouch(e, 'end');
+  }
+
+  canvas.addEventListener('touchstart', onTouchStart, { passive: false });
+  canvas.addEventListener('touchmove', onTouchMove, { passive: false });
+  canvas.addEventListener('touchend', onTouchEnd, { passive: false });
+
+  // Also support mouse for testing in browser
+  canvas.addEventListener('mousedown', (e) => {
+    const fakeTouch = { touches: [{ clientX: e.clientX, clientY: e.clientY }], changedTouches: [{ clientX: e.clientX, clientY: e.clientY }] };
+    onTouchStart(fakeTouch);
+  });
+
+  canvas.addEventListener('mouseup', (e) => {
+    const fakeTouch = { touches: [], changedTouches: [{ clientX: e.clientX, clientY: e.clientY }] };
+    onTouchEnd(fakeTouch);
+  });
+
+
+  // Cursor change handler for end screen buttons
+  canvas.addEventListener('mousemove', (e) => {
+    if (gameState !== 'ended') {
+      canvas.style.cursor = 'default';
+      return;
+    }
+    const { x, y } = screenToLogical(e.clientX, e.clientY);
+    if (gameResult) {
+      if (pointInRect(x, y, restartButton) || pointInRect(x, y, nextButton)) {
+        canvas.style.cursor = 'pointer';
+        return;
+      }
+    } else {
+      if (pointInRect(x, y, centeredRestartButton)) {
+        canvas.style.cursor = 'pointer';
+        return;
+      }
+    }
+    canvas.style.cursor = 'default';
+  });
+
+  // Handle resize
+  window.addEventListener('resize', resizeCanvas);
+  window.addEventListener('orientationchange', () => {
+    setTimeout(resizeCanvas, 100); // Delay for orientation change to complete
+  });
+
+  // Prevent pull-to-refresh and overscroll
+  document.body.addEventListener('touchmove', (e) => e.preventDefault(), { passive: false });
+
+  // Initialize
+  resizeCanvas();
+  initGame();
+  requestAnimationFrame(gameLoop);
+  </script>
+</body>
+</html>

@@ -1,0 +1,1000 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <title>Pirate Crate Smash</title>
+  <link href="https://fonts.googleapis.com/css2?family=Belanosima:wght@400;600;700&family=Nunito+Sans:wght@400;500;600;700&family=Nunito:wght@400;500;600&display=swap" rel="stylesheet">
+  <!--
+  ╔══════════════════════════════════════════════════════════════════════════════╗
+  ║  GAME FACTORY TEMPLATE - MOBILE                                              ║
+  ║  Fills 100% of container, non-uniform scaling, touch input.                  ║
+  ║  Logical dimensions: 360×640 (use aspectRatio for proportional shapes)       ║
+  ╚══════════════════════════════════════════════════════════════════════════════╝
+  -->
+  <style>
+    /* ═══════════════════════════════════════════════════════════════════════════
+       BASE STYLES - Can be extended, not removed
+       ═══════════════════════════════════════════════════════════════════════════ */
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      touch-action: none; /* Prevent default touch behaviors */
+      -webkit-touch-callout: none;
+      -webkit-user-select: none;
+      user-select: none;
+    }
+    body {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      background: #1a1a2e;
+      font-family: 'Nunito Sans', system-ui, -apple-system, sans-serif;
+    }
+    #gameCanvas {
+      background: #16213e;
+      /* Canvas fills viewport via JS, these are fallbacks */
+      width: 100vw;
+      height: 100vh;
+    }
+  </style>
+</head>
+<body>
+  <!-- ═══════════════════════════════════════════════════════════════════════════
+       CANVAS - Sized dynamically to fill viewport
+       ═══════════════════════════════════════════════════════════════════════════ -->
+  <canvas id="gameCanvas"></canvas>
+
+  <script>
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 1: QUESTION PLACEHOLDER - DO NOT MODIFY FORMAT                    ║
+  // ║  Platform replaces this at runtime. Use these exact 60-char answers.       ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  const QUESTION = {
+    type: "mcq",
+    prompt: "Sample question text",
+    choices: [
+      { text: "This is sample answer A which is long enough to test text overflow", is_correct: true, explanation: "Why A is correct" },
+      { text: "This is sample answer B which is long enough to test text overflow", is_correct: false, explanation: "Why B is wrong" },
+      { text: "This is sample answer C which is long enough to test text overflow", is_correct: false, explanation: "Why C is wrong" },
+      { text: "This is sample answer D which is long enough to test text overflow", is_correct: false, explanation: "Why D is wrong" }
+    ],
+    isLastQuestion: false
+  };
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 2: ENGINE CORE (MOBILE) - DO NOT MODIFY                           ║
+  // ║  Non-uniform scaling (fills container), touch input, tap-to-restart.       ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  const canvas = document.getElementById('gameCanvas');
+  const ctx = canvas.getContext('2d');
+
+  // Logical dimensions (game code works in this coordinate space)
+  const W = 360, H = 640;
+
+  // Scaling state (computed on resize)
+  let scaleX = 1;
+  let scaleY = 1;
+  let aspectRatio = 1;  // scaleX/scaleY - use for proportional shapes
+
+  // Game state
+  let gameState = 'playing'; // 'playing' | 'ended'
+  let gameResult = null;     // true (correct) | false (wrong)
+  let gameExplanation = '';
+  let endScreenTime = 0;
+  let confettiParticles = [];
+
+  // End screen button bounds (logical coordinates)
+  const restartButton = { x: 20, y: H / 2 + 50, w: 155, h: 56 };
+  const nextButton = { x: 185, y: H / 2 + 50, w: 155, h: 56 };
+  // Centered restart button for wrong answers
+  const centeredRestartButton = { x: W / 2 - 100, y: H / 2 + 50, w: 200, h: 56 };
+
+  /** Draw a styled button with aspect-ratio aware text */
+  function drawMobileButton(rect, label, color, pulse) {
+    const textAdj = getTextScaleAdjustment();
+    const p = pulse ? 1 + Math.sin(endScreenTime * 4) * 0.03 : 1;
+
+    ctx.save();
+    ctx.translate(rect.x + rect.w / 2, rect.y + rect.h / 2);
+    ctx.scale(p, p);
+    ctx.translate(-(rect.x + rect.w / 2), -(rect.y + rect.h / 2));
+
+    // Button background
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.roundRect(rect.x, rect.y, rect.w, rect.h, 12);
+    ctx.fill();
+
+    // Button text (aspect-ratio aware)
+    ctx.save();
+    ctx.translate(rect.x + rect.w / 2, rect.y + rect.h / 2);
+    ctx.scale(textAdj / aspectRatio, textAdj);
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = 'bold 18px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, 0, 0);
+    ctx.restore();
+
+    ctx.restore();
+  }
+
+  /**
+   * Resize canvas to fill viewport completely (no letterboxing).
+   * Uses non-uniform scaling - game code works in 360×640 logical space.
+   * Use aspectRatio to draw proportionally correct shapes.
+   */
+  function resizeCanvas() {
+    const dpr = window.devicePixelRatio || 1;
+
+    // Physical canvas size (actual pixels)
+    canvas.width = window.innerWidth * dpr;
+    canvas.height = window.innerHeight * dpr;
+
+    // CSS size (fills viewport)
+    canvas.style.width = window.innerWidth + 'px';
+    canvas.style.height = window.innerHeight + 'px';
+
+    // Non-uniform scaling to fill entire canvas
+    scaleX = canvas.width / W;
+    scaleY = canvas.height / H;
+
+    // Aspect ratio for proportional shape drawing
+    // >1 means container is wider than logical space
+    // <1 means container is taller than logical space
+    aspectRatio = scaleX / scaleY;
+
+    // Recalculate text sizing on resize (implement this in SECTION 3)
+    if (typeof recalculateTextSizing === 'function') {
+      recalculateTextSizing();
+    }
+  }
+
+  // === ASPECT-RATIO-AWARE TEXT WITH CLAMPED SCALING ===
+  // Text gets stretched by non-uniform scaling, so we compensate.
+  // Also clamp the effective scale to keep text legible at all sizes.
+  const TEXT_SCALE_MIN = 0.75;
+  const TEXT_SCALE_MAX = 1.4;
+
+  function getTextScaleAdjustment() {
+    const baseScale = window.innerHeight / H;
+    const clampedScale = Math.min(TEXT_SCALE_MAX, Math.max(TEXT_SCALE_MIN, baseScale));
+    return clampedScale / baseScale;
+  }
+
+  /**
+   * Draw text with aspect-ratio compensation and clamped scaling.
+   * Use this instead of raw ctx.fillText() to prevent text stretching.
+   * Default font is 16px (minimum for answer text). Use 18-20px for better readability.
+   */
+  function drawText(text, x, y, options = {}) {
+    const { font = "500 16px system-ui, sans-serif", color = '#F5F5F0', align = 'center', baseline = 'middle' } = options;
+    ctx.save();
+    ctx.translate(x, y);
+    const adj = getTextScaleAdjustment();
+    ctx.scale(adj / aspectRatio, adj);
+    ctx.font = font;
+    ctx.fillStyle = color;
+    ctx.textAlign = align;
+    ctx.textBaseline = baseline;
+    ctx.fillText(text, 0, 0);
+    ctx.restore();
+  }
+
+  /**
+   * Convert screen coordinates to logical coordinates.
+   * Use this in handleTouch to get positions in 360×640 space.
+   */
+  function screenToLogical(screenX, screenY) {
+    const dpr = window.devicePixelRatio || 1;
+    const rect = canvas.getBoundingClientRect();
+    const canvasX = (screenX - rect.left) * dpr;
+    const canvasY = (screenY - rect.top) * dpr;
+    return {
+      x: canvasX / scaleX,
+      y: canvasY / scaleY
+    };
+  }
+
+  /**
+   * Check if a point is inside a rectangle (logical coordinates).
+   */
+  function pointInRect(px, py, rect) {
+    return px >= rect.x && px <= rect.x + rect.w &&
+           py >= rect.y && py <= rect.y + rect.h;
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // TEXT UTILITIES - Dynamic wrapping and font sizing
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  /**
+   * Wrap text to fit within a maximum width (in logical coordinates).
+   * Accounts for canvas transforms applied by drawText().
+   */
+  function wrapText(text, maxWidth, font, maxLines = 3) {
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.font = font;
+    const adj = getTextScaleAdjustment();
+    const maxRawWidth = maxWidth * aspectRatio / adj;
+    const words = text.split(' ');
+    const lines = [];
+    let currentLine = '';
+    words.forEach(word => {
+      const testLine = currentLine ? currentLine + ' ' + word : word;
+      if (ctx.measureText(testLine).width > maxRawWidth && currentLine) {
+        lines.push(currentLine);
+        currentLine = word;
+      } else {
+        currentLine = testLine;
+      }
+    });
+    if (currentLine) lines.push(currentLine);
+    ctx.restore();
+    return lines.slice(0, maxLines);
+  }
+
+  /**
+   * Find the optimal font size to fit content in available space.
+   */
+  function findOptimalFontSize(options) {
+    const {
+      texts,
+      maxWidth,
+      availableHeight,
+      minFont = 12,
+      maxFont = 18,
+      itemPadding = 4,
+      fontFamily = "'Nunito Sans', sans-serif"
+    } = options;
+
+    let bestFontSize = minFont;
+    let bestWrappedTexts = [];
+
+    for (let fontSize = maxFont; fontSize >= minFont; fontSize -= 0.5) {
+      const font = `${fontSize}px ${fontFamily}`;
+      const lineHeight = fontSize + 2;
+
+      let totalHeight = 0;
+      const wrappedTexts = [];
+
+      for (const text of texts) {
+        const lines = wrapText(text, maxWidth, font);
+        wrappedTexts.push(lines);
+        totalHeight += itemPadding + lines.length * lineHeight;
+      }
+
+      if (totalHeight <= availableHeight) {
+        bestFontSize = fontSize;
+        bestWrappedTexts = wrappedTexts;
+        break;
+      }
+
+      bestWrappedTexts = wrappedTexts;
+    }
+
+    return { fontSize: bestFontSize, wrappedTexts: bestWrappedTexts };
+  }
+
+  const engine = {
+    /** Call this to end the game. DO NOT draw your own end screen. */
+    end(isCorrect, explanation) {
+      if (gameState === 'ended') return;
+      gameState = 'ended';
+      gameResult = isCorrect;
+      gameExplanation = explanation || '';
+      endScreenTime = 0;
+
+      // Spawn confetti for correct answers
+      if (isCorrect) {
+        for (let i = 0; i < 50; i++) {
+          confettiParticles.push({
+            x: W / 2,
+            y: H / 2,
+            vx: (Math.random() - 0.5) * 400,
+            vy: -Math.random() * 300 - 80,
+            size: 4 + Math.random() * 6,
+            color: ['#FFD700', '#FF6B6B', '#4ECDC4', '#95E1D3', '#F38181'][Math.floor(Math.random() * 5)],
+            rotation: Math.random() * Math.PI * 2,
+            rotationSpeed: (Math.random() - 0.5) * 10
+          });
+        }
+      }
+
+      // Notify parent frame
+      if (window.parent && window.parent !== window) {
+        window.parent.postMessage({
+          type: 'quiz-end',
+          isCorrect: isCorrect,
+          explanation: explanation || ''
+        }, '*');
+      }
+    }
+  };
+
+  /** STANDARD END SCREEN (MOBILE) - DO NOT MODIFY */
+  function drawEndScreen(dt) {
+    endScreenTime += dt;
+
+    // Update confetti
+    confettiParticles = confettiParticles.filter(p => {
+      p.vy += 600 * dt; // gravity
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.rotation += p.rotationSpeed * dt;
+      p.vx *= 0.99;
+      return p.y < H + 50;
+    });
+
+    // Dark overlay
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
+    ctx.fillRect(0, 0, W, H);
+
+    // Draw confetti
+    confettiParticles.forEach(p => {
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rotation);
+      ctx.fillStyle = p.color;
+      ctx.fillRect(-p.size / 2, -p.size / 4, p.size, p.size / 2);
+      ctx.restore();
+    });
+
+    // Result emoji (aspect-ratio aware)
+    const textAdj = getTextScaleAdjustment();
+    ctx.save();
+    ctx.translate(W / 2, H / 2 - 80);
+    ctx.scale(textAdj / aspectRatio, textAdj);
+    ctx.font = '64px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(gameResult ? '🎉' : '😢', 0, 0);
+    ctx.restore();
+
+    // Result text (aspect-ratio aware)
+    ctx.save();
+    ctx.translate(W / 2, H / 2 - 10);
+    ctx.scale(textAdj / aspectRatio, textAdj);
+    ctx.fillStyle = gameResult ? '#4ADE80' : '#F87171';
+    ctx.font = 'bold 32px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(gameResult ? 'Correct!' : 'Wrong!', 0, 0);
+    ctx.restore();
+
+    // Buttons
+    if (gameResult) {
+      // Correct: show both Restart and Next/Finish
+      drawMobileButton(restartButton, 'Restart', '#E87A3E', true);
+      const nextLabel = QUESTION.isLastQuestion ? 'Finish' : 'Next';
+      drawMobileButton(nextButton, nextLabel, '#4ECDC4', true);
+    } else {
+      // Wrong: show only centered Restart button
+      drawMobileButton(centeredRestartButton, 'Restart', '#E87A3E', true);
+    }
+  }
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 3: YOUR GAME CODE - IMPLEMENT THESE FUNCTIONS                     ║
+  // ║  Pirate Crate Smash - Tap crates on a ship deck to smash them open        ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+
+  // === COLORS ===
+  const COLORS = {
+    bgSky: '#1B3A5C',
+    bgSea: '#0F2844',
+    deckLight: '#8B6914',
+    deckDark: '#6B4F0E',
+    deckPlank: '#7A5C12',
+    crateBase: '#9B7730',
+    crateDark: '#7A5C12',
+    crateLight: '#BFA04A',
+    crateNail: '#C2C2B8',
+    crateStrap: '#5A4520',
+    orange: '#E87A3E',
+    amber: '#F5A742',
+    cyan: '#4ECDC4',
+    success: '#6BBF59',
+    error: '#E85D4A',
+    textPrimary: '#2B2B28',
+    textLight: '#F5F5F0',
+    surface: '#FAFAF7',
+  };
+
+  // === GAME STATE ===
+  let crates = [];
+  let splinters = [];
+  let waveOffset = 0;
+  let selectedCrate = null;
+  let smashAnimTime = 0;
+  let smashAnimDuration = 0.5;
+  let entranceAnimTime = 0;
+  let entranceAnimDuration = 0.6;
+  let shipBobOffset = 0;
+
+  // Sound effects via Web Audio API
+  let audioCtx = null;
+  function getAudioCtx() {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    return audioCtx;
+  }
+
+  function playSmashSound() {
+    try {
+      const ctx = getAudioCtx();
+      // Noise burst for wood smashing
+      const bufferSize = ctx.sampleRate * 0.15;
+      const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+      const data = buffer.getChannelData(0);
+      for (let i = 0; i < bufferSize; i++) {
+        data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / bufferSize, 2);
+      }
+      const source = ctx.createBufferSource();
+      source.buffer = buffer;
+      const filter = ctx.createBiquadFilter();
+      filter.type = 'lowpass';
+      filter.frequency.value = 800;
+      const gain = ctx.createGain();
+      gain.gain.setValueAtTime(0.4, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.15);
+      source.connect(filter);
+      filter.connect(gain);
+      gain.connect(ctx.destination);
+      source.start();
+    } catch(e) {}
+  }
+
+  function playCorrectSound() {
+    try {
+      const ctx = getAudioCtx();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(523, ctx.currentTime);
+      osc.frequency.setValueAtTime(659, ctx.currentTime + 0.1);
+      osc.frequency.setValueAtTime(784, ctx.currentTime + 0.2);
+      gain.gain.setValueAtTime(0.3, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.4);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start();
+      osc.stop(ctx.currentTime + 0.4);
+    } catch(e) {}
+  }
+
+  function playWrongSound() {
+    try {
+      const ctx = getAudioCtx();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(250, ctx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(120, ctx.currentTime + 0.3);
+      gain.gain.setValueAtTime(0.2, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.3);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start();
+      osc.stop(ctx.currentTime + 0.35);
+    } catch(e) {}
+  }
+
+  function spawnSplinters(cx, cy) {
+    for (let i = 0; i < 12; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const speed = 80 + Math.random() * 180;
+      splinters.push({
+        x: cx,
+        y: cy,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed - 60,
+        rotation: Math.random() * Math.PI * 2,
+        rotSpeed: (Math.random() - 0.5) * 12,
+        size: 3 + Math.random() * 6,
+        length: 8 + Math.random() * 12,
+        color: Math.random() > 0.5 ? COLORS.crateBase : COLORS.crateLight,
+        alpha: 1,
+        gravity: 300
+      });
+    }
+  }
+
+  function recalculateTextSizing() {
+    if (!crates || crates.length === 0) return;
+
+    const textMaxWidth = crates[0].w - 20;
+    const { fontSize, wrappedTexts } = findOptimalFontSize({
+      texts: QUESTION.choices.map(c => c.text),
+      maxWidth: textMaxWidth,
+      availableHeight: crates[0].h * 4 + 30,
+      minFont: 14,
+      maxFont: 18,
+      fontFamily: "'Nunito', sans-serif"
+    });
+
+    crates.forEach((crate, i) => {
+      crate.wrappedText = wrappedTexts[i];
+      crate.fontSize = fontSize;
+    });
+  }
+
+  function initGame() {
+    crates = [];
+    splinters = [];
+    selectedCrate = null;
+    smashAnimTime = 0;
+    entranceAnimTime = 0;
+    shipBobOffset = 0;
+
+    const crateW = 320;
+    const crateH = 80;
+    const gap = 14;
+    const totalH = crateH * 4 + gap * 3;
+    const startY = (H - totalH) / 2 + 30;
+    const startX = (W - crateW) / 2;
+
+    QUESTION.choices.forEach((choice, i) => {
+      crates.push({
+        x: startX,
+        y: startY + i * (crateH + gap),
+        w: crateW,
+        h: crateH,
+        choice: choice,
+        smashed: false,
+        shakeX: 0,
+        shakeTime: 0,
+        scale: 0,
+        alpha: 0,
+        entranceDelay: i * 0.1,
+        pulseTime: Math.random() * Math.PI * 2,
+        wrappedText: [choice.text],
+        fontSize: 16,
+        pressed: false
+      });
+    });
+
+    recalculateTextSizing();
+  }
+
+  function updateGame(dt) {
+    if (gameState !== 'playing') return;
+
+    waveOffset += dt * 0.8;
+    shipBobOffset = Math.sin(waveOffset * 1.2) * 3;
+    entranceAnimTime += dt;
+
+    // Update crate entrance animations
+    crates.forEach(crate => {
+      const t = Math.max(0, Math.min(1, (entranceAnimTime - crate.entranceDelay) / 0.4));
+      // Spring easing
+      const spring = t < 1 ? 1 + Math.sin(t * Math.PI * 2) * 0.15 * (1 - t) : 1;
+      crate.scale = t * spring;
+      crate.alpha = Math.min(1, t * 1.5);
+      crate.pulseTime += dt;
+    });
+
+    // Update smash animation
+    if (selectedCrate) {
+      smashAnimTime += dt;
+
+      // Shake the selected crate
+      if (smashAnimTime < 0.2) {
+        const intensity = 6 * (1 - smashAnimTime / 0.2);
+        selectedCrate.shakeX = Math.sin(smashAnimTime * 80) * intensity;
+      }
+
+      // After smash anim, trigger end
+      if (smashAnimTime >= smashAnimDuration) {
+        const choice = selectedCrate.choice;
+        if (choice.is_correct) {
+          playCorrectSound();
+        } else {
+          playWrongSound();
+        }
+        engine.end(choice.is_correct, choice.explanation);
+      }
+    }
+
+    // Update splinters
+    splinters.forEach(s => {
+      s.vy += s.gravity * dt;
+      s.x += s.vx * dt;
+      s.y += s.vy * dt;
+      s.rotation += s.rotSpeed * dt;
+      s.alpha -= dt * 1.5;
+    });
+    splinters = splinters.filter(s => s.alpha > 0 && s.y < H + 20);
+  }
+
+  function drawCrate(crate) {
+    const cx = crate.x + crate.w / 2;
+    const cy = crate.y + crate.h / 2 + shipBobOffset;
+    const halfW = crate.w / 2;
+    const halfH = crate.h / 2;
+
+    ctx.save();
+    ctx.translate(cx + crate.shakeX, cy);
+    ctx.scale(crate.scale, crate.scale);
+    ctx.globalAlpha = crate.alpha;
+
+    if (crate.smashed) {
+      // Draw broken crate pieces
+      ctx.globalAlpha = crate.alpha * 0.4;
+
+      // Left piece
+      ctx.save();
+      ctx.translate(-halfW * 0.3, 0);
+      ctx.rotate(-0.15);
+      ctx.fillStyle = COLORS.crateDark;
+      ctx.beginPath();
+      ctx.roundRect(-halfW * 0.4, -halfH * 0.8, halfW * 0.7, halfH * 1.6, 4);
+      ctx.fill();
+      ctx.restore();
+
+      // Right piece
+      ctx.save();
+      ctx.translate(halfW * 0.3, 0);
+      ctx.rotate(0.12);
+      ctx.fillStyle = COLORS.crateDark;
+      ctx.beginPath();
+      ctx.roundRect(-halfW * 0.3, -halfH * 0.8, halfW * 0.7, halfH * 1.6, 4);
+      ctx.fill();
+      ctx.restore();
+    } else {
+      // Subtle hover/pulse effect
+      const pulse = crate.pressed ? 0.96 : 1 + Math.sin(crate.pulseTime * 2) * 0.008;
+      ctx.scale(pulse, pulse);
+
+      // Crate shadow
+      ctx.fillStyle = 'rgba(0,0,0,0.2)';
+      ctx.beginPath();
+      ctx.roundRect(-halfW + 3, -halfH + 4, crate.w, crate.h, 6);
+      ctx.fill();
+
+      // Main crate body
+      const crateGrad = ctx.createLinearGradient(-halfW, -halfH, -halfW, halfH);
+      crateGrad.addColorStop(0, COLORS.crateLight);
+      crateGrad.addColorStop(0.4, COLORS.crateBase);
+      crateGrad.addColorStop(1, COLORS.crateDark);
+      ctx.fillStyle = crateGrad;
+      ctx.beginPath();
+      ctx.roundRect(-halfW, -halfH, crate.w, crate.h, 6);
+      ctx.fill();
+
+      // Horizontal planks (wood grain lines)
+      ctx.strokeStyle = COLORS.crateDark;
+      ctx.lineWidth = 1;
+      ctx.globalAlpha = crate.alpha * 0.35;
+      for (let py = -halfH + 15; py < halfH - 5; py += 18) {
+        ctx.beginPath();
+        ctx.moveTo(-halfW + 8, py);
+        ctx.lineTo(halfW - 8, py);
+        ctx.stroke();
+      }
+      ctx.globalAlpha = crate.alpha;
+
+      // Vertical straps (darker bands)
+      ctx.fillStyle = COLORS.crateStrap;
+      ctx.globalAlpha = crate.alpha * 0.5;
+      ctx.fillRect(-halfW + 25, -halfH + 2, 8, crate.h - 4);
+      ctx.fillRect(halfW - 33, -halfH + 2, 8, crate.h - 4);
+      ctx.globalAlpha = crate.alpha;
+
+      // Nails on straps
+      ctx.fillStyle = COLORS.crateNail;
+      const nailPositions = [
+        [-halfW + 29, -halfH + 10],
+        [-halfW + 29, halfH - 12],
+        [halfW - 29, -halfH + 10],
+        [halfW - 29, halfH - 12]
+      ];
+      nailPositions.forEach(([nx, ny]) => {
+        ctx.beginPath();
+        ctx.ellipse(nx, ny, 2, 2 * aspectRatio, 0, 0, Math.PI * 2);
+        ctx.fill();
+      });
+
+      // Crate border
+      ctx.strokeStyle = COLORS.crateDark;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.roundRect(-halfW, -halfH, crate.w, crate.h, 6);
+      ctx.stroke();
+
+      // Answer text on crate
+      const lines = crate.wrappedText || [crate.choice.text];
+      const fontSize = crate.fontSize || 16;
+      const lineHeight = fontSize + 3;
+      const totalTextH = lines.length * lineHeight;
+      const textStartY = -totalTextH / 2 + lineHeight / 2;
+
+      lines.forEach((line, li) => {
+        drawText(line, 0, textStartY + li * lineHeight, {
+          font: `500 ${fontSize}px 'Nunito', sans-serif`,
+          color: COLORS.textPrimary,
+          align: 'center',
+          baseline: 'middle'
+        });
+      });
+    }
+
+    ctx.restore();
+  }
+
+  function drawShipDeck() {
+    // Sky gradient
+    const skyGrad = ctx.createLinearGradient(0, 0, 0, H * 0.4);
+    skyGrad.addColorStop(0, '#0B1929');
+    skyGrad.addColorStop(1, COLORS.bgSky);
+    ctx.fillStyle = skyGrad;
+    ctx.fillRect(0, 0, W, H * 0.4);
+
+    // Stars
+    ctx.fillStyle = '#F5F5F0';
+    const starSeed = [0.12, 0.34, 0.56, 0.78, 0.91, 0.23, 0.45, 0.67, 0.89, 0.05, 0.37, 0.72];
+    starSeed.forEach((s, i) => {
+      const sx = s * W;
+      const sy = (starSeed[(i + 3) % starSeed.length]) * H * 0.3;
+      const twinkle = 0.4 + Math.sin(waveOffset * 2 + i) * 0.3;
+      ctx.globalAlpha = twinkle;
+      ctx.beginPath();
+      ctx.ellipse(sx, sy, 1.2, 1.2 * aspectRatio, 0, 0, Math.PI * 2);
+      ctx.fill();
+    });
+    ctx.globalAlpha = 1;
+
+    // Ocean waves
+    const seaTop = H * 0.38;
+    const seaGrad = ctx.createLinearGradient(0, seaTop, 0, H);
+    seaGrad.addColorStop(0, '#1A4670');
+    seaGrad.addColorStop(0.3, COLORS.bgSea);
+    seaGrad.addColorStop(1, '#071825');
+    ctx.fillStyle = seaGrad;
+    ctx.fillRect(0, seaTop, W, H - seaTop);
+
+    // Wave lines
+    ctx.strokeStyle = 'rgba(78, 205, 196, 0.15)';
+    ctx.lineWidth = 1.5;
+    for (let wl = 0; wl < 3; wl++) {
+      ctx.beginPath();
+      const baseY = seaTop + 15 + wl * 25;
+      for (let wx = 0; wx <= W; wx += 4) {
+        const wy = baseY + Math.sin(wx * 0.03 + waveOffset + wl * 1.5) * 5;
+        if (wx === 0) ctx.moveTo(wx, wy);
+        else ctx.lineTo(wx, wy);
+      }
+      ctx.stroke();
+    }
+
+    // Ship deck surface
+    const deckY = H * 0.35 + shipBobOffset;
+    const deckGrad = ctx.createLinearGradient(0, deckY, 0, H);
+    deckGrad.addColorStop(0, COLORS.deckLight);
+    deckGrad.addColorStop(0.15, COLORS.deckDark);
+    deckGrad.addColorStop(1, '#4A3508');
+    ctx.fillStyle = deckGrad;
+
+    // Deck shape (slight curve)
+    ctx.beginPath();
+    ctx.moveTo(-10, H + 10);
+    ctx.lineTo(-10, deckY + 20);
+    ctx.quadraticCurveTo(W / 2, deckY - 5, W + 10, deckY + 20);
+    ctx.lineTo(W + 10, H + 10);
+    ctx.closePath();
+    ctx.fill();
+
+    // Deck planks
+    ctx.strokeStyle = 'rgba(0,0,0,0.15)';
+    ctx.lineWidth = 1;
+    for (let py = deckY + 35; py < H; py += 22) {
+      ctx.beginPath();
+      ctx.moveTo(0, py + shipBobOffset * 0.3);
+      ctx.lineTo(W, py + shipBobOffset * 0.3);
+      ctx.stroke();
+    }
+
+    // Deck railing posts
+    ctx.fillStyle = COLORS.deckDark;
+    const postPositions = [10, 80, 280, 350];
+    postPositions.forEach(px => {
+      const postY = deckY + 5 + shipBobOffset * 0.5;
+      ctx.fillRect(px - 3, postY - 35, 6, 38);
+      // Post top cap
+      ctx.beginPath();
+      ctx.ellipse(px, postY - 35, 5, 5 * aspectRatio, 0, 0, Math.PI * 2);
+      ctx.fill();
+    });
+
+    // Railing rope
+    ctx.strokeStyle = COLORS.crateStrap;
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    ctx.moveTo(10, deckY - 25 + shipBobOffset * 0.5);
+    ctx.quadraticCurveTo(45, deckY - 15 + shipBobOffset * 0.5, 80, deckY - 25 + shipBobOffset * 0.5);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(280, deckY - 25 + shipBobOffset * 0.5);
+    ctx.quadraticCurveTo(315, deckY - 15 + shipBobOffset * 0.5, 350, deckY - 25 + shipBobOffset * 0.5);
+    ctx.stroke();
+  }
+
+  function drawSplinters() {
+    splinters.forEach(s => {
+      ctx.save();
+      ctx.translate(s.x, s.y + shipBobOffset);
+      ctx.rotate(s.rotation);
+      ctx.globalAlpha = s.alpha;
+      ctx.fillStyle = s.color;
+      ctx.fillRect(-s.length / 2, -s.size / 2, s.length, s.size);
+      // Wood grain detail
+      ctx.strokeStyle = 'rgba(0,0,0,0.2)';
+      ctx.lineWidth = 0.5;
+      ctx.beginPath();
+      ctx.moveTo(-s.length / 3, 0);
+      ctx.lineTo(s.length / 3, 0);
+      ctx.stroke();
+      ctx.restore();
+    });
+  }
+
+  function drawGame() {
+    // Clear canvas
+    ctx.fillStyle = '#0B1929';
+    ctx.fillRect(0, 0, W, H);
+
+    // Draw scene
+    drawShipDeck();
+
+    // Draw crates
+    crates.forEach(crate => drawCrate(crate));
+
+    // Draw splinters on top
+    drawSplinters();
+  }
+
+  function handleTouch(e, type) {
+    if (gameState !== 'playing') return;
+    if (selectedCrate) return; // Already smashing
+
+    const touch = e.touches[0] || e.changedTouches[0];
+    if (!touch) return;
+    const { x, y } = screenToLogical(touch.clientX, touch.clientY);
+
+    if (type === 'start') {
+      crates.forEach(crate => {
+        if (pointInRect(x, y, crate) && !crate.smashed) {
+          crate.pressed = true;
+        }
+      });
+    }
+
+    if (type === 'end') {
+      crates.forEach(crate => {
+        if (crate.pressed) {
+          crate.pressed = false;
+          if (pointInRect(x, y, crate) && !crate.smashed) {
+            // Smash this crate!
+            selectedCrate = crate;
+            crate.smashed = true;
+            smashAnimTime = 0;
+            playSmashSound();
+            spawnSplinters(crate.x + crate.w / 2, crate.y + crate.h / 2);
+          }
+        }
+      });
+    }
+  }
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 4: GAME LOOP - DO NOT MODIFY                                      ║
+  // ║  Standard loop with responsive scaling and touch handling.                 ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  let lastTime = performance.now();
+
+  function gameLoop(now) {
+    const dt = Math.min((now - lastTime) / 1000, 0.05); // Cap at 50ms
+    lastTime = now;
+
+    // Apply transform for logical coordinate system (non-uniform scaling)
+    ctx.setTransform(scaleX, 0, 0, scaleY, 0, 0);
+
+    if (gameState === 'playing') {
+      updateGame(dt);
+      drawGame();
+    } else {
+      drawGame(); // Draw game state behind overlay
+      drawEndScreen(dt);
+    }
+
+    // Reset transform for next frame
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+    requestAnimationFrame(gameLoop);
+  }
+
+  // Touch handlers
+  function onTouchStart(e) {
+    e.preventDefault();
+    if (gameState === 'ended') {
+      const touch = e.touches[0];
+      const { x, y } = screenToLogical(touch.clientX, touch.clientY);
+
+      if (gameResult) {
+        // Correct answer: check both buttons
+        if (pointInRect(x, y, restartButton)) {
+          gameState = 'playing';
+          gameResult = null;
+          gameExplanation = '';
+          confettiParticles = [];
+          initGame();
+          return;
+        }
+        if (pointInRect(x, y, nextButton)) {
+          // Notify parent to go to next question
+          if (window.parent && window.parent !== window) {
+            window.parent.postMessage({ type: 'quiz-next' }, '*');
+          }
+          return;
+        }
+      } else {
+        // Wrong answer: check centered restart button
+        if (pointInRect(x, y, centeredRestartButton)) {
+          gameState = 'playing';
+          gameResult = null;
+          gameExplanation = '';
+          confettiParticles = [];
+          initGame();
+          return;
+        }
+      }
+    }
+    handleTouch(e, 'start');
+  }
+
+  function onTouchMove(e) {
+    e.preventDefault();
+    handleTouch(e, 'move');
+  }
+
+  function onTouchEnd(e) {
+    e.preventDefault();
+    handleTouch(e, 'end');
+  }
+
+  canvas.addEventListener('touchstart', onTouchStart, { passive: false });
+  canvas.addEventListener('touchmove', onTouchMove, { passive: false });
+  canvas.addEventListener('touchend', onTouchEnd, { passive: false });
+
+  // Also support mouse for testing in browser
+  canvas.addEventListener('mousedown', (e) => {
+    const fakeTouch = { touches: [{ clientX: e.clientX, clientY: e.clientY }], changedTouches: [{ clientX: e.clientX, clientY: e.clientY }] };
+    onTouchStart(fakeTouch);
+  });
+
+  canvas.addEventListener('mouseup', (e) => {
+    const fakeTouch = { touches: [], changedTouches: [{ clientX: e.clientX, clientY: e.clientY }] };
+    onTouchEnd(fakeTouch);
+  });
+
+  // Handle resize
+  window.addEventListener('resize', resizeCanvas);
+  window.addEventListener('orientationchange', () => {
+    setTimeout(resizeCanvas, 100); // Delay for orientation change to complete
+  });
+
+  // Prevent pull-to-refresh and overscroll
+  document.body.addEventListener('touchmove', (e) => e.preventDefault(), { passive: false });
+
+  // Initialize
+  resizeCanvas();
+  initGame();
+  requestAnimationFrame(gameLoop);
+  </script>
+</body>
+</html>

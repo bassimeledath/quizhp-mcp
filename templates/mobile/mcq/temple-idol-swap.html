@@ -1,0 +1,1474 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <link href="https://fonts.googleapis.com/css2?family=Belanosima:wght@400;600;700&family=Nunito+Sans:wght@400;500;600;700&family=Nunito:wght@400;500;600&display=swap" rel="stylesheet">
+  <title>Temple Idol Swap</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      touch-action: none;
+      -webkit-touch-callout: none;
+      -webkit-user-select: none;
+      user-select: none;
+    }
+    body {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      background: #1a1a2e;
+      font-family: 'Nunito Sans', system-ui, -apple-system, sans-serif;
+    }
+    #gameCanvas {
+      background: #16213e;
+      width: 100vw;
+      height: 100vh;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="gameCanvas"></canvas>
+
+  <script>
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 1: QUESTION PLACEHOLDER - DO NOT MODIFY FORMAT                    ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  const QUESTION = {
+    type: "mcq",
+    prompt: "Sample question text",
+    choices: [
+      { text: "This is sample answer A which is long enough to test text overflow", is_correct: true, explanation: "Why A is correct" },
+      { text: "This is sample answer B which is long enough to test text overflow", is_correct: false, explanation: "Why B is wrong" },
+      { text: "This is sample answer C which is long enough to test text overflow", is_correct: false, explanation: "Why C is wrong" },
+      { text: "This is sample answer D which is long enough to test text overflow", is_correct: false, explanation: "Why D is wrong" }
+    ],
+    isLastQuestion: false
+  };
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 2: ENGINE CORE (MOBILE) - DO NOT MODIFY                           ║
+  // ║  Non-uniform scaling (fills container), touch input, tap-to-restart.       ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  const canvas = document.getElementById('gameCanvas');
+  const ctx = canvas.getContext('2d');
+
+  // Logical dimensions (game code works in this coordinate space)
+  const W = 360, H = 640;
+
+  // Scaling state (computed on resize)
+  let scaleX = 1;
+  let scaleY = 1;
+  let aspectRatio = 1;  // scaleX/scaleY - use for proportional shapes
+
+  // Game state
+  let gameState = 'playing'; // 'playing' | 'ended'
+  let gameResult = null;     // true (correct) | false (wrong)
+  let gameExplanation = '';
+  let endScreenTime = 0;
+  let confettiParticles = [];
+
+  // End screen button bounds (logical coordinates)
+  const restartButton = { x: 20, y: H / 2 + 50, w: 155, h: 56 };
+  const nextButton = { x: 185, y: H / 2 + 50, w: 155, h: 56 };
+  // Centered restart button for wrong answers
+  const centeredRestartButton = { x: W / 2 - 100, y: H / 2 + 50, w: 200, h: 56 };
+
+  /** Draw a styled button with aspect-ratio aware text */
+  function drawMobileButton(rect, label, color, pulse) {
+    const textAdj = getTextScaleAdjustment();
+    const p = pulse ? 1 + Math.sin(endScreenTime * 4) * 0.03 : 1;
+
+    ctx.save();
+    ctx.translate(rect.x + rect.w / 2, rect.y + rect.h / 2);
+    ctx.scale(p, p);
+    ctx.translate(-(rect.x + rect.w / 2), -(rect.y + rect.h / 2));
+
+    // Button background
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.roundRect(rect.x, rect.y, rect.w, rect.h, 12);
+    ctx.fill();
+
+    // Button text (aspect-ratio aware)
+    ctx.save();
+    ctx.translate(rect.x + rect.w / 2, rect.y + rect.h / 2);
+    ctx.scale(textAdj / aspectRatio, textAdj);
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = 'bold 18px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, 0, 0);
+    ctx.restore();
+
+    ctx.restore();
+  }
+
+  /**
+   * Resize canvas to fill viewport completely (no letterboxing).
+   * Uses non-uniform scaling - game code works in 360×640 logical space.
+   * Use aspectRatio to draw proportionally correct shapes.
+   */
+  function resizeCanvas() {
+    const dpr = window.devicePixelRatio || 1;
+
+    // Physical canvas size (actual pixels)
+    canvas.width = window.innerWidth * dpr;
+    canvas.height = window.innerHeight * dpr;
+
+    // CSS size (fills viewport)
+    canvas.style.width = window.innerWidth + 'px';
+    canvas.style.height = window.innerHeight + 'px';
+
+    // Non-uniform scaling to fill entire canvas
+    scaleX = canvas.width / W;
+    scaleY = canvas.height / H;
+
+    // Aspect ratio for proportional shape drawing
+    // >1 means container is wider than logical space
+    // <1 means container is taller than logical space
+    aspectRatio = scaleX / scaleY;
+
+    // Recalculate text sizing on resize (implement this in SECTION 3)
+    if (typeof recalculateTextSizing === 'function') {
+      recalculateTextSizing();
+    }
+  }
+
+  // === ASPECT-RATIO-AWARE TEXT WITH CLAMPED SCALING ===
+  // Text gets stretched by non-uniform scaling, so we compensate.
+  // Also clamp the effective scale to keep text legible at all sizes.
+  const TEXT_SCALE_MIN = 0.75;
+  const TEXT_SCALE_MAX = 1.4;
+
+  function getTextScaleAdjustment() {
+    const baseScale = window.innerHeight / H;
+    const clampedScale = Math.min(TEXT_SCALE_MAX, Math.max(TEXT_SCALE_MIN, baseScale));
+    return clampedScale / baseScale;
+  }
+
+  /**
+   * Draw text with aspect-ratio compensation and clamped scaling.
+   * Use this instead of raw ctx.fillText() to prevent text stretching.
+   * Default font is 16px (minimum for answer text). Use 18-20px for better readability.
+   */
+  function drawText(text, x, y, options = {}) {
+    const { font = "500 16px system-ui, sans-serif", color = '#F5F5F0', align = 'center', baseline = 'middle' } = options;
+    ctx.save();
+    ctx.translate(x, y);
+    const adj = getTextScaleAdjustment();
+    ctx.scale(adj / aspectRatio, adj);
+    ctx.font = font;
+    ctx.fillStyle = color;
+    ctx.textAlign = align;
+    ctx.textBaseline = baseline;
+    ctx.fillText(text, 0, 0);
+    ctx.restore();
+  }
+
+  /**
+   * Convert screen coordinates to logical coordinates.
+   * Use this in handleTouch to get positions in 360×640 space.
+   */
+  function screenToLogical(screenX, screenY) {
+    const dpr = window.devicePixelRatio || 1;
+    const rect = canvas.getBoundingClientRect();
+    const canvasX = (screenX - rect.left) * dpr;
+    const canvasY = (screenY - rect.top) * dpr;
+    return {
+      x: canvasX / scaleX,
+      y: canvasY / scaleY
+    };
+  }
+
+  /**
+   * Check if a point is inside a rectangle (logical coordinates).
+   */
+  function pointInRect(px, py, rect) {
+    return px >= rect.x && px <= rect.x + rect.w &&
+           py >= rect.y && py <= rect.y + rect.h;
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // TEXT UTILITIES - Dynamic wrapping and font sizing
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  /**
+   * Wrap text to fit within a maximum width (in logical coordinates).
+   * Accounts for canvas transforms applied by drawText().
+   *
+   * @param {string} text - The text to wrap
+   * @param {number} maxWidth - Maximum width in logical coordinates
+   * @param {string} font - CSS font string (e.g., "16px 'Nunito', sans-serif")
+   * @param {number} maxLines - Maximum number of lines (default 3)
+   * @returns {string[]} Array of text lines
+   */
+  function wrapText(text, maxWidth, font, maxLines = 3) {
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.font = font;
+    const adj = getTextScaleAdjustment();
+    const maxRawWidth = maxWidth * aspectRatio / adj;
+    const words = text.split(' ');
+    const lines = [];
+    let currentLine = '';
+    words.forEach(word => {
+      const testLine = currentLine ? currentLine + ' ' + word : word;
+      if (ctx.measureText(testLine).width > maxRawWidth && currentLine) {
+        lines.push(currentLine);
+        currentLine = word;
+      } else {
+        currentLine = testLine;
+      }
+    });
+    if (currentLine) lines.push(currentLine);
+    ctx.restore();
+    return lines.slice(0, maxLines);
+  }
+
+  /**
+   * Find the optimal font size to fit content in available space.
+   * Tries font sizes from max to min until content fits.
+   *
+   * @param {Object} options
+   * @param {string[]} options.texts - Array of text strings to fit
+   * @param {number} options.maxWidth - Maximum width for text wrapping
+   * @param {number} options.availableHeight - Total height available for all texts
+   * @param {number} options.minFont - Minimum font size (default 12)
+   * @param {number} options.maxFont - Maximum font size (default 18)
+   * @param {number} options.itemPadding - Vertical padding per text item (default 4)
+   * @param {string} options.fontFamily - Font family (default "'Nunito Sans', sans-serif")
+   * @returns {{ fontSize: number, wrappedTexts: string[][] }} Optimal font size and pre-wrapped texts
+   */
+  function findOptimalFontSize(options) {
+    const {
+      texts,
+      maxWidth,
+      availableHeight,
+      minFont = 12,
+      maxFont = 18,
+      itemPadding = 4,
+      fontFamily = "'Nunito Sans', sans-serif"
+    } = options;
+
+    let bestFontSize = minFont;
+    let bestWrappedTexts = [];
+
+    for (let fontSize = maxFont; fontSize >= minFont; fontSize -= 0.5) {
+      const font = `${fontSize}px ${fontFamily}`;
+      const lineHeight = fontSize + 2;
+
+      let totalHeight = 0;
+      const wrappedTexts = [];
+
+      for (const text of texts) {
+        const lines = wrapText(text, maxWidth, font);
+        wrappedTexts.push(lines);
+        totalHeight += itemPadding + lines.length * lineHeight;
+      }
+
+      if (totalHeight <= availableHeight) {
+        bestFontSize = fontSize;
+        bestWrappedTexts = wrappedTexts;
+        break;
+      }
+
+      bestWrappedTexts = wrappedTexts;
+    }
+
+    return { fontSize: bestFontSize, wrappedTexts: bestWrappedTexts };
+  }
+
+  const engine = {
+    /** Call this to end the game. DO NOT draw your own end screen. */
+    end(isCorrect, explanation) {
+      if (gameState === 'ended') return;
+      gameState = 'ended';
+      gameResult = isCorrect;
+      gameExplanation = explanation || '';
+      endScreenTime = 0;
+
+      // Spawn confetti for correct answers
+      if (isCorrect) {
+        for (let i = 0; i < 50; i++) {
+          confettiParticles.push({
+            x: W / 2,
+            y: H / 2,
+            vx: (Math.random() - 0.5) * 400,
+            vy: -Math.random() * 300 - 80,
+            size: 4 + Math.random() * 6,
+            color: ['#FFD700', '#FF6B6B', '#4ECDC4', '#95E1D3', '#F38181'][Math.floor(Math.random() * 5)],
+            rotation: Math.random() * Math.PI * 2,
+            rotationSpeed: (Math.random() - 0.5) * 10
+          });
+        }
+      }
+
+      // Notify parent frame
+      if (window.parent && window.parent !== window) {
+        window.parent.postMessage({
+          type: 'quiz-end',
+          isCorrect: isCorrect,
+          explanation: explanation || ''
+        }, '*');
+      }
+    }
+  };
+
+  /** STANDARD END SCREEN (MOBILE) - DO NOT MODIFY */
+  function drawEndScreen(dt) {
+    endScreenTime += dt;
+
+    // Update confetti
+    confettiParticles = confettiParticles.filter(p => {
+      p.vy += 600 * dt; // gravity
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.rotation += p.rotationSpeed * dt;
+      p.vx *= 0.99;
+      return p.y < H + 50;
+    });
+
+    // Dark overlay
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
+    ctx.fillRect(0, 0, W, H);
+
+    // Draw confetti
+    confettiParticles.forEach(p => {
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rotation);
+      ctx.fillStyle = p.color;
+      ctx.fillRect(-p.size / 2, -p.size / 4, p.size, p.size / 2);
+      ctx.restore();
+    });
+
+    // Result emoji (aspect-ratio aware)
+    const textAdj = getTextScaleAdjustment();
+    ctx.save();
+    ctx.translate(W / 2, H / 2 - 80);
+    ctx.scale(textAdj / aspectRatio, textAdj);
+    ctx.font = '64px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(gameResult ? '🎉' : '😢', 0, 0);
+    ctx.restore();
+
+    // Result text (aspect-ratio aware)
+    ctx.save();
+    ctx.translate(W / 2, H / 2 - 10);
+    ctx.scale(textAdj / aspectRatio, textAdj);
+    ctx.fillStyle = gameResult ? '#4ADE80' : '#F87171';
+    ctx.font = 'bold 32px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(gameResult ? 'Correct!' : 'Wrong!', 0, 0);
+    ctx.restore();
+
+    // Buttons
+    if (gameResult) {
+      // Correct: show both Restart and Next/Finish
+      drawMobileButton(restartButton, 'Restart', '#E87A3E', true);
+      const nextLabel = QUESTION.isLastQuestion ? 'Finish' : 'Next';
+      drawMobileButton(nextButton, nextLabel, '#4ECDC4', true);
+    } else {
+      // Wrong: show only centered Restart button
+      drawMobileButton(centeredRestartButton, 'Restart', '#E87A3E', true);
+    }
+  }
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 3: YOUR GAME CODE - Temple Idol Swap                              ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+
+  // Game state
+  let animState = 'idle'; // 'idle' | 'picking' | 'replacing' | 'suspense' | 'result'
+  let animTimer = 0;
+  let selectedChoice = null;
+  let selectedSandbagIndex = -1;
+  let sandbags = [];
+  let character = {};
+  let idol = {};
+  let boulder = {};
+  let resultParticles = [];
+
+  // Animation durations
+  const PICK_DURATION = 0.4;
+  const HOLD_DURATION = 0.4;    // Pause with sandbag held next to idol
+  const SWAP_DURATION = 0.5;    // Smooth slide swap
+  const SUSPENSE_DURATION = 0.6;
+  const BOULDER_DURATION = 0.8;
+
+  // Swap animation positions
+  let sandbagSwapX = 0;  // Sandbag X offset during swap
+  let idolSwapX = 0;     // Idol X offset during swap
+
+  // Check for reduced motion preference
+  const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  // Entrance animation state
+  let entranceTimer = 0;
+  let entranceComplete = false;
+  const ENTRANCE_DURATION = 1.2;
+
+  // Idol glow state
+  let idolGlowPhase = 0;
+
+  // Dust particles for boulder impact
+  let dustParticles = [];
+
+  // Pressed sandbag tracking for touch feedback
+  let pressedSandbagIndex = -1;
+
+  // Suspense tick timing
+  let lastTickTime = 0;
+  const TICK_INTERVAL = 0.15;
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // SOUND EFFECTS (Web Audio API)
+  // ═══════════════════════════════════════════════════════════════════════════
+  let audioCtx = null;
+
+  function getAudioContext() {
+    if (!audioCtx) {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    return audioCtx;
+  }
+
+  function playSound(type) {
+    try {
+      const ctx = getAudioContext();
+      if (ctx.state === 'suspended') ctx.resume();
+
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+
+      const now = ctx.currentTime;
+
+      if (type === 'tick') {
+        // Suspenseful tick sound
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(800, now);
+        osc.frequency.exponentialRampToValueAtTime(400, now + 0.05);
+        gain.gain.setValueAtTime(0.15, now);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.08);
+        osc.start(now);
+        osc.stop(now + 0.08);
+      } else if (type === 'correct') {
+        // Celebratory ascending chime
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(523, now);       // C5
+        osc.frequency.setValueAtTime(659, now + 0.1); // E5
+        osc.frequency.setValueAtTime(784, now + 0.2); // G5
+        gain.gain.setValueAtTime(0.25, now);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.4);
+        osc.start(now);
+        osc.stop(now + 0.4);
+
+        // Add harmonics for richness
+        const osc2 = ctx.createOscillator();
+        const gain2 = ctx.createGain();
+        osc2.connect(gain2);
+        gain2.connect(ctx.destination);
+        osc2.type = 'triangle';
+        osc2.frequency.setValueAtTime(784, now);
+        osc2.frequency.setValueAtTime(988, now + 0.15);
+        gain2.gain.setValueAtTime(0.1, now);
+        gain2.gain.exponentialRampToValueAtTime(0.01, now + 0.35);
+        osc2.start(now);
+        osc2.stop(now + 0.35);
+      } else if (type === 'rumble') {
+        // Low rumble/crash for boulder
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(80, now);
+        osc.frequency.exponentialRampToValueAtTime(30, now + 0.5);
+        gain.gain.setValueAtTime(0.3, now);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.6);
+        osc.start(now);
+        osc.stop(now + 0.6);
+
+        // Add noise-like crash
+        const osc2 = ctx.createOscillator();
+        const gain2 = ctx.createGain();
+        osc2.connect(gain2);
+        gain2.connect(ctx.destination);
+        osc2.type = 'square';
+        osc2.frequency.setValueAtTime(150, now);
+        osc2.frequency.exponentialRampToValueAtTime(50, now + 0.3);
+        gain2.gain.setValueAtTime(0.15, now);
+        gain2.gain.exponentialRampToValueAtTime(0.01, now + 0.4);
+        osc2.start(now);
+        osc2.stop(now + 0.4);
+      } else if (type === 'click') {
+        // Soft click for sandbag press
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(600, now);
+        gain.gain.setValueAtTime(0.1, now);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.05);
+        osc.start(now);
+        osc.stop(now + 0.05);
+      }
+    } catch (e) {
+      // Silently fail if audio not available
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // ENTRANCE ANIMATION HELPERS
+  // ═══════════════════════════════════════════════════════════════════════════
+  function easeOutBack(t) {
+    const c1 = 1.70158;
+    const c3 = c1 + 1;
+    return 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2);
+  }
+
+  function getEntranceScale(delay, duration) {
+    if (prefersReducedMotion) return 1;
+    const elapsed = Math.max(0, entranceTimer - delay);
+    if (elapsed <= 0) return 0;
+    const t = Math.min(elapsed / duration, 1);
+    return easeOutBack(t);
+  }
+
+  function getEntranceAlpha(delay, duration) {
+    if (prefersReducedMotion) return 1;
+    const elapsed = Math.max(0, entranceTimer - delay);
+    if (elapsed <= 0) return 0;
+    return Math.min(elapsed / (duration * 0.5), 1);
+  }
+
+  function initGame() {
+    animState = 'idle';
+    animTimer = 0;
+    selectedChoice = null;
+    selectedSandbagIndex = -1;
+    resultParticles = [];
+    dustParticles = [];
+    entranceTimer = 0;
+    entranceComplete = false;
+    pressedSandbagIndex = -1;
+    lastTickTime = 0;
+    sandbagSwapX = 0;
+    idolSwapX = 0;
+
+    // Character (Indiana Jones type - adventurer)
+    character = {
+      x: W / 2,
+      y: 200,
+      armY: 0,       // Arm offset for picking animation
+      holdingSandbag: false,
+      crushed: false
+    };
+
+    // Golden idol on table
+    idol = {
+      x: W / 2,
+      y: 250,
+      visible: true,
+      scale: 1
+    };
+
+    // Boulder (for wrong answers)
+    boulder = {
+      x: W / 2,
+      y: -100,
+      visible: false,
+      falling: false
+    };
+
+    // Create sandbags for each answer - slightly different sizes
+    const bagSizes = [0.9, 1.0, 1.1, 0.95]; // Different sizes
+    const startY = 383;
+    const bagHeight = 50;
+    const baseGap = 10;
+
+    sandbags = QUESTION.choices.map((choice, i) => ({
+      x: 25,
+      y: startY + i * (bagHeight * aspectRatio + baseGap),
+      w: 310,
+      h: bagHeight,
+      sizeScale: bagSizes[i],
+      choice: choice,
+      selected: false,
+      wrappedText: null
+    }));
+
+    // Calculate optimal text sizing (called on init and resize)
+    recalculateTextSizing();
+  }
+
+  function recalculateTextSizing() {
+    if (!sandbags || sandbags.length === 0) return;
+
+    // Recalculate Y positions based on aspect ratio
+    const baseBagHeight = 50;
+    const minGap = 6;
+    const minStartY = 350; // Don't overlap the character/statue area
+    const availableHeight = H - minStartY - 10; // Space from minStartY to bottom
+
+    // Cap the effective aspect ratio for button height to ensure all fit
+    const maxBagHeight = (availableHeight - 3 * minGap) / 4;
+    const bagHeight = Math.min(baseBagHeight * aspectRatio, maxBagHeight);
+
+    // Calculate gap based on remaining space
+    const totalBagHeight = 4 * bagHeight;
+    const remainingSpace = availableHeight - totalBagHeight;
+    const gap = Math.max(minGap, remainingSpace / 3);
+
+    const startY = minStartY;
+
+    sandbags.forEach((bag, i) => {
+      bag.y = startY + i * (bagHeight + gap);
+      bag.h = bagHeight / aspectRatio; // Store logical height for hit testing
+    });
+
+    const textAreaWidth = 310 - 55; // Width minus badge area
+    const textAreaHeight = sandbags[0].h - 8; // Height minus padding
+
+    const { fontSize: optimalFontSize, wrappedTexts } = findOptimalFontSize({
+      texts: QUESTION.choices.map(c => c.text),
+      maxWidth: textAreaWidth,
+      availableHeight: textAreaHeight * 4, // Total height for all 4
+      minFont: 12,
+      maxFont: 18,
+      itemPadding: 4,
+      fontFamily: "'Nunito Sans', system-ui, sans-serif"
+    });
+
+    // Store optimal font size and wrapped text for each sandbag
+    sandbags.forEach((bag, i) => {
+      bag.wrappedText = wrappedTexts[i];
+      bag.fontSize = optimalFontSize;
+    });
+  }
+
+  function updateGame(dt) {
+    if (gameState !== 'playing') return;
+
+    // Update entrance animation
+    if (!entranceComplete) {
+      entranceTimer += dt;
+      if (entranceTimer >= ENTRANCE_DURATION) {
+        entranceComplete = true;
+      }
+    }
+
+    // Update idol glow phase
+    idolGlowPhase += dt * 2;
+
+    // Update dust particles
+    dustParticles = dustParticles.filter(p => {
+      p.vy += 200 * dt;
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.alpha -= dt * 1.5;
+      return p.alpha > 0;
+    });
+
+    if (animState === 'picking') {
+      animTimer += dt;
+      const progress = Math.min(animTimer / PICK_DURATION, 1);
+
+      // Character reaches down to pick up sandbag
+      character.armY = Math.sin(progress * Math.PI * 0.5) * 20;
+
+      if (progress >= 0.7 && !character.holdingSandbag) {
+        character.holdingSandbag = true;
+      }
+
+      if (progress >= 1) {
+        animState = 'holding';
+        animTimer = 0;
+        character.armY = 0;
+      }
+    }
+    else if (animState === 'holding') {
+      // Brief pause showing sandbag held next to idol
+      animTimer += dt;
+      if (animTimer >= HOLD_DURATION) {
+        animState = 'swapping';
+        animTimer = 0;
+        sandbagSwapX = -35; // Start sandbag to the left of idol
+        idolSwapX = 0;      // Idol starts in place
+      }
+    }
+    else if (animState === 'swapping') {
+      animTimer += dt;
+      const progress = Math.min(animTimer / SWAP_DURATION, 1);
+
+      // Easing function for smooth motion
+      const eased = 1 - Math.pow(1 - progress, 3); // ease-out cubic
+
+      // Sandbag slides from left (-35) to center (0)
+      sandbagSwapX = -35 * (1 - eased);
+
+      // Idol slides from center (0) to right (50) and falls
+      idolSwapX = 50 * eased;
+      idol.scale = 1 - (eased * 0.3); // Shrink slightly as it goes
+
+      if (progress >= 1) {
+        idol.visible = false;
+        character.holdingSandbag = false;
+        animState = 'suspense';
+        animTimer = 0;
+      }
+    }
+    else if (animState === 'suspense') {
+      animTimer += dt;
+      lastTickTime += dt;
+
+      // Play suspenseful tick sounds
+      if (lastTickTime >= TICK_INTERVAL) {
+        lastTickTime = 0;
+        playSound('tick');
+      }
+
+      // Suspenseful pause...
+      if (animTimer >= SUSPENSE_DURATION) {
+        animState = 'result';
+        animTimer = 0;
+
+        if (selectedChoice.is_correct) {
+          playSound('correct');
+          // Spawn celebration particles
+          for (let i = 0; i < 30; i++) {
+            resultParticles.push({
+              x: W / 2,
+              y: 200,
+              vx: (Math.random() - 0.5) * 200,
+              vy: -Math.random() * 150 - 50,
+              size: 3 + Math.random() * 4,
+              color: ['#FFD700', '#E87A3E', '#4ECDC4'][Math.floor(Math.random() * 3)],
+              life: 1
+            });
+          }
+        } else {
+          // Boulder starts falling
+          boulder.visible = true;
+          boulder.falling = true;
+          boulder.y = -80;
+          playSound('rumble');
+        }
+      }
+    }
+    else if (animState === 'result') {
+      animTimer += dt;
+
+      // Update result particles
+      resultParticles = resultParticles.filter(p => {
+        p.vy += 300 * dt;
+        p.x += p.vx * dt;
+        p.y += p.vy * dt;
+        p.life -= dt;
+        return p.life > 0 && p.y < H;
+      });
+
+      // Boulder falling animation
+      if (boulder.falling) {
+        boulder.y += 400 * dt;
+
+        if (boulder.y >= 150) {
+          boulder.y = 150;
+          boulder.falling = false;
+          character.crushed = true;
+
+          // Screen shake effect particles
+          for (let i = 0; i < 15; i++) {
+            resultParticles.push({
+              x: W / 2 + (Math.random() - 0.5) * 60,
+              y: 230,
+              vx: (Math.random() - 0.5) * 100,
+              vy: -Math.random() * 50 - 20,
+              size: 2 + Math.random() * 3,
+              color: '#8B7355',
+              life: 0.5
+            });
+          }
+
+          // Spawn dust cloud particles
+          for (let i = 0; i < 25; i++) {
+            const angle = (Math.random() - 0.5) * Math.PI;
+            const speed = 50 + Math.random() * 100;
+            dustParticles.push({
+              x: W / 2 + (Math.random() - 0.5) * 80,
+              y: 200 + Math.random() * 40,
+              vx: Math.cos(angle) * speed,
+              vy: -Math.random() * 30 - 10,
+              size: 8 + Math.random() * 12,
+              alpha: 0.6 + Math.random() * 0.4
+            });
+          }
+        }
+      }
+
+      // End game after animation
+      if (animTimer >= (selectedChoice.is_correct ? 0.8 : BOULDER_DURATION + 0.3)) {
+        engine.end(selectedChoice.is_correct, selectedChoice.explanation);
+      }
+    }
+  }
+
+  function drawGame() {
+    // Temple background
+    const gradient = ctx.createLinearGradient(0, 0, 0, H);
+    gradient.addColorStop(0, '#2D1F1A');
+    gradient.addColorStop(1, '#1A1410');
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, W, H);
+
+    // Stone texture pattern
+    ctx.fillStyle = 'rgba(139, 115, 85, 0.1)';
+    for (let i = 0; i < 8; i++) {
+      for (let j = 0; j < 5; j++) {
+        ctx.fillRect(j * 80 + (i % 2) * 40, i * 45, 75, 40);
+      }
+    }
+
+    // Torch flames on sides
+    drawTorch(40, 100);
+    drawTorch(320, 100);
+
+    // Stone pedestal/table
+    ctx.fillStyle = '#5C4A3A';
+    ctx.beginPath();
+    ctx.roundRect(W/2 - 60, 260, 120, 40 * aspectRatio, 4);
+    ctx.fill();
+
+    ctx.fillStyle = '#4A3C2F';
+    ctx.fillRect(W/2 - 50, 280 * aspectRatio > 280 ? 285 : 275, 100, 20 * aspectRatio);
+
+    // Draw character (adventurer)
+    drawCharacter();
+
+    // Draw golden idol and sandbag based on animation state
+    const sandbagPlacedY = idol.y + 12; // 5% lower than idol position
+    if (animState === 'holding') {
+      // Show sandbag held to the left of idol
+      drawSandbagShape(idol.x - 35, sandbagPlacedY - 5, 20);
+      drawIdol(idol.x, idol.y);
+    } else if (animState === 'swapping') {
+      // Smooth swap: sandbag slides right, idol slides right
+      drawSandbagShape(idol.x + sandbagSwapX, sandbagPlacedY - 5, 20);
+      if (idol.visible) {
+        ctx.globalAlpha = 1 - (idolSwapX / 80); // Fade out idol
+        drawIdol(idol.x + idolSwapX, idol.y + (idolSwapX * 0.3));
+        ctx.globalAlpha = 1;
+      }
+    } else if (idol.visible) {
+      drawIdol(idol.x, idol.y);
+    } else if (animState === 'suspense' || animState === 'result') {
+      // Draw placed sandbag on pedestal
+      drawPlacedSandbag(W/2, 257);
+    }
+
+    // Draw boulder (if visible)
+    if (boulder.visible) {
+      drawBoulder(boulder.x, boulder.y);
+    }
+
+    // Draw dust particles
+    dustParticles.forEach(p => {
+      ctx.globalAlpha = p.alpha * 0.5;
+      ctx.fillStyle = '#A09080';
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+      ctx.fill();
+    });
+    ctx.globalAlpha = 1;
+
+    // Draw result particles
+    resultParticles.forEach(p => {
+      ctx.globalAlpha = p.life;
+      ctx.fillStyle = p.color;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+      ctx.fill();
+    });
+    ctx.globalAlpha = 1;
+
+    // Draw sandbag options (only during idle state)
+    if (animState === 'idle') {
+      sandbags.forEach((bag, i) => {
+        drawSandbagOption(bag, i);
+      });
+    }
+
+    // Draw held sandbag (only during picking animation, before it's shown next to idol)
+    if (character.holdingSandbag && animState === 'picking' && selectedSandbagIndex >= 0) {
+      const handY = 185 + character.armY;
+      drawHeldSandbag(character.x, handY, sandbags[selectedSandbagIndex].sizeScale);
+    }
+  }
+
+  function drawTorch(x, y) {
+    // Torch holder
+    ctx.fillStyle = '#4A3C2F';
+    ctx.fillRect(x - 5, y, 10, 40 * aspectRatio);
+
+    // Enhanced flame with multiple layers and flickering
+    const time = Date.now();
+    const flicker1 = Math.sin(time / 80) * 3;
+    const flicker2 = Math.sin(time / 120 + 1) * 2;
+    const flicker3 = Math.cos(time / 60) * 1.5;
+    const combinedFlicker = flicker1 + flicker2 * 0.5;
+
+    // Outer glow
+    const glowGradient = ctx.createRadialGradient(x, y - 15 + combinedFlicker, 0, x, y - 10, 35);
+    glowGradient.addColorStop(0, 'rgba(255, 215, 0, 0.3)');
+    glowGradient.addColorStop(0.5, 'rgba(232, 122, 62, 0.15)');
+    glowGradient.addColorStop(1, 'rgba(232, 93, 74, 0)');
+    ctx.fillStyle = glowGradient;
+    ctx.beginPath();
+    ctx.ellipse(x, y - 10 + combinedFlicker, 25, 30 * aspectRatio, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Main flame
+    const flameGradient = ctx.createRadialGradient(x, y - 12 + combinedFlicker, 0, x, y - 10, 20);
+    flameGradient.addColorStop(0, '#FFFACD');
+    flameGradient.addColorStop(0.3, '#FFD700');
+    flameGradient.addColorStop(0.6, '#E87A3E');
+    flameGradient.addColorStop(1, 'rgba(232, 93, 74, 0)');
+
+    ctx.fillStyle = flameGradient;
+    ctx.beginPath();
+    const flameWidth = 12 + Math.sin(time / 90) * 2;
+    const flameHeight = 18 + Math.sin(time / 70) * 3;
+    ctx.ellipse(x, y - 10 + combinedFlicker, flameWidth, flameHeight * aspectRatio, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Inner bright core
+    ctx.fillStyle = 'rgba(255, 255, 240, 0.7)';
+    ctx.beginPath();
+    ctx.ellipse(x, y - 8 + combinedFlicker + flicker3, 4, 8 * aspectRatio, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Occasional spark particles (visual only, no state)
+    if (Math.sin(time / 200 + x) > 0.8) {
+      ctx.fillStyle = '#FFD700';
+      ctx.beginPath();
+      const sparkY = y - 30 + Math.sin(time / 50) * 5;
+      const sparkX = x + Math.cos(time / 70) * 8;
+      ctx.arc(sparkX, sparkY, 2, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  function drawCharacter() {
+    const cx = character.x;
+    const cy = character.y;
+
+    if (character.crushed) {
+      // Crushed character (just feet sticking out)
+      ctx.fillStyle = '#8B6914';
+      ctx.fillRect(cx - 25, 240, 15, 20 * aspectRatio);
+      ctx.fillRect(cx + 10, 240, 15, 20 * aspectRatio);
+      return;
+    }
+
+    // Body
+    ctx.fillStyle = '#8B6914'; // Khaki jacket
+    ctx.beginPath();
+    ctx.roundRect(cx - 25, cy + 10, 50, 45 * aspectRatio, 8);
+    ctx.fill();
+
+    // Arms
+    const armOffset = character.armY;
+    ctx.fillStyle = '#8B6914';
+    // Left arm
+    ctx.save();
+    ctx.translate(cx - 30, cy + 20);
+    ctx.rotate(-0.3 + armOffset * 0.02);
+    ctx.fillRect(-8, 0, 16, 35 * aspectRatio);
+    ctx.restore();
+    // Right arm
+    ctx.save();
+    ctx.translate(cx + 30, cy + 20);
+    ctx.rotate(0.3 - armOffset * 0.02);
+    ctx.fillRect(-8, 0, 16, 35 * aspectRatio);
+    ctx.restore();
+
+    // Head
+    ctx.fillStyle = '#DEB887';
+    ctx.beginPath();
+    ctx.ellipse(cx, cy, 18, 20 * aspectRatio, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Fedora hat
+    ctx.fillStyle = '#4A3728';
+    // Hat brim
+    ctx.beginPath();
+    ctx.ellipse(cx, cy - 15, 28, 8 * aspectRatio, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // Hat top
+    ctx.beginPath();
+    ctx.ellipse(cx, cy - 22, 18, 12 * aspectRatio, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Face details
+    ctx.fillStyle = '#2B2B28';
+    // Eyes
+    ctx.beginPath();
+    ctx.ellipse(cx - 6, cy - 2, 2, 2 * aspectRatio, 0, 0, Math.PI * 2);
+    ctx.ellipse(cx + 6, cy - 2, 2, 2 * aspectRatio, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // Slight smile
+    ctx.strokeStyle = '#2B2B28';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.arc(cx, cy + 5, 6, 0.1 * Math.PI, 0.9 * Math.PI);
+    ctx.stroke();
+  }
+
+  function drawIdol(x, y) {
+    // Pulsing glow effect
+    const glowIntensity = 0.3 + Math.sin(idolGlowPhase) * 0.15;
+    const glowSize = 50 + Math.sin(idolGlowPhase * 1.5) * 10;
+
+    // Outer mystical glow
+    const outerGlow = ctx.createRadialGradient(x, y - 5, 0, x, y - 5, glowSize);
+    outerGlow.addColorStop(0, `rgba(255, 215, 0, ${glowIntensity})`);
+    outerGlow.addColorStop(0.5, `rgba(245, 167, 66, ${glowIntensity * 0.5})`);
+    outerGlow.addColorStop(1, 'rgba(232, 122, 62, 0)');
+    ctx.fillStyle = outerGlow;
+    ctx.beginPath();
+    ctx.ellipse(x, y - 5, glowSize, glowSize * 0.8 * aspectRatio, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Inner warm glow
+    const innerGlow = ctx.createRadialGradient(x, y - 5, 0, x, y - 5, 30);
+    innerGlow.addColorStop(0, `rgba(255, 250, 200, ${glowIntensity * 0.6})`);
+    innerGlow.addColorStop(1, 'rgba(255, 215, 0, 0)');
+    ctx.fillStyle = innerGlow;
+    ctx.beginPath();
+    ctx.ellipse(x, y - 5, 30, 25 * aspectRatio, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Golden idol base
+    ctx.fillStyle = '#FFD700';
+    ctx.beginPath();
+    ctx.moveTo(x - 15, y + 20);
+    ctx.lineTo(x + 15, y + 20);
+    ctx.lineTo(x + 10, y + 30);
+    ctx.lineTo(x - 10, y + 30);
+    ctx.closePath();
+    ctx.fill();
+
+    // Idol body
+    ctx.beginPath();
+    ctx.ellipse(x, y, 12, 18 * aspectRatio, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Idol head
+    ctx.beginPath();
+    ctx.ellipse(x, y - 22, 10, 10 * aspectRatio, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Idol eyes (gems) - using styleguide error color
+    ctx.fillStyle = '#E85D4A';
+    ctx.beginPath();
+    ctx.ellipse(x - 4, y - 22, 2, 2 * aspectRatio, 0, 0, Math.PI * 2);
+    ctx.ellipse(x + 4, y - 22, 2, 2 * aspectRatio, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Gem glow
+    const gemGlowIntensity = 0.4 + Math.sin(idolGlowPhase * 2) * 0.2;
+    ctx.fillStyle = `rgba(232, 93, 74, ${gemGlowIntensity})`;
+    ctx.beginPath();
+    ctx.ellipse(x - 4, y - 22, 5, 5 * aspectRatio, 0, 0, Math.PI * 2);
+    ctx.ellipse(x + 4, y - 22, 5, 5 * aspectRatio, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Shine highlight
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
+    ctx.beginPath();
+    ctx.ellipse(x - 4, y - 5, 3, 5 * aspectRatio, -0.3, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Top shine
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
+    ctx.beginPath();
+    ctx.ellipse(x - 3, y - 26, 2, 3 * aspectRatio, -0.2, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  function drawPlacedSandbag(x, y) {
+    // Draw sandbag on pedestal using same style
+    drawSandbagShape(x, y - 5, 22);
+  }
+
+  function drawHeldSandbag(x, y, scale) {
+    drawSandbagShape(x, y, 16 * scale);
+  }
+
+  function drawSandbagShape(cx, cy, size) {
+    // Sandbag pouch shape - same as icon but without letter
+    const w = size;
+    const h = size * 1.2 * aspectRatio;
+
+    ctx.save();
+    ctx.translate(cx, cy);
+
+    // Main bag body
+    ctx.fillStyle = '#C9A66B';
+    ctx.beginPath();
+    ctx.moveTo(0, -h * 0.5);
+    ctx.bezierCurveTo(-w * 0.3, -h * 0.3, -w * 0.55, h * 0.1, -w * 0.45, h * 0.4);
+    ctx.bezierCurveTo(-w * 0.35, h * 0.55, w * 0.35, h * 0.55, w * 0.45, h * 0.4);
+    ctx.bezierCurveTo(w * 0.55, h * 0.1, w * 0.3, -h * 0.3, 0, -h * 0.5);
+    ctx.closePath();
+    ctx.fill();
+
+    // Shading
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.12)';
+    ctx.beginPath();
+    ctx.moveTo(w * 0.1, -h * 0.3);
+    ctx.bezierCurveTo(w * 0.35, -h * 0.15, w * 0.45, h * 0.2, w * 0.35, h * 0.4);
+    ctx.bezierCurveTo(w * 0.25, h * 0.48, 0, h * 0.4, -w * 0.05, h * 0.2);
+    ctx.closePath();
+    ctx.fill();
+
+    // Gathered top
+    ctx.fillStyle = '#B8956A';
+    ctx.beginPath();
+    ctx.ellipse(0, -h * 0.42, w * 0.18, h * 0.07, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Rope ties
+    ctx.strokeStyle = '#7A6548';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(-w * 0.2, -h * 0.38);
+    ctx.lineTo(w * 0.2, -h * 0.38);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(-w * 0.18, -h * 0.44);
+    ctx.lineTo(w * 0.18, -h * 0.44);
+    ctx.stroke();
+
+    // Knot
+    ctx.fillStyle = '#6B5A42';
+    ctx.beginPath();
+    ctx.ellipse(w * 0.2, -h * 0.41, 2.5, 2.5 * aspectRatio, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.restore();
+  }
+
+  function drawBoulder(x, y) {
+    // Main boulder
+    const gradient = ctx.createRadialGradient(x - 10, y - 10, 0, x, y, 60);
+    gradient.addColorStop(0, '#8B7355');
+    gradient.addColorStop(1, '#4A3C2F');
+
+    ctx.fillStyle = gradient;
+    ctx.beginPath();
+    ctx.ellipse(x, y, 55, 50 * aspectRatio, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Boulder texture
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.2)';
+    ctx.beginPath();
+    ctx.ellipse(x + 15, y + 10, 15, 12 * aspectRatio, 0.5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.ellipse(x - 20, y - 5, 10, 8 * aspectRatio, -0.3, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Highlight
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.15)';
+    ctx.beginPath();
+    ctx.ellipse(x - 20, y - 20, 12, 8 * aspectRatio, -0.5, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  function drawSandbagIcon(cx, cy, size, letter) {
+    // Sandbag pouch - teardrop/pear shape with gathered top
+    const w = size;
+    const h = size * 1.3 * aspectRatio;
+
+    ctx.save();
+    ctx.translate(cx, cy);
+
+    // Main bag body - rounded bottom, tapered top
+    ctx.fillStyle = '#C9A66B'; // Burlap tan color
+    ctx.beginPath();
+    // Start at top center (gathered point)
+    ctx.moveTo(0, -h * 0.5);
+    // Left side curve down to bottom
+    ctx.bezierCurveTo(
+      -w * 0.3, -h * 0.3,  // control point 1
+      -w * 0.55, h * 0.1,   // control point 2
+      -w * 0.45, h * 0.4    // end at bottom left
+    );
+    // Bottom curve
+    ctx.bezierCurveTo(
+      -w * 0.35, h * 0.55,  // control point
+      w * 0.35, h * 0.55,   // control point
+      w * 0.45, h * 0.4     // end at bottom right
+    );
+    // Right side curve back up to top
+    ctx.bezierCurveTo(
+      w * 0.55, h * 0.1,    // control point 1
+      w * 0.3, -h * 0.3,    // control point 2
+      0, -h * 0.5           // back to top
+    );
+    ctx.closePath();
+    ctx.fill();
+
+    // Darker shading on right side
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.15)';
+    ctx.beginPath();
+    ctx.moveTo(w * 0.1, -h * 0.35);
+    ctx.bezierCurveTo(
+      w * 0.35, -h * 0.2,
+      w * 0.5, h * 0.15,
+      w * 0.4, h * 0.4
+    );
+    ctx.bezierCurveTo(
+      w * 0.3, h * 0.5,
+      w * 0.1, h * 0.45,
+      0, h * 0.3
+    );
+    ctx.closePath();
+    ctx.fill();
+
+    // Gathered neck/tie area
+    ctx.fillStyle = '#B8956A';
+    ctx.beginPath();
+    ctx.ellipse(0, -h * 0.42, w * 0.2, h * 0.08, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Rope tie - horizontal wrapping
+    ctx.strokeStyle = '#8B7355';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(-w * 0.22, -h * 0.38);
+    ctx.lineTo(w * 0.22, -h * 0.38);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(-w * 0.2, -h * 0.44);
+    ctx.lineTo(w * 0.2, -h * 0.44);
+    ctx.stroke();
+
+    // Rope knot
+    ctx.fillStyle = '#7A6548';
+    ctx.beginPath();
+    ctx.ellipse(w * 0.22, -h * 0.41, 3, 3 * aspectRatio, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Rope tail hanging
+    ctx.strokeStyle = '#8B7355';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(w * 0.24, -h * 0.38);
+    ctx.quadraticCurveTo(w * 0.35, -h * 0.25, w * 0.28, -h * 0.15);
+    ctx.stroke();
+
+    // Letter on bag
+    drawText(letter, 0, h * 0.08, {
+      font: 'bold 14px system-ui, sans-serif',
+      color: '#4A3C2F'
+    });
+
+    ctx.restore();
+  }
+
+  function drawSandbagOption(bag, index) {
+    const isHovered = bag.selected;
+
+    // Sandbag button background
+    ctx.fillStyle = isHovered ? '#6B5D4D' : '#4A3C2F';
+    ctx.beginPath();
+    ctx.roundRect(bag.x, bag.y, bag.w, bag.h * aspectRatio, 10);
+    ctx.fill();
+
+    // Border for separation
+    ctx.strokeStyle = isHovered ? '#8B7D6D' : '#3A2E24';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    // Answer letter badge styled as mini sandbag
+    const letters = ['A', 'B', 'C', 'D'];
+    const badgeX = bag.x + 26;
+    const badgeY = bag.y + (bag.h * aspectRatio) / 2 + 4;
+    const bagScale = bag.sizeScale;
+
+    // Draw sandbag pouch shape
+    drawSandbagIcon(badgeX, badgeY, 18 * bagScale, letters[index]);
+
+    // Answer text (positioned after badge) - uses dynamic font size
+    const textX = bag.x + 45;
+    const textY = bag.y + (bag.h * aspectRatio) / 2;
+    const lines = bag.wrappedText || [bag.choice.text];
+    const fontSize = bag.fontSize || 16;
+    const lineHeight = fontSize + 2;
+    const totalTextHeight = lines.length * lineHeight;
+    const startY = textY - totalTextHeight / 2 + lineHeight / 2;
+
+    lines.forEach((line, i) => {
+      drawText(line, textX + (bag.w - 55) / 2, startY + i * lineHeight, {
+        font: `500 ${fontSize}px 'Nunito Sans', system-ui, sans-serif`,
+        color: '#F5F5F0',
+        align: 'center'
+      });
+    });
+  }
+
+  function handleTouch(e, type) {
+    if (gameState !== 'playing') return;
+    if (animState !== 'idle') return;
+
+    const touch = e.touches[0] || e.changedTouches[0];
+    const { x, y } = screenToLogical(touch.clientX, touch.clientY);
+
+    if (type === 'start') {
+      sandbags.forEach((bag, i) => {
+        const hitBox = { x: bag.x, y: bag.y, w: bag.w, h: bag.h * aspectRatio };
+        if (pointInRect(x, y, hitBox)) {
+          selectedChoice = bag.choice;
+          selectedSandbagIndex = i;
+          bag.selected = true;
+          animState = 'picking';
+          animTimer = 0;
+        }
+      });
+    }
+  }
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 4: GAME LOOP - DO NOT MODIFY                                      ║
+  // ║  Standard loop with responsive scaling and touch handling.                 ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  let lastTime = performance.now();
+
+  function gameLoop(now) {
+    const dt = Math.min((now - lastTime) / 1000, 0.05); // Cap at 50ms
+    lastTime = now;
+
+    // Apply transform for logical coordinate system (non-uniform scaling)
+    ctx.setTransform(scaleX, 0, 0, scaleY, 0, 0);
+
+    if (gameState === 'playing') {
+      updateGame(dt);
+      drawGame();
+    } else {
+      drawGame(); // Draw game state behind overlay
+      drawEndScreen(dt);
+    }
+
+    // Reset transform for next frame
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+    requestAnimationFrame(gameLoop);
+  }
+
+  // Touch handlers
+  function onTouchStart(e) {
+    e.preventDefault();
+    if (gameState === 'ended') {
+      const touch = e.touches[0];
+      const { x, y } = screenToLogical(touch.clientX, touch.clientY);
+
+      if (gameResult) {
+        // Correct answer: check both buttons
+        if (pointInRect(x, y, restartButton)) {
+          gameState = 'playing';
+          gameResult = null;
+          gameExplanation = '';
+          confettiParticles = [];
+          initGame();
+          return;
+        }
+        if (pointInRect(x, y, nextButton)) {
+          // Notify parent to go to next question
+          if (window.parent && window.parent !== window) {
+            window.parent.postMessage({ type: 'quiz-next' }, '*');
+          }
+          return;
+        }
+      } else {
+        // Wrong answer: check centered restart button
+        if (pointInRect(x, y, centeredRestartButton)) {
+          gameState = 'playing';
+          gameResult = null;
+          gameExplanation = '';
+          confettiParticles = [];
+          initGame();
+          return;
+        }
+      }
+    }
+    handleTouch(e, 'start');
+  }
+
+  function onTouchMove(e) {
+    e.preventDefault();
+    handleTouch(e, 'move');
+  }
+
+  function onTouchEnd(e) {
+    e.preventDefault();
+    handleTouch(e, 'end');
+  }
+
+  canvas.addEventListener('touchstart', onTouchStart, { passive: false });
+  canvas.addEventListener('touchmove', onTouchMove, { passive: false });
+  canvas.addEventListener('touchend', onTouchEnd, { passive: false });
+
+  // Also support mouse for testing in browser
+  canvas.addEventListener('mousedown', (e) => {
+    const fakeTouch = { touches: [{ clientX: e.clientX, clientY: e.clientY }], changedTouches: [{ clientX: e.clientX, clientY: e.clientY }] };
+    onTouchStart(fakeTouch);
+  });
+
+  canvas.addEventListener('mouseup', (e) => {
+    const fakeTouch = { touches: [], changedTouches: [{ clientX: e.clientX, clientY: e.clientY }] };
+    onTouchEnd(fakeTouch);
+  });
+
+
+  // Cursor change handler for end screen buttons
+  canvas.addEventListener('mousemove', (e) => {
+    if (gameState !== 'ended') {
+      canvas.style.cursor = 'default';
+      return;
+    }
+    const { x, y } = screenToLogical(e.clientX, e.clientY);
+    if (gameResult) {
+      if (pointInRect(x, y, restartButton) || pointInRect(x, y, nextButton)) {
+        canvas.style.cursor = 'pointer';
+        return;
+      }
+    } else {
+      if (pointInRect(x, y, centeredRestartButton)) {
+        canvas.style.cursor = 'pointer';
+        return;
+      }
+    }
+    canvas.style.cursor = 'default';
+  });
+
+  // Handle resize
+  window.addEventListener('resize', resizeCanvas);
+  window.addEventListener('orientationchange', () => {
+    setTimeout(resizeCanvas, 100); // Delay for orientation change to complete
+  });
+
+  // Prevent pull-to-refresh and overscroll
+  document.body.addEventListener('touchmove', (e) => e.preventDefault(), { passive: false });
+
+  // Initialize
+  resizeCanvas();
+  initGame();
+  requestAnimationFrame(gameLoop);
+  </script>
+</body>
+</html>

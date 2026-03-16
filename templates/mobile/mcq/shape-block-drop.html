@@ -1,0 +1,1311 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <title>Shape Block Drop</title>
+  <link href="https://fonts.googleapis.com/css2?family=Belanosima:wght@400;600;700&family=Nunito+Sans:wght@400;500;600;700&family=Nunito:wght@400;500;600&display=swap" rel="stylesheet">
+  <!--
+  ╔══════════════════════════════════════════════════════════════════════════════╗
+  ║  SHAPE BLOCK DROP - MOBILE MCQ GAME                                          ║
+  ║  Drag blocks with answers into matching shape holes.                         ║
+  ╚══════════════════════════════════════════════════════════════════════════════╝
+  -->
+  <style>
+    /* ═══════════════════════════════════════════════════════════════════════════
+       BASE STYLES - Can be extended, not removed
+       ═══════════════════════════════════════════════════════════════════════════ */
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      touch-action: none;
+      -webkit-touch-callout: none;
+      -webkit-user-select: none;
+      user-select: none;
+    }
+    body {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      background: #1C1C1A;
+      font-family: 'Nunito Sans', system-ui, -apple-system, sans-serif;
+    }
+    #gameCanvas {
+      background: #1C1C1A;
+      width: 100vw;
+      height: 100vh;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="gameCanvas"></canvas>
+
+  <script>
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 1: QUESTION PLACEHOLDER - DO NOT MODIFY FORMAT                    ║
+  // ║  Platform replaces this at runtime. Use these exact 60-char answers.       ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  const QUESTION = {
+    type: "mcq",
+    prompt: "Sample question text",
+    choices: [
+      { text: "This is sample answer A which is long enough to test text overflow", is_correct: true, explanation: "Why A is correct" },
+      { text: "This is sample answer B which is long enough to test text overflow", is_correct: false, explanation: "Why B is wrong" },
+      { text: "This is sample answer C which is long enough to test text overflow", is_correct: false, explanation: "Why C is wrong" },
+      { text: "This is sample answer D which is long enough to test text overflow", is_correct: false, explanation: "Why D is wrong" }
+    ],
+    isLastQuestion: false
+  };
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 2: ENGINE CORE (MOBILE) - DO NOT MODIFY                           ║
+  // ║  Non-uniform scaling (fills container), touch input, tap-to-restart.       ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  const canvas = document.getElementById('gameCanvas');
+  const ctx = canvas.getContext('2d');
+
+  // Logical dimensions (game code works in this coordinate space)
+  const W = 360, H = 640;
+
+  // Scaling state (computed on resize)
+  let scaleX = 1;
+  let scaleY = 1;
+  let aspectRatio = 1;  // scaleX/scaleY - use for proportional shapes
+
+  // Game state
+  let gameState = 'playing'; // 'playing' | 'ended'
+  let gameResult = null;     // true (correct) | false (wrong)
+  let gameExplanation = '';
+  let endScreenTime = 0;
+  let confettiParticles = [];
+
+  // End screen button bounds (logical coordinates)
+  const restartButton = { x: 20, y: H / 2 + 50, w: 155, h: 56 };
+  const nextButton = { x: 185, y: H / 2 + 50, w: 155, h: 56 };
+  // Centered restart button for wrong answers
+  const centeredRestartButton = { x: W / 2 - 100, y: H / 2 + 50, w: 200, h: 56 };
+
+  /** Draw a styled button with aspect-ratio aware text */
+  function drawMobileButton(rect, label, color, pulse) {
+    const textAdj = getTextScaleAdjustment();
+    const p = pulse ? 1 + Math.sin(endScreenTime * 4) * 0.03 : 1;
+
+    ctx.save();
+    ctx.translate(rect.x + rect.w / 2, rect.y + rect.h / 2);
+    ctx.scale(p, p);
+    ctx.translate(-(rect.x + rect.w / 2), -(rect.y + rect.h / 2));
+
+    // Button background
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.roundRect(rect.x, rect.y, rect.w, rect.h, 12);
+    ctx.fill();
+
+    // Button text (aspect-ratio aware)
+    ctx.save();
+    ctx.translate(rect.x + rect.w / 2, rect.y + rect.h / 2);
+    ctx.scale(textAdj / aspectRatio, textAdj);
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = 'bold 18px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, 0, 0);
+    ctx.restore();
+
+    ctx.restore();
+  }
+
+  /**
+   * Resize canvas to fill viewport completely (no letterboxing).
+   * Uses non-uniform scaling - game code works in 360×640 logical space.
+   * Use aspectRatio to draw proportionally correct shapes.
+   */
+  function resizeCanvas() {
+    const dpr = window.devicePixelRatio || 1;
+
+    // Physical canvas size (actual pixels)
+    canvas.width = window.innerWidth * dpr;
+    canvas.height = window.innerHeight * dpr;
+
+    // CSS size (fills viewport)
+    canvas.style.width = window.innerWidth + 'px';
+    canvas.style.height = window.innerHeight + 'px';
+
+    // Non-uniform scaling to fill entire canvas
+    scaleX = canvas.width / W;
+    scaleY = canvas.height / H;
+
+    // Aspect ratio for proportional shape drawing
+    // >1 means container is wider than logical space
+    // <1 means container is taller than logical space
+    aspectRatio = scaleX / scaleY;
+
+    // Recalculate text sizing on resize (implement this in SECTION 3)
+    if (typeof recalculateTextSizing === 'function') {
+      recalculateTextSizing();
+    }
+  }
+
+  // === ASPECT-RATIO-AWARE TEXT WITH CLAMPED SCALING ===
+  // Text gets stretched by non-uniform scaling, so we compensate.
+  // Also clamp the effective scale to keep text legible at all sizes.
+  const TEXT_SCALE_MIN = 0.75;
+  const TEXT_SCALE_MAX = 1.4;
+
+  function getTextScaleAdjustment() {
+    const baseScale = window.innerHeight / H;
+    const clampedScale = Math.min(TEXT_SCALE_MAX, Math.max(TEXT_SCALE_MIN, baseScale));
+    return clampedScale / baseScale;
+  }
+
+  /**
+   * Draw text with aspect-ratio compensation and clamped scaling.
+   * Use this instead of raw ctx.fillText() to prevent text stretching.
+   * Default font is 16px (minimum for answer text). Use 18-20px for better readability.
+   */
+  function drawText(text, x, y, options = {}) {
+    const { font = "500 16px system-ui, sans-serif", color = '#F5F5F0', align = 'center', baseline = 'middle' } = options;
+    ctx.save();
+    ctx.translate(x, y);
+    const adj = getTextScaleAdjustment();
+    ctx.scale(adj / aspectRatio, adj);
+    ctx.font = font;
+    ctx.fillStyle = color;
+    ctx.textAlign = align;
+    ctx.textBaseline = baseline;
+    ctx.fillText(text, 0, 0);
+    ctx.restore();
+  }
+
+  /**
+   * Convert screen coordinates to logical coordinates.
+   * Use this in handleTouch to get positions in 360×640 space.
+   */
+  function screenToLogical(screenX, screenY) {
+    const dpr = window.devicePixelRatio || 1;
+    const rect = canvas.getBoundingClientRect();
+    const canvasX = (screenX - rect.left) * dpr;
+    const canvasY = (screenY - rect.top) * dpr;
+    return {
+      x: canvasX / scaleX,
+      y: canvasY / scaleY
+    };
+  }
+
+  /**
+   * Check if a point is inside a rectangle (logical coordinates).
+   */
+  function pointInRect(px, py, rect) {
+    return px >= rect.x && px <= rect.x + rect.w &&
+           py >= rect.y && py <= rect.y + rect.h;
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // TEXT UTILITIES - Dynamic wrapping and font sizing
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  /**
+   * Wrap text to fit within a maximum width (in logical coordinates).
+   * Accounts for canvas transforms applied by drawText().
+   *
+   * @param {string} text - The text to wrap
+   * @param {number} maxWidth - Maximum width in logical coordinates
+   * @param {string} font - CSS font string (e.g., "16px 'Nunito', sans-serif")
+   * @param {number} maxLines - Maximum number of lines (default 3)
+   * @returns {string[]} Array of text lines
+   */
+  function wrapText(text, maxWidth, font, maxLines = 3) {
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.font = font;
+    const adj = getTextScaleAdjustment();
+    const maxRawWidth = maxWidth * aspectRatio / adj;
+    const words = text.split(' ');
+    const lines = [];
+    let currentLine = '';
+    words.forEach(word => {
+      const testLine = currentLine ? currentLine + ' ' + word : word;
+      if (ctx.measureText(testLine).width > maxRawWidth && currentLine) {
+        lines.push(currentLine);
+        currentLine = word;
+      } else {
+        currentLine = testLine;
+      }
+    });
+    if (currentLine) lines.push(currentLine);
+    ctx.restore();
+    return lines.slice(0, maxLines);
+  }
+
+  /**
+   * Find the optimal font size to fit content in available space.
+   * Tries font sizes from max to min until content fits.
+   *
+   * @param {Object} options
+   * @param {string[]} options.texts - Array of text strings to fit
+   * @param {number} options.maxWidth - Maximum width for text wrapping
+   * @param {number} options.availableHeight - Total height available for all texts
+   * @param {number} options.minFont - Minimum font size (default 12)
+   * @param {number} options.maxFont - Maximum font size (default 18)
+   * @param {number} options.itemPadding - Vertical padding per text item (default 4)
+   * @param {string} options.fontFamily - Font family (default "'Nunito Sans', sans-serif")
+   * @returns {{ fontSize: number, wrappedTexts: string[][] }} Optimal font size and pre-wrapped texts
+   */
+  function findOptimalFontSize(options) {
+    const {
+      texts,
+      maxWidth,
+      availableHeight,
+      minFont = 12,
+      maxFont = 18,
+      itemPadding = 4,
+      fontFamily = "'Nunito Sans', sans-serif"
+    } = options;
+
+    let bestFontSize = minFont;
+    let bestWrappedTexts = [];
+
+    for (let fontSize = maxFont; fontSize >= minFont; fontSize -= 0.5) {
+      const font = `${fontSize}px ${fontFamily}`;
+      const lineHeight = fontSize + 2;
+
+      let totalHeight = 0;
+      const wrappedTexts = [];
+
+      for (const text of texts) {
+        const lines = wrapText(text, maxWidth, font);
+        wrappedTexts.push(lines);
+        totalHeight += itemPadding + lines.length * lineHeight;
+      }
+
+      if (totalHeight <= availableHeight) {
+        bestFontSize = fontSize;
+        bestWrappedTexts = wrappedTexts;
+        break;
+      }
+
+      bestWrappedTexts = wrappedTexts;
+    }
+
+    return { fontSize: bestFontSize, wrappedTexts: bestWrappedTexts };
+  }
+
+  const engine = {
+    /** Call this to end the game. DO NOT draw your own end screen. */
+    end(isCorrect, explanation) {
+      if (gameState === 'ended') return;
+      gameState = 'ended';
+      gameResult = isCorrect;
+      gameExplanation = explanation || '';
+      endScreenTime = 0;
+
+      // Spawn confetti for correct answers
+      if (isCorrect) {
+        for (let i = 0; i < 50; i++) {
+          confettiParticles.push({
+            x: W / 2,
+            y: H / 2,
+            vx: (Math.random() - 0.5) * 400,
+            vy: -Math.random() * 300 - 80,
+            size: 4 + Math.random() * 6,
+            color: ['#FFD700', '#FF6B6B', '#4ECDC4', '#95E1D3', '#F38181'][Math.floor(Math.random() * 5)],
+            rotation: Math.random() * Math.PI * 2,
+            rotationSpeed: (Math.random() - 0.5) * 10
+          });
+        }
+      }
+
+      // Notify parent frame
+      if (window.parent && window.parent !== window) {
+        window.parent.postMessage({
+          type: 'quiz-end',
+          isCorrect: isCorrect,
+          explanation: explanation || ''
+        }, '*');
+      }
+    }
+  };
+
+  /** STANDARD END SCREEN (MOBILE) - DO NOT MODIFY */
+  function drawEndScreen(dt) {
+    endScreenTime += dt;
+
+    // Update confetti
+    confettiParticles = confettiParticles.filter(p => {
+      p.vy += 600 * dt; // gravity
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.rotation += p.rotationSpeed * dt;
+      p.vx *= 0.99;
+      return p.y < H + 50;
+    });
+
+    // Dark overlay
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
+    ctx.fillRect(0, 0, W, H);
+
+    // Draw confetti
+    confettiParticles.forEach(p => {
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rotation);
+      ctx.fillStyle = p.color;
+      ctx.fillRect(-p.size / 2, -p.size / 4, p.size, p.size / 2);
+      ctx.restore();
+    });
+
+    // Result emoji (aspect-ratio aware)
+    const textAdj = getTextScaleAdjustment();
+    ctx.save();
+    ctx.translate(W / 2, H / 2 - 80);
+    ctx.scale(textAdj / aspectRatio, textAdj);
+    ctx.font = '64px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(gameResult ? '🎉' : '😢', 0, 0);
+    ctx.restore();
+
+    // Result text (aspect-ratio aware)
+    ctx.save();
+    ctx.translate(W / 2, H / 2 - 10);
+    ctx.scale(textAdj / aspectRatio, textAdj);
+    ctx.fillStyle = gameResult ? '#4ADE80' : '#F87171';
+    ctx.font = 'bold 32px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(gameResult ? 'Correct!' : 'Wrong!', 0, 0);
+    ctx.restore();
+
+    // Buttons
+    if (gameResult) {
+      // Correct: show both Restart and Next/Finish
+      drawMobileButton(restartButton, 'Restart', '#E87A3E', true);
+      const nextLabel = QUESTION.isLastQuestion ? 'Finish' : 'Next';
+      drawMobileButton(nextButton, nextLabel, '#4ECDC4', true);
+    } else {
+      // Wrong: show only centered Restart button
+      drawMobileButton(centeredRestartButton, 'Restart', '#E87A3E', true);
+    }
+  }
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 3: YOUR GAME CODE - SHAPE BLOCK DROP                              ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+
+  // Colors
+  const COLORS = {
+    bgPrimary: '#1C1C1A',
+    bgSurface: '#2A2A27',
+    orange: '#E87A3E',
+    amber: '#F5A742',
+    cyan: '#4ECDC4',
+    peach: '#FFB89D',
+    textPrimary: '#F5F5F0',
+    textSecondary: '#C2C2B8',
+    borderSubtle: '#424240',
+    success: '#6BBF59',
+    error: '#E85D4A'
+  };
+
+  // Reduced motion preference
+  const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // AUDIO SYSTEM - Web Audio API
+  // ═══════════════════════════════════════════════════════════════════════════
+  let audioCtx = null;
+
+  function initAudio() {
+    if (!audioCtx) {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    if (audioCtx.state === 'suspended') {
+      audioCtx.resume();
+    }
+  }
+
+  function playSound(type) {
+    if (!audioCtx) return;
+    try {
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+
+      const now = audioCtx.currentTime;
+
+      if (type === 'pickup') {
+        // Quick chirp when picking up block
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(400, now);
+        osc.frequency.exponentialRampToValueAtTime(600, now + 0.08);
+        gain.gain.setValueAtTime(0.15, now);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.1);
+        osc.start(now);
+        osc.stop(now + 0.1);
+      } else if (type === 'snap') {
+        // Satisfying snap/click when block fits
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(800, now);
+        osc.frequency.exponentialRampToValueAtTime(400, now + 0.05);
+        gain.gain.setValueAtTime(0.2, now);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.08);
+        osc.start(now);
+        osc.stop(now + 0.08);
+      } else if (type === 'correct') {
+        // Ascending cheerful ding
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(523, now);
+        osc.frequency.setValueAtTime(659, now + 0.1);
+        osc.frequency.setValueAtTime(784, now + 0.2);
+        gain.gain.setValueAtTime(0.25, now);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.4);
+        osc.start(now);
+        osc.stop(now + 0.4);
+      } else if (type === 'wrong') {
+        // Sympathetic low buzz
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(150, now);
+        osc.frequency.exponentialRampToValueAtTime(100, now + 0.25);
+        gain.gain.setValueAtTime(0.1, now);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.25);
+        osc.start(now);
+        osc.stop(now + 0.25);
+      } else if (type === 'hover') {
+        // Subtle hover indication
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(600, now);
+        gain.gain.setValueAtTime(0.05, now);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.05);
+        osc.start(now);
+        osc.stop(now + 0.05);
+      }
+    } catch (e) {
+      // Audio failed, continue silently
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // PARTICLE SYSTEM
+  // ═══════════════════════════════════════════════════════════════════════════
+  let particles = [];
+
+  function spawnParticleBurst(x, y, color, count = 15) {
+    if (prefersReducedMotion) return;
+    const colors = [color, COLORS.orange, COLORS.amber, COLORS.cyan];
+    for (let i = 0; i < count; i++) {
+      const angle = (Math.PI * 2 / count) * i + Math.random() * 0.5;
+      const speed = 80 + Math.random() * 120;
+      particles.push({
+        x, y,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed,
+        color: colors[Math.floor(Math.random() * colors.length)],
+        size: 4 + Math.random() * 6,
+        alpha: 1,
+        life: 0.6 + Math.random() * 0.3
+      });
+    }
+  }
+
+  function updateParticles(dt) {
+    particles = particles.filter(p => {
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.vx *= 0.96;
+      p.vy *= 0.96;
+      p.life -= dt;
+      p.alpha = Math.max(0, p.life / 0.6);
+      p.size *= 0.98;
+      return p.life > 0;
+    });
+  }
+
+  function drawParticles() {
+    particles.forEach(p => {
+      ctx.save();
+      ctx.globalAlpha = p.alpha;
+      ctx.fillStyle = p.color;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.size / 2, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    });
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // ANIMATION HELPERS
+  // ═══════════════════════════════════════════════════════════════════════════
+  let gameTime = 0;
+  let entranceComplete = false;
+
+  function bounceInBlocks() {
+    if (prefersReducedMotion) {
+      blocks.forEach(b => { b.scale = 1; b.alpha = 1; });
+      entranceComplete = true;
+      return;
+    }
+    blocks.forEach((block, i) => {
+      block.scale = 0;
+      block.alpha = 0;
+      setTimeout(() => {
+        const start = performance.now();
+        const duration = 400;
+        const animate = (now) => {
+          const t = Math.min((now - start) / duration, 1);
+          const spring = 1 + Math.sin(t * Math.PI * 2) * 0.25 * (1 - t);
+          block.scale = t * spring;
+          block.alpha = Math.min(1, t * 1.5);
+          if (t < 1) {
+            requestAnimationFrame(animate);
+          } else {
+            block.scale = 1;
+            block.alpha = 1;
+            if (i === blocks.length - 1) entranceComplete = true;
+          }
+        };
+        requestAnimationFrame(animate);
+      }, i * 100);
+    });
+  }
+
+  function snapAnimation(block, hole, onComplete) {
+    if (prefersReducedMotion) {
+      onComplete();
+      return;
+    }
+    const startX = block.x;
+    const startY = block.y;
+    const targetX = hole.x;
+    const targetY = hole.y;
+    const start = performance.now();
+    const duration = 200;
+
+    const animate = (now) => {
+      const t = Math.min((now - start) / duration, 1);
+      // Ease-out with slight overshoot
+      const eased = 1 - Math.pow(1 - t, 3);
+      block.x = startX + (targetX - startX) * eased;
+      block.y = startY + (targetY - startY) * eased;
+      block.snapScale = 1 + Math.sin(t * Math.PI) * 0.15;
+
+      if (t < 1) {
+        requestAnimationFrame(animate);
+      } else {
+        block.x = targetX;
+        block.y = targetY;
+        block.snapScale = 1;
+        onComplete();
+      }
+    };
+    requestAnimationFrame(animate);
+  }
+
+  function shakeBlock(block) {
+    if (prefersReducedMotion) return;
+    const originalX = block.originalX;
+    const start = performance.now();
+    const duration = 400;
+
+    const animate = (now) => {
+      const t = Math.min((now - start) / duration, 1);
+      const decay = 1 - t;
+      block.x = originalX + Math.sin(t * Math.PI * 8) * 10 * decay;
+      if (t < 1) {
+        requestAnimationFrame(animate);
+      } else {
+        block.x = originalX;
+      }
+    };
+    requestAnimationFrame(animate);
+  }
+
+  // Shape types
+  const SHAPES = ['circle', 'square', 'triangle', 'star'];
+  const SHAPE_COLORS = [COLORS.orange, COLORS.cyan, COLORS.amber, COLORS.peach];
+
+  // Game state
+  let blocks = [];
+  let holes = [];
+  let draggedBlock = null;
+  let dragOffset = { x: 0, y: 0 };
+  let placedBlocks = []; // Blocks that have been placed in holes
+  let hoveredHole = null; // Track which hole is being hovered over
+  let lastHoveredHole = null; // For sound trigger
+
+  function shuffleArray(array) {
+    const shuffled = [...array];
+    for (let i = shuffled.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+    }
+    return shuffled;
+  }
+
+  function initGame() {
+    placedBlocks = [];
+    draggedBlock = null;
+    hoveredHole = null;
+    lastHoveredHole = null;
+    particles = [];
+    gameTime = 0;
+    entranceComplete = false;
+
+    // Create holes at the bottom - horizontal row of 4
+    const holeSize = 60;
+    const holeGap = 15;
+    const totalHolesWidth = holeSize * 4 + holeGap * 3;
+    const holesStartX = (W - totalHolesWidth) / 2;
+    const holesStartY = 500;
+
+    holes = SHAPES.map((shape, i) => ({
+      shape: shape,
+      x: holesStartX + i * (holeSize + holeGap),
+      y: holesStartY,
+      size: holeSize,
+      color: SHAPE_COLORS[i],
+      filled: false,
+      glowIntensity: 0 // For highlight animation
+    }));
+
+    // Create blocks with answers - horizontal cards stacked vertically
+    // Each card: shape on left, text on right
+    const blockWidth = 320;
+    const blockHeight = 75;
+    const shapeSize = 50;
+    const blockGap = 12;
+    const blocksStartX = (W - blockWidth) / 2;
+    const blocksStartY = 25;
+
+    // Shuffle blocks so they're not in order
+    const shuffledIndices = shuffleArray([0, 1, 2, 3]);
+
+    blocks = QUESTION.choices.map((choice, i) => {
+      const shapeIndex = shuffledIndices[i];
+      return {
+        choice: choice,
+        shape: SHAPES[shapeIndex],
+        shapeIndex: shapeIndex,
+        x: blocksStartX,
+        y: blocksStartY + i * (blockHeight + blockGap),
+        originalX: blocksStartX,
+        originalY: blocksStartY + i * (blockHeight + blockGap),
+        w: blockWidth,
+        h: blockHeight,
+        shapeSize: shapeSize,
+        size: shapeSize, // For compatibility with drawShape and hole matching
+        color: SHAPE_COLORS[shapeIndex],
+        placed: false,
+        // Animation properties
+        scale: 0,
+        alpha: 0,
+        snapScale: 1,
+        bobOffset: Math.random() * Math.PI * 2 // Random phase for bobbing
+      };
+    });
+
+    // Trigger entrance animation
+    bounceInBlocks();
+  }
+
+  function drawShape(shape, cx, cy, size, color, filled = true, strokeWidth = 3) {
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.scale(1, aspectRatio);
+
+    if (filled) {
+      ctx.fillStyle = color;
+    }
+    ctx.strokeStyle = color;
+    ctx.lineWidth = strokeWidth;
+
+    ctx.beginPath();
+
+    switch (shape) {
+      case 'circle':
+        ctx.arc(0, 0, size / 2 - 4, 0, Math.PI * 2);
+        break;
+      case 'square':
+        const halfSize = size / 2 - 4;
+        ctx.rect(-halfSize, -halfSize, halfSize * 2, halfSize * 2);
+        break;
+      case 'triangle':
+        const r = size / 2 - 4;
+        ctx.moveTo(0, -r);
+        ctx.lineTo(r * Math.cos(Math.PI / 6), r * Math.sin(Math.PI / 6));
+        ctx.lineTo(-r * Math.cos(Math.PI / 6), r * Math.sin(Math.PI / 6));
+        ctx.closePath();
+        break;
+      case 'star':
+        const outerR = size / 2 - 4;
+        const innerR = outerR * 0.5;
+        for (let i = 0; i < 5; i++) {
+          const outerAngle = (i * 72 - 90) * Math.PI / 180;
+          const innerAngle = ((i * 72) + 36 - 90) * Math.PI / 180;
+          if (i === 0) {
+            ctx.moveTo(Math.cos(outerAngle) * outerR, Math.sin(outerAngle) * outerR);
+          } else {
+            ctx.lineTo(Math.cos(outerAngle) * outerR, Math.sin(outerAngle) * outerR);
+          }
+          ctx.lineTo(Math.cos(innerAngle) * innerR, Math.sin(innerAngle) * innerR);
+        }
+        ctx.closePath();
+        break;
+    }
+
+    if (filled) {
+      ctx.fill();
+    }
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  function wrapTextLocal(text, maxWidth, fontSize) {
+    const words = text.split(' ');
+    const lines = [];
+    let currentLine = '';
+
+    // Approximate character width (tighter estimate for Nunito)
+    const charWidth = fontSize * 0.55;
+    const maxChars = Math.floor(maxWidth / charWidth);
+
+    words.forEach(word => {
+      const testLine = currentLine ? currentLine + ' ' + word : word;
+      if (testLine.length <= maxChars) {
+        currentLine = testLine;
+      } else {
+        if (currentLine) lines.push(currentLine);
+        currentLine = word;
+      }
+    });
+    if (currentLine) lines.push(currentLine);
+
+    return lines.slice(0, 4); // Max 4 lines to fit 60+ chars
+  }
+
+  function drawGame() {
+    // Clear canvas
+    ctx.fillStyle = COLORS.bgPrimary;
+    ctx.fillRect(0, 0, W, H);
+
+    // Draw dividing line above drop zone
+    ctx.strokeStyle = COLORS.borderSubtle;
+    ctx.lineWidth = 2;
+    ctx.setLineDash([8, 4]);
+    ctx.beginPath();
+    ctx.moveTo(20, 455);
+    ctx.lineTo(W - 20, 455);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Draw "Drop Zone" label
+    drawText('Drop Zone', W / 2, 478, {
+      font: "600 14px 'Nunito Sans', sans-serif",
+      color: COLORS.textSecondary
+    });
+
+    // Draw holes (drop targets) - horizontal row at bottom
+    holes.forEach(hole => {
+      // Glow effect when hovering matching block
+      if (hole.glowIntensity > 0) {
+        ctx.save();
+        ctx.shadowColor = hole.color;
+        ctx.shadowBlur = 20 * hole.glowIntensity;
+        ctx.fillStyle = hole.color + '30';
+        ctx.beginPath();
+        ctx.roundRect(hole.x - 6, hole.y - 6, hole.size + 12, hole.size * aspectRatio + 12, 12);
+        ctx.fill();
+        ctx.restore();
+      }
+
+      // Hole background
+      ctx.fillStyle = hole.glowIntensity > 0 ? COLORS.bgSurface + 'FF' : COLORS.bgSurface;
+      ctx.beginPath();
+      ctx.roundRect(hole.x - 4, hole.y - 4, hole.size + 8, hole.size * aspectRatio + 8, 10);
+      ctx.fill();
+
+      // Draw shape outline (hole)
+      if (!hole.filled) {
+        const pulseAlpha = hole.glowIntensity > 0 ? 'A0' : '60';
+        drawShape(
+          hole.shape,
+          hole.x + hole.size / 2,
+          hole.y + (hole.size * aspectRatio) / 2,
+          hole.size,
+          hole.color + pulseAlpha,
+          false,
+          hole.glowIntensity > 0 ? 4 : 3
+        );
+      }
+    });
+
+    // Draw placed blocks in holes
+    placedBlocks.forEach(placed => {
+      drawShape(
+        placed.shape,
+        placed.x + placed.size / 2,
+        placed.y + (placed.size * aspectRatio) / 2,
+        placed.size,
+        placed.color,
+        true
+      );
+    });
+
+    // Draw blocks (not being dragged, not placed, not snapping) - horizontal cards
+    blocks.filter(b => b !== draggedBlock && !b.placed && !b.snapping).forEach(block => {
+      // Skip if not yet visible (entrance animation)
+      if (block.alpha <= 0) return;
+
+      ctx.save();
+
+      // Apply alpha for entrance animation
+      ctx.globalAlpha = block.alpha;
+
+      // Calculate bobbing offset for idle blocks
+      let bobY = 0;
+      if (entranceComplete && !prefersReducedMotion) {
+        bobY = Math.sin(gameTime * 2 + block.bobOffset) * 2;
+      }
+
+      // Calculate scale (entrance + snap animations)
+      const totalScale = block.scale * block.snapScale;
+
+      // Transform for scale animation
+      const centerX = block.x + block.w / 2;
+      const centerY = block.y + block.h / 2 + bobY;
+
+      ctx.translate(centerX, centerY);
+      ctx.scale(totalScale, totalScale);
+      ctx.translate(-centerX, -centerY);
+
+      // Block card background
+      ctx.fillStyle = COLORS.bgSurface;
+      ctx.beginPath();
+      ctx.roundRect(block.x, block.y + bobY, block.w, block.h, 12);
+      ctx.fill();
+
+      // Draw shape on left side
+      const shapeX = block.x + 45;
+      const shapeY = block.y + block.h / 2 + bobY;
+      drawShape(
+        block.shape,
+        shapeX,
+        shapeY,
+        block.shapeSize,
+        block.color,
+        true
+      );
+
+      // Draw answer text on right side (wrapped, 16px min font)
+      const textX = block.x + 90; // Start after shape area
+      const textWidth = block.w - 100; // Available width for text
+      const lines = wrapTextLocal(block.choice.text, textWidth, 16);
+      const lineHeight = 18;
+      const textStartY = block.y + (block.h - lines.length * lineHeight) / 2 + lineHeight / 2 + bobY;
+
+      lines.forEach((line, i) => {
+        drawText(line, textX + textWidth / 2, textStartY + i * lineHeight, {
+          font: "500 16px 'Nunito', sans-serif",
+          color: COLORS.textPrimary
+        });
+      });
+
+      ctx.restore();
+    });
+
+    // Draw snapping blocks (during snap animation)
+    blocks.filter(b => b.snapping && !b.placed).forEach(block => {
+      const shapeSize = block.shapeSize || block.size;
+      const scale = block.snapScale || 1;
+      const centerX = block.x + shapeSize / 2;
+      const centerY = block.y + (shapeSize * aspectRatio) / 2;
+
+      ctx.save();
+      ctx.translate(centerX, centerY);
+      ctx.scale(scale, scale);
+      ctx.translate(-centerX, -centerY);
+
+      // Background
+      ctx.fillStyle = COLORS.bgSurface;
+      ctx.beginPath();
+      ctx.roundRect(block.x - 8, block.y - 8, shapeSize + 16, shapeSize * aspectRatio + 16, 12);
+      ctx.fill();
+
+      // Draw shape
+      drawShape(
+        block.shape,
+        block.x + shapeSize / 2,
+        block.y + (shapeSize * aspectRatio) / 2,
+        shapeSize,
+        block.color,
+        true
+      );
+
+      ctx.restore();
+    });
+
+    // Draw dragged block on top (just the shape, not full card)
+    if (draggedBlock) {
+      const scale = (draggedBlock.snapScale || 1) * 1.1;
+      const shapeSize = draggedBlock.shapeSize || draggedBlock.size;
+      const centerX = draggedBlock.x + shapeSize / 2;
+      const centerY = draggedBlock.y + (shapeSize * aspectRatio) / 2;
+
+      ctx.save();
+      ctx.translate(centerX, centerY);
+      ctx.scale(scale, scale);
+      ctx.translate(-centerX, -centerY);
+
+      // Shadow
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
+      ctx.beginPath();
+      ctx.roundRect(draggedBlock.x - 6, draggedBlock.y + 4, shapeSize + 12, shapeSize * aspectRatio + 8, 10);
+      ctx.fill();
+
+      // Background circle/pill
+      ctx.fillStyle = COLORS.bgSurface;
+      ctx.beginPath();
+      ctx.roundRect(draggedBlock.x - 8, draggedBlock.y - 8, shapeSize + 16, shapeSize * aspectRatio + 16, 12);
+      ctx.fill();
+
+      // Draw shape
+      drawShape(
+        draggedBlock.shape,
+        draggedBlock.x + shapeSize / 2,
+        draggedBlock.y + (shapeSize * aspectRatio) / 2,
+        shapeSize,
+        draggedBlock.color,
+        true
+      );
+
+      ctx.restore();
+    }
+
+    // Draw particles on top
+    drawParticles();
+  }
+
+  function updateGame(dt) {
+    if (gameState !== 'playing') return;
+
+    // Update game time for bobbing animation
+    gameTime += dt;
+
+    // Update particles
+    updateParticles(dt);
+
+    // Update hole glow effects based on dragged block position
+    holes.forEach(hole => {
+      if (hole.filled) {
+        hole.glowIntensity = 0;
+        return;
+      }
+
+      if (draggedBlock && draggedBlock.shape === hole.shape) {
+        // Check distance from dragged shape to hole
+        const shapeSize = draggedBlock.shapeSize || draggedBlock.size;
+        const blockCX = draggedBlock.x + shapeSize / 2;
+        const blockCY = draggedBlock.y + (shapeSize * aspectRatio) / 2;
+        const holeCX = hole.x + hole.size / 2;
+        const holeCY = hole.y + (hole.size * aspectRatio) / 2;
+        const dist = Math.sqrt((blockCX - holeCX) ** 2 + ((blockCY - holeCY) / aspectRatio) ** 2);
+
+        // Glow intensity based on proximity (within 150 pixels)
+        const maxDist = 150;
+        if (dist < maxDist) {
+          const targetGlow = 1 - (dist / maxDist);
+          hole.glowIntensity += (targetGlow - hole.glowIntensity) * 10 * dt;
+
+          // Play hover sound when entering glow range
+          if (hole !== lastHoveredHole && hole.glowIntensity > 0.5) {
+            playSound('hover');
+            lastHoveredHole = hole;
+          }
+        } else {
+          hole.glowIntensity *= 0.9;
+        }
+      } else {
+        // Fade out glow for non-matching holes
+        hole.glowIntensity *= 0.9;
+      }
+
+      // Clamp glow intensity
+      if (hole.glowIntensity < 0.01) hole.glowIntensity = 0;
+    });
+
+    // Reset lastHoveredHole when not dragging
+    if (!draggedBlock) {
+      lastHoveredHole = null;
+    }
+  }
+
+  function getBlockAt(x, y) {
+    // Check blocks in reverse order (top-most first)
+    for (let i = blocks.length - 1; i >= 0; i--) {
+      const block = blocks[i];
+      if (block.placed) continue;
+
+      // Expand hit area for easier touch
+      const hitPadding = 10;
+      if (x >= block.x - hitPadding &&
+          x <= block.x + block.w + hitPadding &&
+          y >= block.y - hitPadding &&
+          y <= block.y + block.h + hitPadding) {
+        return block;
+      }
+    }
+    return null;
+  }
+
+  function getHoleAt(x, y) {
+    for (const hole of holes) {
+      if (hole.filled) continue;
+
+      // Check if point is near hole center
+      const holeCX = hole.x + hole.size / 2;
+      const holeCY = hole.y + (hole.size * aspectRatio) / 2;
+      const dist = Math.sqrt((x - holeCX) ** 2 + ((y - holeCY) / aspectRatio) ** 2);
+
+      if (dist < hole.size * 0.7) {
+        return hole;
+      }
+    }
+    return null;
+  }
+
+  function handleTouch(e, type) {
+    if (gameState !== 'playing') return;
+
+    const touch = e.touches[0] || e.changedTouches[0];
+    if (!touch) return;
+
+    const { x, y } = screenToLogical(touch.clientX, touch.clientY);
+
+    if (type === 'start') {
+      // Initialize audio on first touch (required for mobile)
+      initAudio();
+
+      const block = getBlockAt(x, y);
+      if (block) {
+        draggedBlock = block;
+        // Store original card position
+        draggedBlock.cardX = block.x;
+        draggedBlock.cardY = block.y;
+        // Set shape position for dragging (center shape on touch)
+        const shapeSize = block.shapeSize || block.size;
+        draggedBlock.x = x - shapeSize / 2;
+        draggedBlock.y = y - (shapeSize * aspectRatio) / 2;
+        dragOffset.x = shapeSize / 2;
+        dragOffset.y = (shapeSize * aspectRatio) / 2;
+        playSound('pickup');
+      }
+    } else if (type === 'move') {
+      if (draggedBlock) {
+        draggedBlock.x = x - dragOffset.x;
+        draggedBlock.y = y - dragOffset.y;
+      }
+    } else if (type === 'end') {
+      if (draggedBlock) {
+        const shapeSize = draggedBlock.shapeSize || draggedBlock.size;
+        const blockCX = draggedBlock.x + shapeSize / 2;
+        const blockCY = draggedBlock.y + (shapeSize * aspectRatio) / 2;
+        const hole = getHoleAt(blockCX, blockCY);
+
+        if (hole && hole.shape === draggedBlock.shape) {
+          // Play snap sound
+          playSound('snap');
+
+          // Store reference to block for animation
+          const placingBlock = draggedBlock;
+          draggedBlock = null;
+
+          // Mark as snapping so it doesn't flash back as a card
+          placingBlock.snapping = true;
+
+          // Animate snap into hole
+          snapAnimation(placingBlock, hole, () => {
+            // Snap block into hole
+            placingBlock.placed = true;
+            hole.filled = true;
+            hole.glowIntensity = 0;
+
+            // Spawn particle burst at hole center
+            const particleX = hole.x + hole.size / 2;
+            const particleY = hole.y + (hole.size * aspectRatio) / 2;
+            spawnParticleBurst(particleX, particleY, placingBlock.color, 20);
+
+            // Add to placed blocks for drawing
+            placedBlocks.push({
+              shape: placingBlock.shape,
+              x: hole.x,
+              y: hole.y,
+              size: hole.size,
+              color: placingBlock.color
+            });
+
+            // Play success/error sound and end game after short delay
+            const isCorrect = placingBlock.choice.is_correct;
+            setTimeout(() => {
+              playSound(isCorrect ? 'correct' : 'wrong');
+            }, 100);
+
+            // Delay end slightly to show feedback
+            setTimeout(() => {
+              engine.end(isCorrect, placingBlock.choice.explanation);
+            }, isCorrect ? 400 : 300);
+          });
+        } else {
+          // Wrong hole or missed - return to original card position
+          if (hole) {
+            // Tried to put in wrong shape hole - shake feedback
+            playSound('wrong');
+          }
+          // Restore original position
+          draggedBlock.x = draggedBlock.originalX;
+          draggedBlock.y = draggedBlock.originalY;
+          draggedBlock = null;
+        }
+      }
+    }
+  }
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 4: GAME LOOP - DO NOT MODIFY                                      ║
+  // ║  Standard loop with responsive scaling and touch handling.                 ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  let lastTime = performance.now();
+
+  function gameLoop(now) {
+    const dt = Math.min((now - lastTime) / 1000, 0.05); // Cap at 50ms
+    lastTime = now;
+
+    // Apply transform for logical coordinate system (non-uniform scaling)
+    ctx.setTransform(scaleX, 0, 0, scaleY, 0, 0);
+
+    if (gameState === 'playing') {
+      updateGame(dt);
+      drawGame();
+    } else {
+      drawGame(); // Draw game state behind overlay
+      drawEndScreen(dt);
+    }
+
+    // Reset transform for next frame
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+    requestAnimationFrame(gameLoop);
+  }
+
+  // Touch handlers
+  function onTouchStart(e) {
+    e.preventDefault();
+    if (gameState === 'ended') {
+      const touch = e.touches[0];
+      const { x, y } = screenToLogical(touch.clientX, touch.clientY);
+
+      if (gameResult) {
+        // Correct answer: check both buttons
+        if (pointInRect(x, y, restartButton)) {
+          gameState = 'playing';
+          gameResult = null;
+          gameExplanation = '';
+          confettiParticles = [];
+          initGame();
+          return;
+        }
+        if (pointInRect(x, y, nextButton)) {
+          // Notify parent to go to next question
+          if (window.parent && window.parent !== window) {
+            window.parent.postMessage({ type: 'quiz-next' }, '*');
+          }
+          return;
+        }
+      } else {
+        // Wrong answer: check centered restart button
+        if (pointInRect(x, y, centeredRestartButton)) {
+          gameState = 'playing';
+          gameResult = null;
+          gameExplanation = '';
+          confettiParticles = [];
+          initGame();
+          return;
+        }
+      }
+    }
+    handleTouch(e, 'start');
+  }
+
+  function onTouchMove(e) {
+    e.preventDefault();
+    handleTouch(e, 'move');
+  }
+
+  function onTouchEnd(e) {
+    e.preventDefault();
+    handleTouch(e, 'end');
+  }
+
+  canvas.addEventListener('touchstart', onTouchStart, { passive: false });
+  canvas.addEventListener('touchmove', onTouchMove, { passive: false });
+  canvas.addEventListener('touchend', onTouchEnd, { passive: false });
+
+  // Also support mouse for testing in browser
+  canvas.addEventListener('mousedown', (e) => {
+    const fakeTouch = { touches: [{ clientX: e.clientX, clientY: e.clientY }], changedTouches: [{ clientX: e.clientX, clientY: e.clientY }] };
+    onTouchStart(fakeTouch);
+  });
+
+  canvas.addEventListener('mousemove', (e) => {
+    if (draggedBlock) {
+      const fakeTouch = { touches: [{ clientX: e.clientX, clientY: e.clientY }], changedTouches: [{ clientX: e.clientX, clientY: e.clientY }], preventDefault: () => {} };
+      handleTouch(fakeTouch, 'move');
+    }
+  });
+
+  canvas.addEventListener('mouseup', (e) => {
+    const fakeTouch = { touches: [], changedTouches: [{ clientX: e.clientX, clientY: e.clientY }] };
+    onTouchEnd(fakeTouch);
+  });
+
+
+  // Cursor change handler for end screen buttons
+  canvas.addEventListener('mousemove', (e) => {
+    if (gameState !== 'ended') {
+      canvas.style.cursor = 'default';
+      return;
+    }
+    const { x, y } = screenToLogical(e.clientX, e.clientY);
+    if (gameResult) {
+      if (pointInRect(x, y, restartButton) || pointInRect(x, y, nextButton)) {
+        canvas.style.cursor = 'pointer';
+        return;
+      }
+    } else {
+      if (pointInRect(x, y, centeredRestartButton)) {
+        canvas.style.cursor = 'pointer';
+        return;
+      }
+    }
+    canvas.style.cursor = 'default';
+  });
+
+  // Handle resize
+  window.addEventListener('resize', resizeCanvas);
+  window.addEventListener('orientationchange', () => {
+    setTimeout(resizeCanvas, 100); // Delay for orientation change to complete
+  });
+
+  // Prevent pull-to-refresh and overscroll
+  document.body.addEventListener('touchmove', (e) => e.preventDefault(), { passive: false });
+
+  // Initialize
+  resizeCanvas();
+  initGame();
+  requestAnimationFrame(gameLoop);
+  </script>
+</body>
+</html>
