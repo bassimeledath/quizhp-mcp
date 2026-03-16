@@ -31,6 +31,7 @@
     "dev": "tsx watch src/index.ts",
     "start": "node dist/server/index.js",
     "start:stdio": "node dist/server/stdio.js",
+    "build:worker": "node scripts/build-worker-bundle.mjs && tsc",
     "clean": "rm -rf dist"
   },
   "dependencies": {

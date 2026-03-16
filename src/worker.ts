@@ -13,6 +13,7 @@ import {
   RESOURCE_MIME_TYPE,
 } from "@modelcontextprotocol/ext-apps/server";
 import { z } from "zod";
+import { WIDGET_HTML, WORKER_TEMPLATES } from "./worker-bundle.js";
 
 // ── Inline types (Worker can't use Node fs) ──────────────────────────
 
@@ -26,6 +27,51 @@ interface GameSession {
 // ── Simple in-memory store (per-isolate) ─────────────────────────────
 
 const sessions = new Map<string, GameSession>();
+
+// ── Template helpers ─────────────────────────────────────────────────
+
+// Group bundled templates by question type for fast lookup
+const templatesByType = new Map<string, typeof WORKER_TEMPLATES>();
+for (const t of WORKER_TEMPLATES) {
+  if (!templatesByType.has(t.questionType)) templatesByType.set(t.questionType, []);
+  templatesByType.get(t.questionType)!.push(t);
+}
+
+function pickTemplates(questionTypes: string[]): unknown[] {
+  const usedPerType = new Map<string, Set<number>>();
+  const results: unknown[] = [];
+
+  for (const qType of questionTypes) {
+    const candidates = templatesByType.get(qType) ?? [];
+    if (candidates.length === 0) continue;
+
+    if (!usedPerType.has(qType)) usedPerType.set(qType, new Set());
+    const used = usedPerType.get(qType)!;
+    if (used.size >= candidates.length) used.clear();
+
+    let idx: number;
+    do {
+      idx = Math.floor(Math.random() * candidates.length);
+    } while (used.has(idx));
+    used.add(idx);
+
+    const entry = candidates[idx];
+    results.push({
+      id: entry.name,
+      name: entry.name,
+      code: entry.code,
+      game_controls: entry.controls,
+      game_instructions: entry.instructions,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      supported_question_type: entry.questionType,
+      is_active: true,
+      platform: entry.platform,
+    });
+  }
+
+  return results;
+}
 
 function createGame(questions: unknown[], title?: string): GameSession {
   const gameId = `g_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`;
@@ -96,7 +142,7 @@ function corsHeaders(request: Request): HeadersInit {
 
 // ── Create MCP server (per-request, stateless) ───────────────────────
 
-function createMcpServer(widgetHtml: string): McpServer {
+function createMcpServer(): McpServer {
   const server = new McpServer({
     name: "QuizHP",
     version: "1.0.0",
@@ -148,10 +194,9 @@ The quiz renders as interactive mini-games (archery, puzzles, switches, etc.) �
     async ({ questions, title }) => {
       const session = createGame(questions, title ?? undefined);
 
-      // Note: In the Worker environment, templates must be provided by
-      // the client or fetched from an external source since we can't
-      // read from the filesystem. Templates are empty here — the client
-      // structuredContent will carry them if available.
+      const types = questions.map((q: { question_type: string }) => q.question_type);
+      const templates = pickTemplates(types);
+
       return {
         content: [
           {
@@ -163,7 +208,7 @@ The quiz renders as interactive mini-games (archery, puzzles, switches, etc.) �
           gameId: session.gameId,
           questions,
           title: session.title,
-          templates: [],
+          templates,
         } as Record<string, unknown>,
       };
     }
@@ -188,7 +233,7 @@ The quiz renders as interactive mini-games (archery, puzzles, switches, etc.) �
         {
           uri: "ui://quizhp/quiz-app.html",
           mimeType: RESOURCE_MIME_TYPE,
-          text: widgetHtml,
+          text: WIDGET_HTML,
         },
       ],
     })
@@ -231,8 +276,7 @@ export default {
 
       if (request.method === "POST") {
         try {
-          const widgetHtml = `<!DOCTYPE html><html><body><p>QuizHP Worker</p></body></html>`;
-          const server = createMcpServer(widgetHtml);
+          const server = createMcpServer();
 
           const transport = new WebStandardStreamableHTTPServerTransport({
             sessionIdGenerator: undefined,

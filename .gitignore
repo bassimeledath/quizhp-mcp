@@ -3,3 +3,4 @@ dist/
 .dispatch/
 *.tsbuildinfo
 .DS_Store
+src/worker-bundle.ts
