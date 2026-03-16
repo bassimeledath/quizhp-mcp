@@ -246,7 +246,6 @@ export default {
             headers.set(k, v);
           }
 
-          await server.close();
           return new Response(response.body, {
             status: response.status,
             headers,
