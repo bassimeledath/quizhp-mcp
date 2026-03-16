@@ -19,6 +19,7 @@ interface QuizState {
   error: string | null;
   platform: Platform;
   templatePlatform: Platform | null;
+  resetGeneration: number;
 }
 
 interface QuizActions {
@@ -53,6 +54,7 @@ export const useQuizStore = create<QuizStore>((set, get) => ({
   error: null,
   platform: "web",
   templatePlatform: null,
+  resetGeneration: 0,
 
   setQuestions: (questions) => {
     set({
@@ -104,11 +106,12 @@ export const useQuizStore = create<QuizStore>((set, get) => ({
   },
 
   resetQuiz: () => {
-    const { questions } = get();
+    const { questions, resetGeneration } = get();
     set({
       currentQuestionIndex: 0,
       quizCompleted: false,
       feedback: null,
+      resetGeneration: resetGeneration + 1,
       attemptRecords: questions.map(() => ({
         wrongAttempts: 0,
         completed: false,

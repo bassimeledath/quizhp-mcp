@@ -11,6 +11,7 @@ import { GameInfoModal } from "./GameInfoModal";
 import { QuestionCard } from "./QuestionCard";
 import { LoadingSpinner } from "./LoadingSpinner";
 import { ExpandButton } from "./ExpandButton";
+import type { ChoicePayload } from "../types";
 import { injectQuestionIntoTemplate } from "../lib/template-injector";
 
 interface QuizContainerProps {
@@ -50,13 +51,14 @@ export function QuizContainer({
     goToPreviousQuestion,
     resetQuiz,
     setFeedback,
-    handleChoice,
+    handleChoice: rawHandleChoice,
     setLoading,
     setError,
     getCurrentQuestion,
     getCurrentTemplate,
     isFirstQuestion,
     isLastQuestion,
+    resetGeneration,
   } = useQuizStore();
 
   // Derive platform from host context
@@ -67,6 +69,17 @@ export function QuizContainer({
 
   // Derive display mode from host context
   const displayMode = hostContext?.displayMode ?? "inline";
+
+  // Wrap handleChoice to ignore stale postMessages from a previous game session.
+  // After resetQuiz increments resetGeneration, any callback created with the
+  // old generation will see a mismatch and discard the message.
+  const handleChoice = useCallback(
+    (payload: ChoicePayload) => {
+      if (useQuizStore.getState().resetGeneration !== resetGeneration) return;
+      rawHandleChoice(payload);
+    },
+    [rawHandleChoice, resetGeneration]
+  );
 
   const requestDisplayMode = useCallback(
     async (mode: "inline" | "fullscreen" | "pip") => {
@@ -251,6 +264,7 @@ export function QuizContainer({
                 onChoice={handleChoice}
                 onNext={goToNextQuestion}
                 fullscreen
+                displayMode={displayMode}
               />
               <div className="absolute inset-0 bg-black/30 flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity">
                 <div className="bg-white/90 px-4 py-2 rounded-full text-sm font-medium text-gray-700 shadow-lg">
@@ -371,6 +385,7 @@ export function QuizContainer({
             onChoice={handleChoice}
             onNext={goToNextQuestion}
             fullscreen
+            displayMode={displayMode}
           />
           {feedback && (
             <FeedbackToast
@@ -469,6 +484,7 @@ export function QuizContainer({
             onChoice={handleChoice}
             onNext={goToNextQuestion}
             maxHeight={displayMode === "inline" ? "420px" : "480px"}
+            displayMode={displayMode}
           />
           {feedback && (
             <FeedbackToast

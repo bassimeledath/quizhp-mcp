@@ -11,6 +11,7 @@ interface GameRuntimeProps {
   onNext?: () => void;
   fullscreen?: boolean;
   maxHeight?: string;
+  displayMode?: string;
 }
 
 /**
@@ -23,6 +24,7 @@ export function GameRuntime({
   onNext,
   fullscreen = false,
   maxHeight,
+  displayMode,
 }: GameRuntimeProps) {
   const frameRef = useRef<HTMLIFrameElement>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
@@ -41,6 +43,12 @@ export function GameRuntime({
   useEffect(() => {
     frameRef.current?.focus();
   }, [srcDoc]);
+
+  useEffect(() => {
+    if (displayMode === "fullscreen") {
+      frameRef.current?.focus();
+    }
+  }, [displayMode]);
 
   const handleWrapperClick = () => {
     frameRef.current?.focus();
