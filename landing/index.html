@@ -1,0 +1,1155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>QuizHP — Interactive Quiz Games for AI Chat</title>
+  <meta name="description" content="Turn any topic into playable mini-games inside Claude or ChatGPT. 125+ game templates, free and open source.">
+  <meta name="theme-color" content="#0a0a0f">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg-primary: #0a0a0f;
+      --bg-secondary: #111118;
+      --bg-card: #16161f;
+      --bg-card-hover: #1c1c28;
+      --bg-code: #1a1a26;
+      --border: #232333;
+      --border-glow: #3b3b5c;
+      --text-primary: #e8e8f0;
+      --text-secondary: #9494b0;
+      --text-muted: #5e5e7a;
+      --accent: #7c5cfc;
+      --accent-light: #9b7fff;
+      --accent-glow: rgba(124, 92, 252, 0.15);
+      --accent-glow-strong: rgba(124, 92, 252, 0.3);
+      --green: #34d399;
+      --green-glow: rgba(52, 211, 153, 0.15);
+      --orange: #fb923c;
+      --blue: #60a5fa;
+      --pink: #f472b6;
+      --font-body: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+      --max-width: 1120px;
+      --radius: 12px;
+      --radius-sm: 8px;
+    }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      font-family: var(--font-body);
+      background: var(--bg-primary);
+      color: var(--text-primary);
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+      overflow-x: hidden;
+    }
+
+    /* ── Nav ── */
+    nav {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      z-index: 100;
+      padding: 0 24px;
+      background: rgba(10, 10, 15, 0.8);
+      backdrop-filter: blur(20px);
+      border-bottom: 1px solid var(--border);
+    }
+
+    .nav-inner {
+      max-width: var(--max-width);
+      margin: 0 auto;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      height: 64px;
+    }
+
+    .nav-logo {
+      font-weight: 800;
+      font-size: 1.25rem;
+      color: var(--text-primary);
+      text-decoration: none;
+      letter-spacing: -0.02em;
+    }
+
+    .nav-logo span { color: var(--accent-light); }
+
+    .nav-links { display: flex; gap: 32px; align-items: center; }
+    .nav-links a {
+      color: var(--text-secondary);
+      text-decoration: none;
+      font-size: 0.875rem;
+      font-weight: 500;
+      transition: color 0.2s;
+    }
+    .nav-links a:hover { color: var(--text-primary); }
+
+    .nav-cta {
+      background: var(--accent) !important;
+      color: #fff !important;
+      padding: 8px 20px;
+      border-radius: 8px;
+      font-weight: 600 !important;
+      transition: background 0.2s, transform 0.2s !important;
+    }
+    .nav-cta:hover {
+      background: var(--accent-light) !important;
+      transform: translateY(-1px);
+    }
+
+    .nav-hamburger {
+      display: none;
+      background: none;
+      border: none;
+      cursor: pointer;
+      padding: 4px;
+    }
+    .nav-hamburger svg { display: block; }
+
+    /* ── Sections ── */
+    section { padding: 100px 24px; }
+    .container { max-width: var(--max-width); margin: 0 auto; }
+
+    /* ── Hero ── */
+    .hero {
+      padding-top: 160px;
+      padding-bottom: 100px;
+      text-align: center;
+      position: relative;
+    }
+
+    .hero::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 800px;
+      height: 600px;
+      background: radial-gradient(ellipse at center, var(--accent-glow-strong) 0%, transparent 70%);
+      pointer-events: none;
+    }
+
+    .hero-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 16px;
+      border-radius: 100px;
+      border: 1px solid var(--border);
+      background: var(--bg-card);
+      font-size: 0.8rem;
+      font-weight: 500;
+      color: var(--text-secondary);
+      margin-bottom: 32px;
+      animation: fadeInUp 0.6s ease-out;
+    }
+
+    .hero-badge .dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--green);
+      animation: pulse 2s ease-in-out infinite;
+    }
+
+    h1 {
+      font-size: clamp(2.5rem, 6vw, 4.25rem);
+      font-weight: 800;
+      line-height: 1.1;
+      letter-spacing: -0.03em;
+      margin-bottom: 24px;
+      animation: fadeInUp 0.6s ease-out 0.1s both;
+    }
+
+    h1 .gradient {
+      background: linear-gradient(135deg, var(--accent-light), var(--pink), var(--orange));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    .hero-sub {
+      font-size: clamp(1.05rem, 2vw, 1.25rem);
+      color: var(--text-secondary);
+      max-width: 560px;
+      margin: 0 auto 40px;
+      line-height: 1.7;
+      animation: fadeInUp 0.6s ease-out 0.2s both;
+    }
+
+    .hero-buttons {
+      display: flex;
+      gap: 16px;
+      justify-content: center;
+      flex-wrap: wrap;
+      animation: fadeInUp 0.6s ease-out 0.3s both;
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 14px 28px;
+      border-radius: 10px;
+      font-size: 0.95rem;
+      font-weight: 600;
+      text-decoration: none;
+      transition: all 0.2s;
+      cursor: pointer;
+      border: none;
+      font-family: var(--font-body);
+    }
+
+    .btn-primary {
+      background: var(--accent);
+      color: #fff;
+      box-shadow: 0 0 24px var(--accent-glow-strong);
+    }
+    .btn-primary:hover {
+      background: var(--accent-light);
+      transform: translateY(-2px);
+      box-shadow: 0 0 40px var(--accent-glow-strong);
+    }
+
+    .btn-secondary {
+      background: var(--bg-card);
+      color: var(--text-primary);
+      border: 1px solid var(--border);
+    }
+    .btn-secondary:hover {
+      background: var(--bg-card-hover);
+      border-color: var(--border-glow);
+      transform: translateY(-2px);
+    }
+
+    .btn svg { width: 18px; height: 18px; flex-shrink: 0; }
+
+    /* ── Hero visual ── */
+    .hero-visual {
+      margin-top: 64px;
+      position: relative;
+      animation: fadeInUp 0.6s ease-out 0.4s both;
+    }
+
+    .hero-mockup {
+      max-width: 780px;
+      margin: 0 auto;
+      border-radius: 16px;
+      border: 1px solid var(--border);
+      background: var(--bg-secondary);
+      overflow: hidden;
+      box-shadow: 0 32px 64px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(255,255,255,0.03);
+    }
+
+    .mockup-bar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 12px 16px;
+      background: var(--bg-card);
+      border-bottom: 1px solid var(--border);
+    }
+
+    .mockup-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: var(--text-muted);
+      opacity: 0.4;
+    }
+
+    .mockup-content {
+      padding: 32px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .mockup-msg {
+      display: flex;
+      gap: 12px;
+      align-items: flex-start;
+    }
+
+    .mockup-avatar {
+      width: 32px;
+      height: 32px;
+      border-radius: 8px;
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.75rem;
+      font-weight: 700;
+      color: #fff;
+    }
+
+    .avatar-user { background: var(--accent); }
+    .avatar-ai { background: linear-gradient(135deg, var(--green), #2dd4bf); }
+
+    .mockup-bubble {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 14px 18px;
+      font-size: 0.9rem;
+      color: var(--text-secondary);
+      max-width: 480px;
+      line-height: 1.5;
+    }
+
+    .mockup-game {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 24px;
+      max-width: 520px;
+    }
+
+    .game-header {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      margin-bottom: 12px;
+    }
+
+    .game-question {
+      font-size: 0.95rem;
+      font-weight: 600;
+      color: var(--text-primary);
+      margin-bottom: 16px;
+    }
+
+    .game-options {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+
+    .game-option {
+      padding: 10px 14px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: var(--bg-secondary);
+      font-size: 0.85rem;
+      color: var(--text-secondary);
+      text-align: center;
+      transition: all 0.2s;
+    }
+
+    .game-option.active {
+      border-color: var(--accent);
+      background: var(--accent-glow);
+      color: var(--text-primary);
+    }
+
+    /* ── How it works ── */
+    .section-label {
+      font-size: 0.8rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: var(--accent-light);
+      margin-bottom: 16px;
+    }
+
+    .section-title {
+      font-size: clamp(1.75rem, 4vw, 2.5rem);
+      font-weight: 800;
+      letter-spacing: -0.02em;
+      margin-bottom: 16px;
+    }
+
+    .section-desc {
+      font-size: 1.05rem;
+      color: var(--text-secondary);
+      max-width: 540px;
+      line-height: 1.7;
+    }
+
+    .section-header {
+      text-align: center;
+      margin-bottom: 64px;
+    }
+
+    .section-header .section-desc { margin: 0 auto; }
+
+    .steps {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 24px;
+    }
+
+    .step {
+      padding: 32px;
+      border-radius: var(--radius);
+      border: 1px solid var(--border);
+      background: var(--bg-card);
+      position: relative;
+      transition: all 0.3s;
+    }
+    .step:hover {
+      border-color: var(--border-glow);
+      background: var(--bg-card-hover);
+      transform: translateY(-4px);
+    }
+
+    .step-num {
+      width: 40px;
+      height: 40px;
+      border-radius: 10px;
+      background: var(--accent-glow);
+      border: 1px solid rgba(124, 92, 252, 0.2);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 700;
+      font-size: 1rem;
+      color: var(--accent-light);
+      margin-bottom: 20px;
+    }
+
+    .step h3 {
+      font-size: 1.15rem;
+      font-weight: 700;
+      margin-bottom: 8px;
+      letter-spacing: -0.01em;
+    }
+
+    .step p {
+      font-size: 0.9rem;
+      color: var(--text-secondary);
+      line-height: 1.6;
+    }
+
+    /* ── Features ── */
+    .features-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 24px;
+    }
+
+    .feature {
+      padding: 32px;
+      border-radius: var(--radius);
+      border: 1px solid var(--border);
+      background: var(--bg-card);
+      transition: all 0.3s;
+    }
+    .feature:hover {
+      border-color: var(--border-glow);
+      transform: translateY(-4px);
+    }
+
+    .feature-icon {
+      width: 44px;
+      height: 44px;
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 20px;
+      font-size: 1.25rem;
+    }
+
+    .feature-icon.purple { background: var(--accent-glow); border: 1px solid rgba(124, 92, 252, 0.2); }
+    .feature-icon.green { background: var(--green-glow); border: 1px solid rgba(52, 211, 153, 0.2); }
+    .feature-icon.blue { background: rgba(96, 165, 250, 0.12); border: 1px solid rgba(96, 165, 250, 0.2); }
+    .feature-icon.pink { background: rgba(244, 114, 182, 0.12); border: 1px solid rgba(244, 114, 182, 0.2); }
+
+    .feature h3 {
+      font-size: 1.1rem;
+      font-weight: 700;
+      margin-bottom: 8px;
+    }
+
+    .feature p {
+      font-size: 0.9rem;
+      color: var(--text-secondary);
+      line-height: 1.6;
+    }
+
+    /* ── Templates showcase ── */
+    .templates-section { overflow: hidden; }
+
+    .template-scroll {
+      display: flex;
+      gap: 16px;
+      animation: scroll 40s linear infinite;
+      width: max-content;
+    }
+
+    .template-scroll:hover { animation-play-state: paused; }
+
+    .template-card {
+      flex-shrink: 0;
+      width: 220px;
+      padding: 20px;
+      border-radius: var(--radius);
+      border: 1px solid var(--border);
+      background: var(--bg-card);
+      transition: all 0.3s;
+    }
+    .template-card:hover {
+      border-color: var(--border-glow);
+      transform: translateY(-4px);
+    }
+
+    .template-icon {
+      font-size: 2rem;
+      margin-bottom: 12px;
+    }
+
+    .template-name {
+      font-size: 0.9rem;
+      font-weight: 600;
+      margin-bottom: 4px;
+    }
+
+    .template-type {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+    }
+
+    @keyframes scroll {
+      0% { transform: translateX(0); }
+      100% { transform: translateX(-50%); }
+    }
+
+    /* ── Install ── */
+    .install-section { background: var(--bg-secondary); }
+
+    .install-card {
+      max-width: 680px;
+      margin: 0 auto;
+      border-radius: var(--radius);
+      border: 1px solid var(--border);
+      background: var(--bg-card);
+      overflow: hidden;
+    }
+
+    .install-tabs {
+      display: flex;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .install-tab {
+      flex: 1;
+      padding: 14px 24px;
+      background: none;
+      border: none;
+      color: var(--text-muted);
+      font-family: var(--font-body);
+      font-size: 0.9rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+      position: relative;
+    }
+
+    .install-tab.active {
+      color: var(--text-primary);
+      background: rgba(124, 92, 252, 0.05);
+    }
+
+    .install-tab.active::after {
+      content: '';
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      height: 2px;
+      background: var(--accent);
+    }
+
+    .install-tab:hover:not(.active) { color: var(--text-secondary); }
+
+    .install-panel {
+      display: none;
+      padding: 28px;
+    }
+    .install-panel.active { display: block; }
+
+    .install-panel h3 {
+      font-size: 1rem;
+      font-weight: 700;
+      margin-bottom: 8px;
+    }
+
+    .install-panel p {
+      font-size: 0.88rem;
+      color: var(--text-secondary);
+      margin-bottom: 20px;
+      line-height: 1.6;
+    }
+
+    .install-panel ol {
+      list-style: none;
+      counter-reset: install-step;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      margin-bottom: 20px;
+    }
+
+    .install-panel ol li {
+      counter-increment: install-step;
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+      font-size: 0.88rem;
+      color: var(--text-secondary);
+      line-height: 1.6;
+    }
+
+    .install-panel ol li::before {
+      content: counter(install-step);
+      flex-shrink: 0;
+      width: 24px;
+      height: 24px;
+      border-radius: 6px;
+      background: var(--accent-glow);
+      border: 1px solid rgba(124, 92, 252, 0.2);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 700;
+      font-size: 0.75rem;
+      color: var(--accent-light);
+      margin-top: 1px;
+    }
+
+    .code-block {
+      background: var(--bg-code);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 20px;
+      overflow-x: auto;
+      position: relative;
+    }
+
+    .code-block pre {
+      font-family: var(--font-mono);
+      font-size: 0.82rem;
+      line-height: 1.7;
+      color: var(--text-secondary);
+    }
+
+    .code-block .key { color: var(--accent-light); }
+    .code-block .str { color: var(--green); }
+    .code-block .punc { color: var(--text-muted); }
+
+    .copy-btn {
+      position: absolute;
+      top: 12px;
+      right: 12px;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 6px 12px;
+      font-size: 0.72rem;
+      font-weight: 600;
+      color: var(--text-muted);
+      cursor: pointer;
+      font-family: var(--font-body);
+      transition: all 0.2s;
+    }
+    .copy-btn:hover { color: var(--text-primary); border-color: var(--border-glow); }
+
+    .url-highlight {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: var(--bg-code);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 6px 12px;
+      font-family: var(--font-mono);
+      font-size: 0.82rem;
+      color: var(--green);
+      user-select: all;
+    }
+
+    /* ── Prompt examples ── */
+    .prompts-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 16px;
+      margin-top: 48px;
+    }
+
+    .prompt-card {
+      padding: 24px;
+      border-radius: var(--radius);
+      border: 1px solid var(--border);
+      background: var(--bg-card);
+      transition: all 0.3s;
+    }
+    .prompt-card:hover {
+      border-color: var(--border-glow);
+      transform: translateY(-2px);
+    }
+
+    .prompt-text {
+      font-size: 0.88rem;
+      color: var(--text-primary);
+      font-style: italic;
+      margin-bottom: 10px;
+      line-height: 1.5;
+    }
+
+    .prompt-desc {
+      font-size: 0.78rem;
+      color: var(--text-muted);
+    }
+
+    /* ── CTA ── */
+    .cta-section {
+      text-align: center;
+      position: relative;
+    }
+
+    .cta-section::before {
+      content: '';
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 600px;
+      height: 400px;
+      background: radial-gradient(ellipse at center, var(--accent-glow) 0%, transparent 70%);
+      pointer-events: none;
+    }
+
+    .cta-section .section-title { margin-bottom: 16px; }
+    .cta-section .section-desc {
+      margin: 0 auto 40px;
+      text-align: center;
+    }
+
+    /* ── Footer ── */
+    footer {
+      padding: 40px 24px;
+      border-top: 1px solid var(--border);
+      text-align: center;
+    }
+
+    .footer-inner {
+      max-width: var(--max-width);
+      margin: 0 auto;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .footer-left {
+      font-size: 0.82rem;
+      color: var(--text-muted);
+    }
+
+    .footer-links {
+      display: flex;
+      gap: 24px;
+    }
+
+    .footer-links a {
+      font-size: 0.82rem;
+      color: var(--text-muted);
+      text-decoration: none;
+      transition: color 0.2s;
+    }
+    .footer-links a:hover { color: var(--text-secondary); }
+
+    /* ── Animations ── */
+    @keyframes fadeInUp {
+      from { opacity: 0; transform: translateY(20px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.4; }
+    }
+
+    .fade-in {
+      opacity: 0;
+      transform: translateY(24px);
+      transition: opacity 0.6s ease-out, transform 0.6s ease-out;
+    }
+    .fade-in.visible {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    /* ── Responsive ── */
+    @media (max-width: 768px) {
+      section { padding: 64px 20px; }
+      .hero { padding-top: 120px; padding-bottom: 64px; }
+      .steps { grid-template-columns: 1fr; }
+      .features-grid { grid-template-columns: 1fr; }
+      .prompts-grid { grid-template-columns: 1fr; }
+      .nav-links { display: none; }
+      .nav-hamburger { display: block; }
+      .nav-links.open {
+        display: flex;
+        flex-direction: column;
+        position: absolute;
+        top: 64px;
+        left: 0;
+        right: 0;
+        background: var(--bg-primary);
+        border-bottom: 1px solid var(--border);
+        padding: 20px 24px;
+        gap: 16px;
+      }
+      .hero-mockup { margin: 0 -8px; }
+      .mockup-content { padding: 20px; }
+      .game-options { grid-template-columns: 1fr; }
+      .footer-inner {
+        flex-direction: column;
+        gap: 16px;
+      }
+      .code-block pre { font-size: 0.75rem; }
+      .install-panel { padding: 20px; }
+    }
+
+    @media (max-width: 480px) {
+      .hero-buttons { flex-direction: column; align-items: center; }
+      .btn { width: 100%; justify-content: center; }
+      .template-card { width: 180px; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Nav -->
+  <nav>
+    <div class="nav-inner">
+      <a href="#" class="nav-logo">Quiz<span>HP</span></a>
+      <div class="nav-links" id="nav-links">
+        <a href="#how-it-works">How it works</a>
+        <a href="#features">Features</a>
+        <a href="#install">Install</a>
+        <a href="https://github.com/bassimeledath/quizhp-mcp" target="_blank" rel="noopener">GitHub</a>
+        <a href="#install" class="nav-cta">Get started</a>
+      </div>
+      <button class="nav-hamburger" onclick="document.getElementById('nav-links').classList.toggle('open')" aria-label="Toggle menu">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+          <line x1="3" y1="6" x2="21" y2="6" style="stroke: var(--text-secondary)"/>
+          <line x1="3" y1="12" x2="21" y2="12" style="stroke: var(--text-secondary)"/>
+          <line x1="3" y1="18" x2="21" y2="18" style="stroke: var(--text-secondary)"/>
+        </svg>
+      </button>
+    </div>
+  </nav>
+
+  <!-- Hero -->
+  <section class="hero">
+    <div class="container">
+      <div class="hero-badge">
+        <span class="dot"></span>
+        125+ game templates — free &amp; open source
+      </div>
+      <h1>
+        Turn any topic into<br>
+        <span class="gradient">playable quiz games</span>
+      </h1>
+      <p class="hero-sub">
+        An MCP server that transforms AI conversations into interactive mini-games.
+        Archery, puzzles, switches, and 100+ more — right inside Claude or ChatGPT.
+      </p>
+      <div class="hero-buttons">
+        <a href="#install" class="btn btn-primary">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          Install now
+        </a>
+        <a href="https://github.com/bassimeledath/quizhp-mcp" target="_blank" rel="noopener" class="btn btn-secondary">
+          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
+          View on GitHub
+        </a>
+      </div>
+
+      <!-- Mockup -->
+      <div class="hero-visual">
+        <div class="hero-mockup">
+          <div class="mockup-bar">
+            <span class="mockup-dot"></span>
+            <span class="mockup-dot"></span>
+            <span class="mockup-dot"></span>
+          </div>
+          <div class="mockup-content">
+            <div class="mockup-msg">
+              <div class="mockup-avatar avatar-user">Y</div>
+              <div class="mockup-bubble">Quiz me on the solar system</div>
+            </div>
+            <div class="mockup-msg">
+              <div class="mockup-avatar avatar-ai">AI</div>
+              <div class="mockup-game">
+                <div class="game-header">Archery Range Balloons &mdash; Question 1 of 5</div>
+                <div class="game-question">Which planet is known as the Red Planet?</div>
+                <div class="game-options">
+                  <div class="game-option">Venus</div>
+                  <div class="game-option active">Mars</div>
+                  <div class="game-option">Jupiter</div>
+                  <div class="game-option">Saturn</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- How it works -->
+  <section id="how-it-works" class="fade-in">
+    <div class="container">
+      <div class="section-header">
+        <div class="section-label">How it works</div>
+        <h2 class="section-title">Three steps to interactive quizzes</h2>
+        <p class="section-desc">Connect the MCP server, ask for a quiz, and play. Each question becomes a unique mini-game.</p>
+      </div>
+      <div class="steps">
+        <div class="step">
+          <div class="step-num">1</div>
+          <h3>Connect</h3>
+          <p>Add the MCP server URL to Claude Desktop, Claude.ai, or ChatGPT. Takes 30 seconds, no API keys needed.</p>
+        </div>
+        <div class="step">
+          <div class="step-num">2</div>
+          <h3>Ask for a quiz</h3>
+          <p>Tell the AI what you want to be quizzed on. Any topic works — science, history, your own documents, code concepts.</p>
+        </div>
+        <div class="step">
+          <div class="step-num">3</div>
+          <h3>Play interactive games</h3>
+          <p>Each question renders as a different mini-game — archery, treasure chests, switches, potion bottles, and 120+ more.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Features -->
+  <section id="features" class="fade-in">
+    <div class="container">
+      <div class="section-header">
+        <div class="section-label">Features</div>
+        <h2 class="section-title">Why QuizHP</h2>
+        <p class="section-desc">Not just another quiz app. Each question is a unique interactive game.</p>
+      </div>
+      <div class="features-grid">
+        <div class="feature">
+          <div class="feature-icon purple">&#127918;</div>
+          <h3>125+ game templates</h3>
+          <p>Every question is rendered as a unique canvas game — archery, bomb defusal, piano keys, constellation mapping, potion mixing, and many more.</p>
+        </div>
+        <div class="feature">
+          <div class="feature-icon green">&#9889;</div>
+          <h3>Works on Claude &amp; ChatGPT</h3>
+          <p>Runs as an MCP server that connects to both Claude (Desktop &amp; Web) and ChatGPT. One server, two platforms.</p>
+        </div>
+        <div class="feature">
+          <div class="feature-icon blue">&#128241;</div>
+          <h3>Mobile-friendly</h3>
+          <p>Responsive game templates with touch support and fullscreen mode. Play quizzes on any device, any screen size.</p>
+        </div>
+        <div class="feature">
+          <div class="feature-icon pink">&#128275;</div>
+          <h3>Free &amp; open source</h3>
+          <p>MIT licensed. No API keys, no accounts, no tracking. Self-host or use the hosted server at mcp.quizhp.com.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Template showcase -->
+  <section class="templates-section fade-in">
+    <div class="container">
+      <div class="section-header">
+        <div class="section-label">Game Templates</div>
+        <h2 class="section-title">Every question, a new game</h2>
+        <p class="section-desc">A selection of the 125+ interactive templates that turn quiz questions into mini-games.</p>
+      </div>
+    </div>
+    <div class="template-scroll" aria-hidden="true">
+      <div class="template-card"><div class="template-icon">&#127993;</div><div class="template-name">Archery Range</div><div class="template-type">MCQ</div></div>
+      <div class="template-card"><div class="template-icon">&#128163;</div><div class="template-name">Bomb Defusal</div><div class="template-type">True / False</div></div>
+      <div class="template-card"><div class="template-icon">&#9978;</div><div class="template-name">Potion Bottles</div><div class="template-type">MCQ</div></div>
+      <div class="template-card"><div class="template-icon">&#127917;</div><div class="template-name">Piano Keys</div><div class="template-type">MCQ</div></div>
+      <div class="template-card"><div class="template-icon">&#128302;</div><div class="template-name">Crystal Shards</div><div class="template-type">MCQ</div></div>
+      <div class="template-card"><div class="template-icon">&#9775;</div><div class="template-name">Ancient Runes</div><div class="template-type">MCQ</div></div>
+      <div class="template-card"><div class="template-icon">&#9731;</div><div class="template-name">Arctic Ice Blocks</div><div class="template-type">True / False</div></div>
+      <div class="template-card"><div class="template-icon">&#128640;</div><div class="template-name">Space Defense</div><div class="template-type">MCQ</div></div>
+      <div class="template-card"><div class="template-icon">&#127774;</div><div class="template-name">Comet Capture</div><div class="template-type">MCQ</div></div>
+      <div class="template-card"><div class="template-icon">&#128506;</div><div class="template-name">Treasure Chests</div><div class="template-type">MCQ</div></div>
+      <div class="template-card"><div class="template-icon">&#128301;</div><div class="template-name">Constellation View</div><div class="template-type">MCQ</div></div>
+      <div class="template-card"><div class="template-icon">&#9876;</div><div class="template-name">Blacksmith Anvil</div><div class="template-type">MCQ</div></div>
+      <div class="template-card"><div class="template-icon">&#127861;</div><div class="template-name">Coffee Bean Sacks</div><div class="template-type">MCQ</div></div>
+      <div class="template-card"><div class="template-icon">&#128225;</div><div class="template-name">Vintage Radio</div><div class="template-type">MCQ</div></div>
+      <!-- duplicated for seamless loop -->
+      <div class="template-card"><div class="template-icon">&#127993;</div><div class="template-name">Archery Range</div><div class="template-type">MCQ</div></div>
+      <div class="template-card"><div class="template-icon">&#128163;</div><div class="template-name">Bomb Defusal</div><div class="template-type">True / False</div></div>
+      <div class="template-card"><div class="template-icon">&#9978;</div><div class="template-name">Potion Bottles</div><div class="template-type">MCQ</div></div>
+      <div class="template-card"><div class="template-icon">&#127917;</div><div class="template-name">Piano Keys</div><div class="template-type">MCQ</div></div>
+      <div class="template-card"><div class="template-icon">&#128302;</div><div class="template-name">Crystal Shards</div><div class="template-type">MCQ</div></div>
+      <div class="template-card"><div class="template-icon">&#9775;</div><div class="template-name">Ancient Runes</div><div class="template-type">MCQ</div></div>
+      <div class="template-card"><div class="template-icon">&#9731;</div><div class="template-name">Arctic Ice Blocks</div><div class="template-type">True / False</div></div>
+      <div class="template-card"><div class="template-icon">&#128640;</div><div class="template-name">Space Defense</div><div class="template-type">MCQ</div></div>
+      <div class="template-card"><div class="template-icon">&#127774;</div><div class="template-name">Comet Capture</div><div class="template-type">MCQ</div></div>
+      <div class="template-card"><div class="template-icon">&#128506;</div><div class="template-name">Treasure Chests</div><div class="template-type">MCQ</div></div>
+      <div class="template-card"><div class="template-icon">&#128301;</div><div class="template-name">Constellation View</div><div class="template-type">MCQ</div></div>
+      <div class="template-card"><div class="template-icon">&#9876;</div><div class="template-name">Blacksmith Anvil</div><div class="template-type">MCQ</div></div>
+      <div class="template-card"><div class="template-icon">&#127861;</div><div class="template-name">Coffee Bean Sacks</div><div class="template-type">MCQ</div></div>
+      <div class="template-card"><div class="template-icon">&#128225;</div><div class="template-name">Vintage Radio</div><div class="template-type">MCQ</div></div>
+    </div>
+  </section>
+
+  <!-- Install -->
+  <section id="install" class="install-section fade-in">
+    <div class="container">
+      <div class="section-header">
+        <div class="section-label">Install</div>
+        <h2 class="section-title">Get started in 30 seconds</h2>
+        <p class="section-desc">No API keys, no accounts. Just add the server URL and start quizzing.</p>
+      </div>
+      <div class="install-card">
+        <div class="install-tabs">
+          <button class="install-tab active" onclick="switchTab('claude')" id="tab-claude">Claude</button>
+          <button class="install-tab" onclick="switchTab('chatgpt')" id="tab-chatgpt">ChatGPT</button>
+        </div>
+        <div class="install-panel active" id="panel-claude">
+          <h3>Claude Desktop &amp; Claude.ai</h3>
+          <p>Add this to your <code style="font-family: var(--font-mono); font-size: 0.82rem; background: var(--bg-code); padding: 2px 6px; border-radius: 4px; border: 1px solid var(--border);">claude_desktop_config.json</code>:</p>
+          <div class="code-block">
+            <button class="copy-btn" onclick="copyCode(this, 'claude-code')">Copy</button>
+            <pre id="claude-code"><span class="punc">{</span>
+  <span class="key">"mcpServers"</span><span class="punc">:</span> <span class="punc">{</span>
+    <span class="key">"quizhp"</span><span class="punc">:</span> <span class="punc">{</span>
+      <span class="key">"url"</span><span class="punc">:</span> <span class="str">"https://mcp.quizhp.com/mcp"</span>
+    <span class="punc">}</span>
+  <span class="punc">}</span>
+<span class="punc">}</span></pre>
+          </div>
+          <p style="margin-top: 16px; font-size: 0.82rem; color: var(--text-muted);">
+            Works with Claude Desktop, Claude.ai, and Claude Code (via MCP settings).
+          </p>
+        </div>
+        <div class="install-panel" id="panel-chatgpt">
+          <h3>ChatGPT</h3>
+          <p>Connect the MCP server through ChatGPT's settings:</p>
+          <ol>
+            <li>Open <strong style="color: var(--text-primary)">Settings</strong> in ChatGPT</li>
+            <li>Go to <strong style="color: var(--text-primary)">Connected Apps</strong></li>
+            <li>Click <strong style="color: var(--text-primary)">Add MCP Server</strong></li>
+            <li>Enter the server URL:</li>
+          </ol>
+          <div style="margin-bottom: 16px;">
+            <span class="url-highlight">https://mcp.quizhp.com/mcp</span>
+          </div>
+          <p style="font-size: 0.82rem; color: var(--text-muted); margin-bottom: 0;">
+            Then ask ChatGPT to quiz you on any topic. It will use QuizHP automatically.
+          </p>
+        </div>
+      </div>
+
+      <!-- Example prompts -->
+      <div class="prompts-grid">
+        <div class="prompt-card">
+          <div class="prompt-text">"Quiz me on the solar system"</div>
+          <div class="prompt-desc">Great for quick knowledge checks on any topic</div>
+        </div>
+        <div class="prompt-card">
+          <div class="prompt-text">"Read this PDF and quiz me on the key concepts"</div>
+          <div class="prompt-desc">Upload documents for grounded, contextual quizzes</div>
+        </div>
+        <div class="prompt-card">
+          <div class="prompt-text">"15 hard true/false questions about JavaScript closures"</div>
+          <div class="prompt-desc">Customize count, difficulty, and question type</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- CTA -->
+  <section class="cta-section fade-in">
+    <div class="container" style="position: relative;">
+      <div class="section-label">Open Source</div>
+      <h2 class="section-title">Built in the open</h2>
+      <p class="section-desc">
+        QuizHP is MIT licensed. Star, fork, contribute, or self-host — it's yours.
+      </p>
+      <div class="hero-buttons">
+        <a href="https://github.com/bassimeledath/quizhp-mcp" target="_blank" rel="noopener" class="btn btn-primary">
+          <svg viewBox="0 0 24 24" fill="currentColor" width="18" height="18"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
+          Star on GitHub
+        </a>
+        <a href="#install" class="btn btn-secondary">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          Install now
+        </a>
+      </div>
+    </div>
+  </section>
+
+  <!-- Footer -->
+  <footer>
+    <div class="footer-inner">
+      <div class="footer-left">QuizHP &mdash; MIT License</div>
+      <div class="footer-links">
+        <a href="https://github.com/bassimeledath/quizhp-mcp" target="_blank" rel="noopener">GitHub</a>
+        <a href="https://github.com/bassimeledath/quizhp-mcp/issues" target="_blank" rel="noopener">Issues</a>
+        <a href="https://www.npmjs.com/package/quizhp" target="_blank" rel="noopener">npm</a>
+      </div>
+    </div>
+  </footer>
+
+  <script>
+    // Tab switching
+    function switchTab(tab) {
+      document.querySelectorAll('.install-tab').forEach(t => t.classList.remove('active'));
+      document.querySelectorAll('.install-panel').forEach(p => p.classList.remove('active'));
+      document.getElementById('tab-' + tab).classList.add('active');
+      document.getElementById('panel-' + tab).classList.add('active');
+    }
+
+    // Copy code
+    function copyCode(btn, id) {
+      const el = document.getElementById(id);
+      const text = el.textContent;
+      navigator.clipboard.writeText(text).then(() => {
+        btn.textContent = 'Copied!';
+        setTimeout(() => { btn.textContent = 'Copy'; }, 2000);
+      });
+    }
+
+    // Intersection observer for fade-in animations
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach(entry => {
+        if (entry.isIntersecting) {
+          entry.target.classList.add('visible');
+          observer.unobserve(entry.target);
+        }
+      });
+    }, { threshold: 0.1 });
+
+    document.querySelectorAll('.fade-in').forEach(el => observer.observe(el));
+
+    // Close mobile menu on link click
+    document.querySelectorAll('#nav-links a').forEach(a => {
+      a.addEventListener('click', () => {
+        document.getElementById('nav-links').classList.remove('open');
+      });
+    });
+  </script>
+</body>
+</html>
