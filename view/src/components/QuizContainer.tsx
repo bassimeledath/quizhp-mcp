@@ -70,29 +70,19 @@ export function QuizContainer({
   // Derive display mode from host context
   const displayMode = hostContext?.displayMode ?? "inline";
 
-  // Local feedback state — keyed to question + generation so it auto-resets
-  // on navigation and restart. This bypasses all store race conditions.
-  const feedbackKey = `${currentQuestionIndex}-${resetGeneration}`;
-  const [localFeedback, setLocalFeedback] = useState<{ key: string; feedback: import("../types").Feedback } | null>(null);
+  // Feedback is LOCAL state only — never read from the store.
+  // This eliminates all race conditions with stale iframe postMessages.
+  const [visibleFeedback, setVisibleFeedback] = useState<import("../types").Feedback | null>(null);
 
-  // Clear local feedback whenever question or generation changes
+  // Clear feedback on question change or restart
   useEffect(() => {
-    setLocalFeedback(null);
-  }, [feedbackKey]);
-
-  // Sync store feedback to local (only if key matches current question)
-  useEffect(() => {
-    if (feedback) {
-      setLocalFeedback({ key: feedbackKey, feedback });
-    }
-  }, [feedback, feedbackKey]);
-
-  // The feedback to actually render — only if it's for the current question
-  const visibleFeedback = localFeedback?.key === feedbackKey ? localFeedback.feedback : null;
+    setVisibleFeedback(null);
+  }, [currentQuestionIndex, resetGeneration]);
 
   const handleChoice = useCallback(
     (payload: ChoicePayload) => {
       rawHandleChoice(payload);
+      setVisibleFeedback({ isCorrect: payload.isCorrect, explanation: payload.explanation });
     },
     [rawHandleChoice]
   );
@@ -404,7 +394,7 @@ export function QuizContainer({
           {visibleFeedback && (
             <FeedbackToast
               feedback={visibleFeedback}
-              onDismiss={() => setLocalFeedback(null)}
+              onDismiss={() => setVisibleFeedback(null)}
             />
           )}
           {showInfo && currentTemplate && (
@@ -501,7 +491,7 @@ export function QuizContainer({
           {visibleFeedback && (
             <FeedbackToast
               feedback={visibleFeedback}
-              onDismiss={() => setLocalFeedback(null)}
+              onDismiss={() => setVisibleFeedback(null)}
             />
           )}
           {showInfo && currentTemplate && (
