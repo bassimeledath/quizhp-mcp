@@ -5,67 +5,177 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>QuizHP — Interactive Quiz Games for AI Chat</title>
   <meta name="description" content="Turn any topic into playable mini-games inside Claude or ChatGPT. 125+ game templates, free and open source.">
-  <meta name="theme-color" content="#0a0a0f">
+  <meta name="theme-color" content="#FAFAF7">
+  <meta property="og:title" content="QuizHP — Interactive Quiz Games for AI Chat">
+  <meta property="og:description" content="An MCP server that transforms AI conversations into 125+ interactive mini-games. Free and open source.">
+  <meta property="og:type" content="website">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Belanosima:wght@400;600;700&family=JetBrains+Mono:wght@400;500&family=Nunito+Sans:wght@400;500;600;700;800&family=Nunito:wght@400;500;600;700&display=swap" rel="stylesheet">
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
     :root {
-      --bg-primary: #0a0a0f;
-      --bg-secondary: #111118;
-      --bg-card: #16161f;
-      --bg-card-hover: #1c1c28;
-      --bg-code: #1a1a26;
-      --border: #232333;
-      --border-glow: #3b3b5c;
-      --text-primary: #e8e8f0;
-      --text-secondary: #9494b0;
-      --text-muted: #5e5e7a;
-      --accent: #7c5cfc;
-      --accent-light: #9b7fff;
-      --accent-glow: rgba(124, 92, 252, 0.15);
-      --accent-glow-strong: rgba(124, 92, 252, 0.3);
-      --green: #34d399;
-      --green-glow: rgba(52, 211, 153, 0.15);
-      --orange: #fb923c;
-      --blue: #60a5fa;
-      --pink: #f472b6;
-      --font-body: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-      --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
-      --max-width: 1120px;
-      --radius: 12px;
-      --radius-sm: 8px;
+      --bg: #FAFAF7;
+      --surface: #FFFFFF;
+      --bg-secondary: #F5F5F0;
+      --text: #2B2B28;
+      --text-secondary: #5A5A54;
+      --text-tertiary: #8C8C84;
+      --text-disabled: #C2C2B8;
+      --border-subtle: #E6E6E0;
+      --border-strong: #D4D4CC;
+      --orange: #E87A3E;
+      --orange-hover: #D66B31;
+      --amber: #F5A742;
+      --cyan: #4ECDC4;
+      --cyan-hover: #45B8B0;
+      --peach: #FFB89D;
+      --success: #6BBF59;
+      --error: #E85D4A;
+      --notebook-blue: #94C5DE;
+      --notebook-red: #E85C5C;
+      --doodle-color: rgba(0,0,0,0.08);
+    }
+
+    [data-theme="dark"] {
+      --bg: #1C1C1A;
+      --surface: #2A2A27;
+      --bg-secondary: #363633;
+      --text: #F5F5F0;
+      --text-secondary: #C2C2B8;
+      --text-tertiary: #8C8C84;
+      --text-disabled: #5A5A54;
+      --border-subtle: #424240;
+      --border-strong: #5A5A56;
+      --doodle-color: rgba(255,255,255,0.06);
     }
 
     html { scroll-behavior: smooth; }
 
     body {
-      font-family: var(--font-body);
-      background: var(--bg-primary);
-      color: var(--text-primary);
+      font-family: 'Nunito', system-ui, -apple-system, sans-serif;
+      background: var(--bg);
+      color: var(--text);
       line-height: 1.6;
-      -webkit-font-smoothing: antialiased;
       overflow-x: hidden;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* ── Notebook Background ── */
+    .notebook-lines {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      z-index: 0;
+      opacity: 0.10;
+      background-image: repeating-linear-gradient(
+        transparent, transparent 31px, var(--notebook-blue) 31px, var(--notebook-blue) 32px
+      );
+      background-size: 100% 32px;
+    }
+
+    .margin-line {
+      position: fixed;
+      left: 80px;
+      top: 0;
+      bottom: 0;
+      width: 2px;
+      background: var(--notebook-red);
+      opacity: 0.35;
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    .punch-holes {
+      position: fixed;
+      left: 28px;
+      top: 0;
+      bottom: 0;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-around;
+      padding: 48px 0;
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    .punch-hole {
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      border: 2px solid var(--border-subtle);
+      background: var(--surface);
+      opacity: 0.3;
+    }
+
+    /* ── Canvas Doodles ── */
+    #doodles {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    /* ── Floating Stickers ── */
+    @keyframes subtle-float {
+      0%, 100% { transform: translateY(0px); }
+      50% { transform: translateY(-3px); }
+    }
+
+    .sticker {
+      position: fixed;
+      pointer-events: none;
+      z-index: 1;
+      animation: subtle-float 4s ease-in-out infinite;
+    }
+
+    .sticker-inner {
+      position: relative;
+      padding: 8px;
+      border: 2px solid;
+      border-radius: 10px;
+      background: var(--surface);
+      box-shadow: 0 4px 12px rgba(0,0,0,0.06);
+    }
+
+    .sticker-shadow {
+      position: absolute;
+      inset: 0;
+      border-radius: 10px;
+      background: var(--text);
+      opacity: 0.08;
+      filter: blur(8px);
+      transform: translateY(4px);
+      z-index: -1;
+    }
+
+    /* Sticker SVGs */
+    .sticker svg {
+      display: block;
+    }
+
+    /* ── Content Layer ── */
+    .content-layer {
+      position: relative;
+      z-index: 2;
     }
 
     /* ── Nav ── */
     nav {
-      position: fixed;
+      position: sticky;
       top: 0;
-      left: 0;
-      right: 0;
-      z-index: 100;
-      padding: 0 24px;
-      background: rgba(10, 10, 15, 0.8);
-      backdrop-filter: blur(20px);
-      border-bottom: 1px solid var(--border);
+      z-index: 50;
+      background: color-mix(in srgb, var(--bg) 92%, transparent);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border-bottom: 2px dashed color-mix(in srgb, var(--border-subtle) 60%, transparent);
     }
 
     .nav-inner {
-      max-width: var(--max-width);
+      max-width: 1200px;
       margin: 0 auto;
+      padding: 0 24px;
       display: flex;
       align-items: center;
       justify-content: space-between;
@@ -73,69 +183,104 @@
     }
 
     .nav-logo {
-      font-weight: 800;
-      font-size: 1.25rem;
-      color: var(--text-primary);
+      font-family: 'Belanosima', sans-serif;
+      font-size: 1.5rem;
+      font-weight: 700;
+      color: var(--text);
       text-decoration: none;
-      letter-spacing: -0.02em;
+      transition: transform 0.2s;
+    }
+    .nav-logo:hover { transform: scale(1.05); }
+    .nav-logo span { color: var(--orange); }
+
+    .nav-right {
+      display: flex;
+      align-items: center;
+      gap: 8px;
     }
 
-    .nav-logo span { color: var(--accent-light); }
+    .nav-links {
+      display: flex;
+      align-items: center;
+      gap: 24px;
+    }
 
-    .nav-links { display: flex; gap: 32px; align-items: center; }
     .nav-links a {
       color: var(--text-secondary);
       text-decoration: none;
       font-size: 0.875rem;
-      font-weight: 500;
+      font-weight: 600;
+      font-family: 'Nunito Sans', sans-serif;
       transition: color 0.2s;
     }
-    .nav-links a:hover { color: var(--text-primary); }
+    .nav-links a:hover { color: var(--text); }
 
     .nav-cta {
-      background: var(--accent) !important;
-      color: #fff !important;
-      padding: 8px 20px;
+      background: var(--text) !important;
+      color: var(--bg) !important;
+      padding: 8px 20px !important;
       border-radius: 8px;
-      font-weight: 600 !important;
-      transition: background 0.2s, transform 0.2s !important;
+      border: 2px solid var(--text) !important;
+      transition: all 0.2s !important;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.08);
     }
     .nav-cta:hover {
-      background: var(--accent-light) !important;
-      transform: translateY(-1px);
+      transform: translateY(-2px);
+      box-shadow: 0 6px 16px rgba(0,0,0,0.12) !important;
     }
 
-    .nav-hamburger {
+    /* Theme toggle */
+    .theme-toggle {
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      border: 2px solid var(--border-subtle);
+      background: var(--orange);
+      color: #fff;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.3s;
+      font-size: 0;
+      flex-shrink: 0;
+    }
+    [data-theme="dark"] .theme-toggle { background: var(--cyan); }
+    .theme-toggle svg { width: 18px; height: 18px; }
+
+    /* Hamburger */
+    .hamburger {
       display: none;
       background: none;
       border: none;
       cursor: pointer;
       padding: 4px;
+      color: var(--text-secondary);
     }
-    .nav-hamburger svg { display: block; }
-
-    /* ── Sections ── */
-    section { padding: 100px 24px; }
-    .container { max-width: var(--max-width); margin: 0 auto; }
+    .hamburger svg { display: block; }
 
     /* ── Hero ── */
     .hero {
-      padding-top: 160px;
-      padding-bottom: 100px;
-      text-align: center;
-      position: relative;
+      padding: 40px 24px 72px;
+      max-width: 1200px;
+      margin: 0 auto;
     }
 
-    .hero::before {
-      content: '';
-      position: absolute;
-      top: 0;
-      left: 50%;
-      transform: translateX(-50%);
-      width: 800px;
-      height: 600px;
-      background: radial-gradient(ellipse at center, var(--accent-glow-strong) 0%, transparent 70%);
-      pointer-events: none;
+    .hero-inner {
+      display: flex;
+      gap: 48px;
+      align-items: flex-start;
+    }
+
+    .hero-game {
+      flex-shrink: 0;
+      order: 1;
+    }
+
+    .hero-content {
+      max-width: 480px;
+      order: 2;
+      padding-top: 16px;
     }
 
     .hero-badge {
@@ -143,231 +288,165 @@
       align-items: center;
       gap: 8px;
       padding: 6px 16px;
-      border-radius: 100px;
-      border: 1px solid var(--border);
-      background: var(--bg-card);
-      font-size: 0.8rem;
-      font-weight: 500;
-      color: var(--text-secondary);
-      margin-bottom: 32px;
-      animation: fadeInUp 0.6s ease-out;
-    }
-
-    .hero-badge .dot {
-      width: 6px;
-      height: 6px;
-      border-radius: 50%;
-      background: var(--green);
-      animation: pulse 2s ease-in-out infinite;
-    }
-
-    h1 {
-      font-size: clamp(2.5rem, 6vw, 4.25rem);
-      font-weight: 800;
-      line-height: 1.1;
-      letter-spacing: -0.03em;
+      border: 2px solid var(--cyan);
+      border-radius: 9999px;
+      background: var(--surface);
+      font-size: 0.85rem;
+      font-weight: 600;
+      font-family: 'Nunito Sans', sans-serif;
+      color: var(--text);
       margin-bottom: 24px;
-      animation: fadeInUp 0.6s ease-out 0.1s both;
+      transform: rotate(-1deg);
+      box-shadow: 0 2px 8px rgba(0,0,0,0.04);
     }
 
-    h1 .gradient {
-      background: linear-gradient(135deg, var(--accent-light), var(--pink), var(--orange));
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-      background-clip: text;
+    .hero h1 {
+      font-family: 'Belanosima', sans-serif;
+      font-size: clamp(2.5rem, 5vw, 4.25rem);
+      font-weight: 700;
+      line-height: 1.08;
+      letter-spacing: -0.02em;
+      margin-bottom: 20px;
+      color: var(--text);
     }
 
     .hero-sub {
-      font-size: clamp(1.05rem, 2vw, 1.25rem);
+      font-size: 1.15rem;
       color: var(--text-secondary);
-      max-width: 560px;
-      margin: 0 auto 40px;
+      margin-bottom: 32px;
       line-height: 1.7;
-      animation: fadeInUp 0.6s ease-out 0.2s both;
     }
 
     .hero-buttons {
       display: flex;
-      gap: 16px;
-      justify-content: center;
+      gap: 12px;
       flex-wrap: wrap;
-      animation: fadeInUp 0.6s ease-out 0.3s both;
     }
 
+    /* ── Buttons ── */
     .btn {
       display: inline-flex;
       align-items: center;
       gap: 8px;
-      padding: 14px 28px;
+      padding: 12px 24px;
       border-radius: 10px;
       font-size: 0.95rem;
-      font-weight: 600;
+      font-weight: 700;
+      font-family: 'Nunito Sans', sans-serif;
       text-decoration: none;
       transition: all 0.2s;
       cursor: pointer;
-      border: none;
-      font-family: var(--font-body);
+      border: 2px solid transparent;
     }
 
     .btn-primary {
-      background: var(--accent);
+      background: var(--orange);
       color: #fff;
-      box-shadow: 0 0 24px var(--accent-glow-strong);
+      border-color: var(--orange);
+      box-shadow: 0 6px 14px rgba(232, 122, 62, 0.25);
     }
     .btn-primary:hover {
-      background: var(--accent-light);
+      background: var(--orange-hover);
+      border-color: var(--orange-hover);
       transform: translateY(-2px);
-      box-shadow: 0 0 40px var(--accent-glow-strong);
+      box-shadow: 0 10px 24px rgba(232, 122, 62, 0.3);
     }
 
-    .btn-secondary {
-      background: var(--bg-card);
-      color: var(--text-primary);
-      border: 1px solid var(--border);
+    .btn-ghost {
+      background: var(--surface);
+      color: var(--text);
+      border-color: var(--border-strong);
     }
-    .btn-secondary:hover {
-      background: var(--bg-card-hover);
-      border-color: var(--border-glow);
+    .btn-ghost:hover {
+      border-color: var(--text-secondary);
       transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(0,0,0,0.06);
     }
 
     .btn svg { width: 18px; height: 18px; flex-shrink: 0; }
 
-    /* ── Hero visual ── */
-    .hero-visual {
-      margin-top: 64px;
+    /* ── Game Preview ── */
+    .game-preview {
       position: relative;
-      animation: fadeInUp 0.6s ease-out 0.4s both;
     }
 
-    .hero-mockup {
-      max-width: 780px;
-      margin: 0 auto;
-      border-radius: 16px;
-      border: 1px solid var(--border);
-      background: var(--bg-secondary);
-      overflow: hidden;
-      box-shadow: 0 32px 64px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(255,255,255,0.03);
-    }
-
-    .mockup-bar {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      padding: 12px 16px;
-      background: var(--bg-card);
-      border-bottom: 1px solid var(--border);
-    }
-
-    .mockup-dot {
-      width: 10px;
-      height: 10px;
-      border-radius: 50%;
-      background: var(--text-muted);
-      opacity: 0.4;
-    }
-
-    .mockup-content {
-      padding: 32px;
-      display: flex;
-      flex-direction: column;
-      gap: 16px;
-    }
-
-    .mockup-msg {
-      display: flex;
-      gap: 12px;
-      align-items: flex-start;
-    }
-
-    .mockup-avatar {
-      width: 32px;
-      height: 32px;
-      border-radius: 8px;
-      flex-shrink: 0;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 0.75rem;
-      font-weight: 700;
-      color: #fff;
-    }
-
-    .avatar-user { background: var(--accent); }
-    .avatar-ai { background: linear-gradient(135deg, var(--green), #2dd4bf); }
-
-    .mockup-bubble {
-      background: var(--bg-card);
-      border: 1px solid var(--border);
-      border-radius: 10px;
-      padding: 14px 18px;
-      font-size: 0.9rem;
-      color: var(--text-secondary);
-      max-width: 480px;
-      line-height: 1.5;
-    }
-
-    .mockup-game {
-      background: var(--bg-card);
-      border: 1px solid var(--border);
+    .question-card {
+      position: relative;
+      padding: 16px 20px;
+      background: var(--surface);
+      border: 2px solid var(--orange);
       border-radius: 12px;
-      padding: 24px;
-      max-width: 520px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+      transform: rotate(-0.5deg);
+      margin-bottom: 16px;
+      transition: box-shadow 0.2s;
+    }
+    .question-card:hover {
+      box-shadow: 0 6px 20px rgba(0,0,0,0.08);
     }
 
-    .game-header {
-      font-size: 0.75rem;
-      color: var(--text-muted);
+    .question-dot {
+      position: absolute;
+      top: -8px;
+      right: -8px;
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      background: var(--amber);
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+
+    .question-icon {
+      position: absolute;
+      top: -6px;
+      left: -6px;
+    }
+
+    .question-text {
+      font-size: 1rem;
+      font-weight: 700;
+      font-family: 'Nunito Sans', sans-serif;
+      color: var(--text);
+      line-height: 1.5;
+      margin: 0;
+    }
+
+    .game-frame {
+      border-radius: 20px;
+      overflow: hidden;
+      box-shadow: 0 16px 48px rgba(0,0,0,0.10), 0 0 0 1px var(--border-subtle);
+      width: 520px;
+      height: 390px;
+    }
+
+    .game-frame iframe {
+      width: 100%;
+      height: 100%;
+      border: none;
+      display: block;
+    }
+
+    /* ── Sections ── */
+    section { padding: 80px 24px; }
+    .container { max-width: 1200px; margin: 0 auto; }
+
+    .section-label {
+      font-size: 0.8rem;
+      font-weight: 700;
       text-transform: uppercase;
-      letter-spacing: 0.08em;
+      letter-spacing: 0.1em;
+      color: var(--orange);
+      font-family: 'Nunito Sans', sans-serif;
       margin-bottom: 12px;
     }
 
-    .game-question {
-      font-size: 0.95rem;
-      font-weight: 600;
-      color: var(--text-primary);
-      margin-bottom: 16px;
-    }
-
-    .game-options {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 8px;
-    }
-
-    .game-option {
-      padding: 10px 14px;
-      border-radius: 8px;
-      border: 1px solid var(--border);
-      background: var(--bg-secondary);
-      font-size: 0.85rem;
-      color: var(--text-secondary);
-      text-align: center;
-      transition: all 0.2s;
-    }
-
-    .game-option.active {
-      border-color: var(--accent);
-      background: var(--accent-glow);
-      color: var(--text-primary);
-    }
-
-    /* ── How it works ── */
-    .section-label {
-      font-size: 0.8rem;
-      font-weight: 600;
-      text-transform: uppercase;
-      letter-spacing: 0.1em;
-      color: var(--accent-light);
-      margin-bottom: 16px;
-    }
-
     .section-title {
+      font-family: 'Belanosima', sans-serif;
       font-size: clamp(1.75rem, 4vw, 2.5rem);
-      font-weight: 800;
+      font-weight: 700;
       letter-spacing: -0.02em;
-      margin-bottom: 16px;
+      margin-bottom: 12px;
+      color: var(--text);
     }
 
     .section-desc {
@@ -379,11 +458,11 @@
 
     .section-header {
       text-align: center;
-      margin-bottom: 64px;
+      margin-bottom: 56px;
     }
-
     .section-header .section-desc { margin: 0 auto; }
 
+    /* ── Steps ── */
     .steps {
       display: grid;
       grid-template-columns: repeat(3, 1fr);
@@ -391,39 +470,40 @@
     }
 
     .step {
-      padding: 32px;
-      border-radius: var(--radius);
-      border: 1px solid var(--border);
-      background: var(--bg-card);
-      position: relative;
+      padding: 28px;
+      border-radius: 16px;
+      border: 2px solid var(--border-subtle);
+      background: var(--surface);
       transition: all 0.3s;
     }
     .step:hover {
-      border-color: var(--border-glow);
-      background: var(--bg-card-hover);
       transform: translateY(-4px);
+      box-shadow: 0 8px 24px rgba(0,0,0,0.06);
+      border-color: var(--border-strong);
     }
 
     .step-num {
       width: 40px;
       height: 40px;
       border-radius: 10px;
-      background: var(--accent-glow);
-      border: 1px solid rgba(124, 92, 252, 0.2);
+      background: rgba(232, 122, 62, 0.1);
+      border: 2px solid rgba(232, 122, 62, 0.2);
       display: flex;
       align-items: center;
       justify-content: center;
+      font-family: 'Belanosima', sans-serif;
       font-weight: 700;
-      font-size: 1rem;
-      color: var(--accent-light);
-      margin-bottom: 20px;
+      font-size: 1.1rem;
+      color: var(--orange);
+      margin-bottom: 16px;
     }
 
     .step h3 {
-      font-size: 1.15rem;
+      font-family: 'Nunito Sans', sans-serif;
+      font-size: 1.1rem;
       font-weight: 700;
       margin-bottom: 8px;
-      letter-spacing: -0.01em;
+      color: var(--text);
     }
 
     .step p {
@@ -440,15 +520,16 @@
     }
 
     .feature {
-      padding: 32px;
-      border-radius: var(--radius);
-      border: 1px solid var(--border);
-      background: var(--bg-card);
+      padding: 28px;
+      border-radius: 16px;
+      border: 2px solid var(--border-subtle);
+      background: var(--surface);
       transition: all 0.3s;
     }
     .feature:hover {
-      border-color: var(--border-glow);
       transform: translateY(-4px);
+      box-shadow: 0 8px 24px rgba(0,0,0,0.06);
+      border-color: var(--border-strong);
     }
 
     .feature-icon {
@@ -458,19 +539,20 @@
       display: flex;
       align-items: center;
       justify-content: center;
-      margin-bottom: 20px;
-      font-size: 1.25rem;
+      margin-bottom: 16px;
+      font-size: 1.3rem;
     }
-
-    .feature-icon.purple { background: var(--accent-glow); border: 1px solid rgba(124, 92, 252, 0.2); }
-    .feature-icon.green { background: var(--green-glow); border: 1px solid rgba(52, 211, 153, 0.2); }
-    .feature-icon.blue { background: rgba(96, 165, 250, 0.12); border: 1px solid rgba(96, 165, 250, 0.2); }
-    .feature-icon.pink { background: rgba(244, 114, 182, 0.12); border: 1px solid rgba(244, 114, 182, 0.2); }
+    .fi-orange { background: rgba(232, 122, 62, 0.1); border: 1px solid rgba(232, 122, 62, 0.2); }
+    .fi-cyan { background: rgba(78, 205, 196, 0.1); border: 1px solid rgba(78, 205, 196, 0.2); }
+    .fi-amber { background: rgba(245, 167, 66, 0.1); border: 1px solid rgba(245, 167, 66, 0.2); }
+    .fi-success { background: rgba(107, 191, 89, 0.1); border: 1px solid rgba(107, 191, 89, 0.2); }
 
     .feature h3 {
+      font-family: 'Nunito Sans', sans-serif;
       font-size: 1.1rem;
       font-weight: 700;
       margin-bottom: 8px;
+      color: var(--text);
     }
 
     .feature p {
@@ -479,46 +561,44 @@
       line-height: 1.6;
     }
 
-    /* ── Templates showcase ── */
+    /* ── Template Showcase ── */
     .templates-section { overflow: hidden; }
 
     .template-scroll {
       display: flex;
       gap: 16px;
-      animation: scroll 40s linear infinite;
+      animation: scroll 45s linear infinite;
       width: max-content;
     }
-
     .template-scroll:hover { animation-play-state: paused; }
 
     .template-card {
       flex-shrink: 0;
-      width: 220px;
+      width: 200px;
       padding: 20px;
-      border-radius: var(--radius);
-      border: 1px solid var(--border);
-      background: var(--bg-card);
+      border-radius: 14px;
+      border: 2px solid var(--border-subtle);
+      background: var(--surface);
       transition: all 0.3s;
     }
     .template-card:hover {
-      border-color: var(--border-glow);
       transform: translateY(-4px);
+      border-color: var(--border-strong);
+      box-shadow: 0 4px 12px rgba(0,0,0,0.05);
     }
 
-    .template-icon {
-      font-size: 2rem;
-      margin-bottom: 12px;
-    }
-
+    .template-icon { font-size: 2rem; margin-bottom: 8px; }
     .template-name {
+      font-family: 'Nunito Sans', sans-serif;
       font-size: 0.9rem;
-      font-weight: 600;
-      margin-bottom: 4px;
+      font-weight: 700;
+      color: var(--text);
+      margin-bottom: 2px;
     }
-
     .template-type {
       font-size: 0.75rem;
-      color: var(--text-muted);
+      color: var(--text-tertiary);
+      font-weight: 600;
     }
 
     @keyframes scroll {
@@ -527,20 +607,22 @@
     }
 
     /* ── Install ── */
-    .install-section { background: var(--bg-secondary); }
+    .install-section {
+      background: var(--bg-secondary);
+    }
 
     .install-card {
       max-width: 680px;
       margin: 0 auto;
-      border-radius: var(--radius);
-      border: 1px solid var(--border);
-      background: var(--bg-card);
+      border-radius: 16px;
+      border: 2px solid var(--border-subtle);
+      background: var(--surface);
       overflow: hidden;
     }
 
     .install-tabs {
       display: flex;
-      border-bottom: 1px solid var(--border);
+      border-bottom: 2px solid var(--border-subtle);
     }
 
     .install-tab {
@@ -548,30 +630,27 @@
       padding: 14px 24px;
       background: none;
       border: none;
-      color: var(--text-muted);
-      font-family: var(--font-body);
+      color: var(--text-tertiary);
+      font-family: 'Nunito Sans', sans-serif;
       font-size: 0.9rem;
-      font-weight: 600;
+      font-weight: 700;
       cursor: pointer;
       transition: all 0.2s;
       position: relative;
     }
-
     .install-tab.active {
-      color: var(--text-primary);
-      background: rgba(124, 92, 252, 0.05);
+      color: var(--text);
+      background: rgba(232, 122, 62, 0.04);
     }
-
     .install-tab.active::after {
       content: '';
       position: absolute;
-      bottom: 0;
+      bottom: -2px;
       left: 0;
       right: 0;
       height: 2px;
-      background: var(--accent);
+      background: var(--orange);
     }
-
     .install-tab:hover:not(.active) { color: var(--text-secondary); }
 
     .install-panel {
@@ -581,29 +660,30 @@
     .install-panel.active { display: block; }
 
     .install-panel h3 {
+      font-family: 'Nunito Sans', sans-serif;
       font-size: 1rem;
       font-weight: 700;
       margin-bottom: 8px;
+      color: var(--text);
     }
 
     .install-panel p {
       font-size: 0.88rem;
       color: var(--text-secondary);
-      margin-bottom: 20px;
+      margin-bottom: 16px;
       line-height: 1.6;
     }
 
     .install-panel ol {
       list-style: none;
-      counter-reset: install-step;
+      counter-reset: step;
       display: flex;
       flex-direction: column;
-      gap: 16px;
-      margin-bottom: 20px;
+      gap: 12px;
+      margin-bottom: 16px;
     }
-
     .install-panel ol li {
-      counter-increment: install-step;
+      counter-increment: step;
       display: flex;
       align-items: flex-start;
       gap: 12px;
@@ -611,76 +691,84 @@
       color: var(--text-secondary);
       line-height: 1.6;
     }
-
     .install-panel ol li::before {
-      content: counter(install-step);
+      content: counter(step);
       flex-shrink: 0;
       width: 24px;
       height: 24px;
       border-radius: 6px;
-      background: var(--accent-glow);
-      border: 1px solid rgba(124, 92, 252, 0.2);
+      background: rgba(232, 122, 62, 0.1);
+      border: 1px solid rgba(232, 122, 62, 0.2);
       display: flex;
       align-items: center;
       justify-content: center;
       font-weight: 700;
       font-size: 0.75rem;
-      color: var(--accent-light);
-      margin-top: 1px;
+      color: var(--orange);
     }
 
     .code-block {
-      background: var(--bg-code);
-      border: 1px solid var(--border);
-      border-radius: var(--radius-sm);
+      background: var(--bg-secondary);
+      border: 1px solid var(--border-subtle);
+      border-radius: 8px;
       padding: 20px;
       overflow-x: auto;
       position: relative;
     }
 
     .code-block pre {
-      font-family: var(--font-mono);
+      font-family: 'JetBrains Mono', monospace;
       font-size: 0.82rem;
       line-height: 1.7;
       color: var(--text-secondary);
     }
 
-    .code-block .key { color: var(--accent-light); }
-    .code-block .str { color: var(--green); }
-    .code-block .punc { color: var(--text-muted); }
+    .code-block .key { color: var(--orange); }
+    .code-block .str { color: var(--cyan); font-weight: 500; }
+    .code-block .punc { color: var(--text-tertiary); }
 
     .copy-btn {
       position: absolute;
       top: 12px;
       right: 12px;
-      background: var(--bg-card);
-      border: 1px solid var(--border);
+      background: var(--surface);
+      border: 1px solid var(--border-subtle);
       border-radius: 6px;
-      padding: 6px 12px;
+      padding: 4px 12px;
       font-size: 0.72rem;
-      font-weight: 600;
-      color: var(--text-muted);
+      font-weight: 700;
+      color: var(--text-tertiary);
       cursor: pointer;
-      font-family: var(--font-body);
+      font-family: 'Nunito Sans', sans-serif;
       transition: all 0.2s;
     }
-    .copy-btn:hover { color: var(--text-primary); border-color: var(--border-glow); }
+    .copy-btn:hover { color: var(--text); border-color: var(--border-strong); }
 
     .url-highlight {
       display: inline-flex;
       align-items: center;
       gap: 6px;
-      background: var(--bg-code);
-      border: 1px solid var(--border);
+      background: var(--bg-secondary);
+      border: 1px solid var(--border-subtle);
       border-radius: 6px;
-      padding: 6px 12px;
-      font-family: var(--font-mono);
+      padding: 6px 14px;
+      font-family: 'JetBrains Mono', monospace;
       font-size: 0.82rem;
-      color: var(--green);
+      color: var(--cyan);
       user-select: all;
+      font-weight: 500;
     }
 
-    /* ── Prompt examples ── */
+    .code-inline {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.82rem;
+      background: var(--bg-secondary);
+      padding: 2px 6px;
+      border-radius: 4px;
+      border: 1px solid var(--border-subtle);
+    }
+
+    /* ── Prompt Examples ── */
     .prompts-grid {
       display: grid;
       grid-template-columns: repeat(3, 1fr);
@@ -690,62 +778,42 @@
 
     .prompt-card {
       padding: 24px;
-      border-radius: var(--radius);
-      border: 1px solid var(--border);
-      background: var(--bg-card);
+      border-radius: 14px;
+      border: 2px solid var(--border-subtle);
+      background: var(--surface);
       transition: all 0.3s;
     }
     .prompt-card:hover {
-      border-color: var(--border-glow);
       transform: translateY(-2px);
+      border-color: var(--border-strong);
+      box-shadow: 0 4px 12px rgba(0,0,0,0.05);
     }
 
     .prompt-text {
-      font-size: 0.88rem;
-      color: var(--text-primary);
+      font-size: 0.9rem;
+      color: var(--text);
       font-style: italic;
-      margin-bottom: 10px;
+      margin-bottom: 8px;
       line-height: 1.5;
+      font-weight: 600;
     }
 
     .prompt-desc {
       font-size: 0.78rem;
-      color: var(--text-muted);
+      color: var(--text-tertiary);
     }
 
     /* ── CTA ── */
-    .cta-section {
-      text-align: center;
-      position: relative;
-    }
-
-    .cta-section::before {
-      content: '';
-      position: absolute;
-      top: 50%;
-      left: 50%;
-      transform: translate(-50%, -50%);
-      width: 600px;
-      height: 400px;
-      background: radial-gradient(ellipse at center, var(--accent-glow) 0%, transparent 70%);
-      pointer-events: none;
-    }
-
-    .cta-section .section-title { margin-bottom: 16px; }
-    .cta-section .section-desc {
-      margin: 0 auto 40px;
-      text-align: center;
-    }
+    .cta-section { text-align: center; }
 
     /* ── Footer ── */
     footer {
-      padding: 40px 24px;
-      border-top: 1px solid var(--border);
-      text-align: center;
+      padding: 32px 24px;
+      border-top: 2px dashed color-mix(in srgb, var(--border-subtle) 50%, transparent);
     }
 
     .footer-inner {
-      max-width: var(--max-width);
+      max-width: 1200px;
       margin: 0 auto;
       display: flex;
       align-items: center;
@@ -754,33 +822,25 @@
 
     .footer-left {
       font-size: 0.82rem;
-      color: var(--text-muted);
+      color: var(--text-tertiary);
+      display: flex;
+      align-items: center;
+      gap: 4px;
     }
 
     .footer-links {
       display: flex;
       gap: 24px;
     }
-
     .footer-links a {
       font-size: 0.82rem;
-      color: var(--text-muted);
+      color: var(--text-tertiary);
       text-decoration: none;
       transition: color 0.2s;
     }
     .footer-links a:hover { color: var(--text-secondary); }
 
-    /* ── Animations ── */
-    @keyframes fadeInUp {
-      from { opacity: 0; transform: translateY(20px); }
-      to { opacity: 1; transform: translateY(0); }
-    }
-
-    @keyframes pulse {
-      0%, 100% { opacity: 1; }
-      50% { opacity: 0.4; }
-    }
-
+    /* ── Scroll Fade ── */
     .fade-in {
       opacity: 0;
       transform: translateY(24px);
@@ -792,14 +852,26 @@
     }
 
     /* ── Responsive ── */
+    @media (max-width: 960px) {
+      .hero-inner {
+        flex-direction: column;
+        align-items: center;
+      }
+      .hero-game { order: 2; }
+      .hero-content { order: 1; text-align: center; max-width: 100%; padding-top: 0; }
+      .hero-badge { transform: none; }
+      .hero-buttons { justify-content: center; }
+      .game-frame { width: 100%; max-width: 520px; height: auto; aspect-ratio: 4/3; }
+      .question-card { transform: none; }
+    }
+
     @media (max-width: 768px) {
-      section { padding: 64px 20px; }
-      .hero { padding-top: 120px; padding-bottom: 64px; }
+      section { padding: 56px 20px; }
+      .hero { padding: 24px 20px 48px; }
       .steps { grid-template-columns: 1fr; }
       .features-grid { grid-template-columns: 1fr; }
       .prompts-grid { grid-template-columns: 1fr; }
       .nav-links { display: none; }
-      .nav-hamburger { display: block; }
       .nav-links.open {
         display: flex;
         flex-direction: column;
@@ -807,314 +879,364 @@
         top: 64px;
         left: 0;
         right: 0;
-        background: var(--bg-primary);
-        border-bottom: 1px solid var(--border);
-        padding: 20px 24px;
-        gap: 16px;
+        background: var(--bg);
+        border-bottom: 2px dashed var(--border-subtle);
+        padding: 16px 24px;
+        gap: 12px;
+        z-index: 51;
       }
-      .hero-mockup { margin: 0 -8px; }
-      .mockup-content { padding: 20px; }
-      .game-options { grid-template-columns: 1fr; }
-      .footer-inner {
-        flex-direction: column;
-        gap: 16px;
-      }
-      .code-block pre { font-size: 0.75rem; }
-      .install-panel { padding: 20px; }
+      .hamburger { display: block; }
+      .margin-line, .punch-holes { display: none; }
+      .sticker { display: none; }
+      .footer-inner { flex-direction: column; gap: 12px; text-align: center; }
     }
 
     @media (max-width: 480px) {
-      .hero-buttons { flex-direction: column; align-items: center; }
+      .hero-buttons { flex-direction: column; width: 100%; }
       .btn { width: 100%; justify-content: center; }
-      .template-card { width: 180px; }
+      .template-card { width: 160px; }
+      .game-frame { height: 300px; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .sticker { animation: none; }
+      .template-scroll { animation: none; }
+      .fade-in { opacity: 1; transform: none; transition: none; }
+      #doodles { display: none; }
     }
   </style>
 </head>
 <body>
+  <!-- ── Background Layers ── -->
+  <canvas id="doodles" aria-hidden="true"></canvas>
+  <div class="notebook-lines" aria-hidden="true"></div>
+  <div class="margin-line" aria-hidden="true"></div>
+  <div class="punch-holes" aria-hidden="true">
+    <div class="punch-hole"></div>
+    <div class="punch-hole"></div>
+    <div class="punch-hole"></div>
+    <div class="punch-hole"></div>
+    <div class="punch-hole"></div>
+    <div class="punch-hole"></div>
+    <div class="punch-hole"></div>
+    <div class="punch-hole"></div>
+  </div>
 
-  <!-- Nav -->
-  <nav>
-    <div class="nav-inner">
-      <a href="#" class="nav-logo">Quiz<span>HP</span></a>
-      <div class="nav-links" id="nav-links">
-        <a href="#how-it-works">How it works</a>
-        <a href="#features">Features</a>
-        <a href="#install">Install</a>
-        <a href="https://github.com/bassimeledath/quizhp-mcp" target="_blank" rel="noopener">GitHub</a>
-        <a href="#install" class="nav-cta">Get started</a>
-      </div>
-      <button class="nav-hamburger" onclick="document.getElementById('nav-links').classList.toggle('open')" aria-label="Toggle menu">
-        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
-          <line x1="3" y1="6" x2="21" y2="6" style="stroke: var(--text-secondary)"/>
-          <line x1="3" y1="12" x2="21" y2="12" style="stroke: var(--text-secondary)"/>
-          <line x1="3" y1="18" x2="21" y2="18" style="stroke: var(--text-secondary)"/>
-        </svg>
-      </button>
+  <!-- ── Floating Stickers ── -->
+  <div class="sticker" style="top: 100px; right: 64px; animation-delay: 0s; transform: rotate(1.5deg);" aria-hidden="true">
+    <div class="sticker-inner" style="border-color: rgba(232,122,62,0.4);">
+      <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#E87A3E" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="11" width="12" height="8" rx="1"/><path d="m6 11 3-4h6l3 4"/><line x1="8" y1="15" x2="8" y2="15.01"/><line x1="16" y1="15" x2="16" y2="15.01"/></svg>
+      <div class="sticker-shadow"></div>
     </div>
-  </nav>
+  </div>
 
-  <!-- Hero -->
-  <section class="hero">
-    <div class="container">
-      <div class="hero-badge">
-        <span class="dot"></span>
-        125+ game templates — free &amp; open source
-      </div>
-      <h1>
-        Turn any topic into<br>
-        <span class="gradient">playable quiz games</span>
-      </h1>
-      <p class="hero-sub">
-        An MCP server that transforms AI conversations into interactive mini-games.
-        Archery, puzzles, switches, and 100+ more — right inside Claude or ChatGPT.
-      </p>
-      <div class="hero-buttons">
-        <a href="#install" class="btn btn-primary">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-          Install now
-        </a>
-        <a href="https://github.com/bassimeledath/quizhp-mcp" target="_blank" rel="noopener" class="btn btn-secondary">
-          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
-          View on GitHub
-        </a>
-      </div>
+  <div class="sticker" style="top: 220px; right: 24px; animation-delay: 0.5s; transform: rotate(-1.2deg);" aria-hidden="true">
+    <div class="sticker-inner" style="border-color: rgba(245,167,66,0.4); border-radius: 50%;">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="#F5A742" stroke="#F5A742" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+      <div class="sticker-shadow"></div>
+    </div>
+  </div>
 
-      <!-- Mockup -->
-      <div class="hero-visual">
-        <div class="hero-mockup">
-          <div class="mockup-bar">
-            <span class="mockup-dot"></span>
-            <span class="mockup-dot"></span>
-            <span class="mockup-dot"></span>
+  <div class="sticker" style="bottom: 180px; left: 100px; animation-delay: 1s; transform: rotate(0.8deg);" aria-hidden="true">
+    <div class="sticker-inner" style="border-color: rgba(232,93,74,0.4);">
+      <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#E85D4A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/><path d="M4 22h16"/><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"/><path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"/><path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"/></svg>
+      <div class="sticker-shadow"></div>
+    </div>
+  </div>
+
+  <div class="sticker" style="top: 35%; left: 96px; animation-delay: 1.5s; transform: rotate(-1.8deg);" aria-hidden="true">
+    <div class="sticker-inner" style="border-color: rgba(78,205,196,0.4); padding: 6px;">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="#4ECDC4" stroke="#4ECDC4" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+      <div class="sticker-shadow"></div>
+    </div>
+  </div>
+
+  <!-- ── Content ── -->
+  <div class="content-layer">
+    <!-- Nav -->
+    <nav>
+      <div class="nav-inner">
+        <a href="#" class="nav-logo">Quiz<span>HP</span></a>
+        <div class="nav-right">
+          <div class="nav-links" id="nav-links">
+            <a href="#how-it-works">How it works</a>
+            <a href="#features">Features</a>
+            <a href="#install">Install</a>
+            <a href="https://github.com/bassimeledath/quizhp-mcp" target="_blank" rel="noopener">GitHub</a>
+            <a href="#install" class="nav-cta">Get started</a>
           </div>
-          <div class="mockup-content">
-            <div class="mockup-msg">
-              <div class="mockup-avatar avatar-user">Y</div>
-              <div class="mockup-bubble">Quiz me on the solar system</div>
+          <button class="theme-toggle" onclick="toggleTheme()" aria-label="Toggle dark mode">
+            <svg class="sun-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+            <svg class="moon-icon" style="display:none" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+          </button>
+          <button class="hamburger" onclick="document.getElementById('nav-links').classList.toggle('open')" aria-label="Toggle menu">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+              <line x1="3" y1="6" x2="21" y2="6"/>
+              <line x1="3" y1="12" x2="21" y2="12"/>
+              <line x1="3" y1="18" x2="21" y2="18"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+    </nav>
+
+    <!-- Hero -->
+    <section class="hero">
+      <div class="hero-inner">
+        <!-- Game Demo -->
+        <div class="hero-game">
+          <div class="game-preview">
+            <div class="question-card">
+              <div class="question-dot"></div>
+              <svg class="question-icon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#4ECDC4" stroke-width="2.5" opacity="0.6">
+                <circle cx="12" cy="12" r="10"/>
+                <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/>
+                <circle cx="12" cy="17" r="0.5" fill="#4ECDC4"/>
+              </svg>
+              <p class="question-text">Which planet is known as the Red Planet?</p>
             </div>
-            <div class="mockup-msg">
-              <div class="mockup-avatar avatar-ai">AI</div>
-              <div class="mockup-game">
-                <div class="game-header">Archery Range Balloons &mdash; Question 1 of 5</div>
-                <div class="game-question">Which planet is known as the Red Planet?</div>
-                <div class="game-options">
-                  <div class="game-option">Venus</div>
-                  <div class="game-option active">Mars</div>
-                  <div class="game-option">Jupiter</div>
-                  <div class="game-option">Saturn</div>
-                </div>
-              </div>
+            <div class="game-frame">
+              <iframe id="game-demo" title="Interactive Quiz Game Demo" sandbox="allow-scripts allow-pointer-lock allow-same-origin"></iframe>
             </div>
           </div>
         </div>
-      </div>
-    </div>
-  </section>
 
-  <!-- How it works -->
-  <section id="how-it-works" class="fade-in">
-    <div class="container">
-      <div class="section-header">
-        <div class="section-label">How it works</div>
-        <h2 class="section-title">Three steps to interactive quizzes</h2>
-        <p class="section-desc">Connect the MCP server, ask for a quiz, and play. Each question becomes a unique mini-game.</p>
-      </div>
-      <div class="steps">
-        <div class="step">
-          <div class="step-num">1</div>
-          <h3>Connect</h3>
-          <p>Add the MCP server URL to Claude Desktop, Claude.ai, or ChatGPT. Takes 30 seconds, no API keys needed.</p>
-        </div>
-        <div class="step">
-          <div class="step-num">2</div>
-          <h3>Ask for a quiz</h3>
-          <p>Tell the AI what you want to be quizzed on. Any topic works — science, history, your own documents, code concepts.</p>
-        </div>
-        <div class="step">
-          <div class="step-num">3</div>
-          <h3>Play interactive games</h3>
-          <p>Each question renders as a different mini-game — archery, treasure chests, switches, potion bottles, and 120+ more.</p>
-        </div>
-      </div>
-    </div>
-  </section>
+        <!-- Content -->
+        <div class="hero-content">
+          <div class="hero-badge">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="#4ECDC4" stroke="#4ECDC4" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+            Level Up Your Learning
+          </div>
 
-  <!-- Features -->
-  <section id="features" class="fade-in">
-    <div class="container">
-      <div class="section-header">
-        <div class="section-label">Features</div>
-        <h2 class="section-title">Why QuizHP</h2>
-        <p class="section-desc">Not just another quiz app. Each question is a unique interactive game.</p>
-      </div>
-      <div class="features-grid">
-        <div class="feature">
-          <div class="feature-icon purple">&#127918;</div>
-          <h3>125+ game templates</h3>
-          <p>Every question is rendered as a unique canvas game — archery, bomb defusal, piano keys, constellation mapping, potion mixing, and many more.</p>
-        </div>
-        <div class="feature">
-          <div class="feature-icon green">&#9889;</div>
-          <h3>Works on Claude &amp; ChatGPT</h3>
-          <p>Runs as an MCP server that connects to both Claude (Desktop &amp; Web) and ChatGPT. One server, two platforms.</p>
-        </div>
-        <div class="feature">
-          <div class="feature-icon blue">&#128241;</div>
-          <h3>Mobile-friendly</h3>
-          <p>Responsive game templates with touch support and fullscreen mode. Play quizzes on any device, any screen size.</p>
-        </div>
-        <div class="feature">
-          <div class="feature-icon pink">&#128275;</div>
-          <h3>Free &amp; open source</h3>
-          <p>MIT licensed. No API keys, no accounts, no tracking. Self-host or use the hosted server at mcp.quizhp.com.</p>
-        </div>
-      </div>
-    </div>
-  </section>
+          <h1>Turn any topic into playable quiz games</h1>
 
-  <!-- Template showcase -->
-  <section class="templates-section fade-in">
-    <div class="container">
-      <div class="section-header">
-        <div class="section-label">Game Templates</div>
-        <h2 class="section-title">Every question, a new game</h2>
-        <p class="section-desc">A selection of the 125+ interactive templates that turn quiz questions into mini-games.</p>
-      </div>
-    </div>
-    <div class="template-scroll" aria-hidden="true">
-      <div class="template-card"><div class="template-icon">&#127993;</div><div class="template-name">Archery Range</div><div class="template-type">MCQ</div></div>
-      <div class="template-card"><div class="template-icon">&#128163;</div><div class="template-name">Bomb Defusal</div><div class="template-type">True / False</div></div>
-      <div class="template-card"><div class="template-icon">&#9978;</div><div class="template-name">Potion Bottles</div><div class="template-type">MCQ</div></div>
-      <div class="template-card"><div class="template-icon">&#127917;</div><div class="template-name">Piano Keys</div><div class="template-type">MCQ</div></div>
-      <div class="template-card"><div class="template-icon">&#128302;</div><div class="template-name">Crystal Shards</div><div class="template-type">MCQ</div></div>
-      <div class="template-card"><div class="template-icon">&#9775;</div><div class="template-name">Ancient Runes</div><div class="template-type">MCQ</div></div>
-      <div class="template-card"><div class="template-icon">&#9731;</div><div class="template-name">Arctic Ice Blocks</div><div class="template-type">True / False</div></div>
-      <div class="template-card"><div class="template-icon">&#128640;</div><div class="template-name">Space Defense</div><div class="template-type">MCQ</div></div>
-      <div class="template-card"><div class="template-icon">&#127774;</div><div class="template-name">Comet Capture</div><div class="template-type">MCQ</div></div>
-      <div class="template-card"><div class="template-icon">&#128506;</div><div class="template-name">Treasure Chests</div><div class="template-type">MCQ</div></div>
-      <div class="template-card"><div class="template-icon">&#128301;</div><div class="template-name">Constellation View</div><div class="template-type">MCQ</div></div>
-      <div class="template-card"><div class="template-icon">&#9876;</div><div class="template-name">Blacksmith Anvil</div><div class="template-type">MCQ</div></div>
-      <div class="template-card"><div class="template-icon">&#127861;</div><div class="template-name">Coffee Bean Sacks</div><div class="template-type">MCQ</div></div>
-      <div class="template-card"><div class="template-icon">&#128225;</div><div class="template-name">Vintage Radio</div><div class="template-type">MCQ</div></div>
-      <!-- duplicated for seamless loop -->
-      <div class="template-card"><div class="template-icon">&#127993;</div><div class="template-name">Archery Range</div><div class="template-type">MCQ</div></div>
-      <div class="template-card"><div class="template-icon">&#128163;</div><div class="template-name">Bomb Defusal</div><div class="template-type">True / False</div></div>
-      <div class="template-card"><div class="template-icon">&#9978;</div><div class="template-name">Potion Bottles</div><div class="template-type">MCQ</div></div>
-      <div class="template-card"><div class="template-icon">&#127917;</div><div class="template-name">Piano Keys</div><div class="template-type">MCQ</div></div>
-      <div class="template-card"><div class="template-icon">&#128302;</div><div class="template-name">Crystal Shards</div><div class="template-type">MCQ</div></div>
-      <div class="template-card"><div class="template-icon">&#9775;</div><div class="template-name">Ancient Runes</div><div class="template-type">MCQ</div></div>
-      <div class="template-card"><div class="template-icon">&#9731;</div><div class="template-name">Arctic Ice Blocks</div><div class="template-type">True / False</div></div>
-      <div class="template-card"><div class="template-icon">&#128640;</div><div class="template-name">Space Defense</div><div class="template-type">MCQ</div></div>
-      <div class="template-card"><div class="template-icon">&#127774;</div><div class="template-name">Comet Capture</div><div class="template-type">MCQ</div></div>
-      <div class="template-card"><div class="template-icon">&#128506;</div><div class="template-name">Treasure Chests</div><div class="template-type">MCQ</div></div>
-      <div class="template-card"><div class="template-icon">&#128301;</div><div class="template-name">Constellation View</div><div class="template-type">MCQ</div></div>
-      <div class="template-card"><div class="template-icon">&#9876;</div><div class="template-name">Blacksmith Anvil</div><div class="template-type">MCQ</div></div>
-      <div class="template-card"><div class="template-icon">&#127861;</div><div class="template-name">Coffee Bean Sacks</div><div class="template-type">MCQ</div></div>
-      <div class="template-card"><div class="template-icon">&#128225;</div><div class="template-name">Vintage Radio</div><div class="template-type">MCQ</div></div>
-    </div>
-  </section>
+          <p class="hero-sub">
+            An MCP server for Claude and ChatGPT that transforms questions into 125+ interactive mini-games. Archery, puzzles, switches, and more.
+          </p>
 
-  <!-- Install -->
-  <section id="install" class="install-section fade-in">
-    <div class="container">
-      <div class="section-header">
-        <div class="section-label">Install</div>
-        <h2 class="section-title">Get started in 30 seconds</h2>
-        <p class="section-desc">No API keys, no accounts. Just add the server URL and start quizzing.</p>
-      </div>
-      <div class="install-card">
-        <div class="install-tabs">
-          <button class="install-tab active" onclick="switchTab('claude')" id="tab-claude">Claude</button>
-          <button class="install-tab" onclick="switchTab('chatgpt')" id="tab-chatgpt">ChatGPT</button>
+          <div class="hero-buttons">
+            <a href="#install" class="btn btn-primary">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+              Install now
+            </a>
+            <a href="https://github.com/bassimeledath/quizhp-mcp" target="_blank" rel="noopener" class="btn btn-ghost">
+              <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
+              View on GitHub
+            </a>
+          </div>
         </div>
-        <div class="install-panel active" id="panel-claude">
-          <h3>Claude Desktop &amp; Claude.ai</h3>
-          <p>Add this to your <code style="font-family: var(--font-mono); font-size: 0.82rem; background: var(--bg-code); padding: 2px 6px; border-radius: 4px; border: 1px solid var(--border);">claude_desktop_config.json</code>:</p>
-          <div class="code-block">
-            <button class="copy-btn" onclick="copyCode(this, 'claude-code')">Copy</button>
-            <pre id="claude-code"><span class="punc">{</span>
+      </div>
+    </section>
+
+    <!-- How it works -->
+    <section id="how-it-works" class="fade-in">
+      <div class="container">
+        <div class="section-header">
+          <div class="section-label">How it works</div>
+          <h2 class="section-title">Three steps to interactive quizzes</h2>
+          <p class="section-desc">Connect the MCP server, ask for a quiz, and play. Each question becomes a unique mini-game.</p>
+        </div>
+        <div class="steps">
+          <div class="step">
+            <div class="step-num">1</div>
+            <h3>Connect</h3>
+            <p>Add the MCP server URL to Claude Desktop, Claude.ai, or ChatGPT. Takes 30 seconds, no API keys needed.</p>
+          </div>
+          <div class="step">
+            <div class="step-num">2</div>
+            <h3>Ask for a quiz</h3>
+            <p>Tell the AI what you want to be quizzed on. Any topic works&mdash;science, history, your own documents, code concepts.</p>
+          </div>
+          <div class="step">
+            <div class="step-num">3</div>
+            <h3>Play interactive games</h3>
+            <p>Each question renders as a different mini-game&mdash;archery, treasure chests, switches, potion bottles, and 120+ more.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Features -->
+    <section id="features" class="fade-in">
+      <div class="container">
+        <div class="section-header">
+          <div class="section-label">Features</div>
+          <h2 class="section-title">Why QuizHP</h2>
+          <p class="section-desc">Not just another quiz app. Each question is a unique interactive game.</p>
+        </div>
+        <div class="features-grid">
+          <div class="feature">
+            <div class="feature-icon fi-orange">&#127918;</div>
+            <h3>125+ game templates</h3>
+            <p>Every question is rendered as a unique canvas game&mdash;archery, bomb defusal, piano keys, constellation mapping, potion mixing, and many more.</p>
+          </div>
+          <div class="feature">
+            <div class="feature-icon fi-cyan">&#9889;</div>
+            <h3>Works on Claude &amp; ChatGPT</h3>
+            <p>Runs as an MCP server that connects to both Claude (Desktop &amp; Web) and ChatGPT. One server, two platforms.</p>
+          </div>
+          <div class="feature">
+            <div class="feature-icon fi-amber">&#128241;</div>
+            <h3>Mobile-friendly</h3>
+            <p>Responsive game templates with touch support and fullscreen mode. Play quizzes on any device, any screen size.</p>
+          </div>
+          <div class="feature">
+            <div class="feature-icon fi-success">&#128275;</div>
+            <h3>Free &amp; open source</h3>
+            <p>MIT licensed. No API keys, no accounts, no tracking. Self-host or use the hosted server at mcp.quizhp.com.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Template Showcase -->
+    <section class="templates-section fade-in">
+      <div class="container">
+        <div class="section-header">
+          <div class="section-label">Game Templates</div>
+          <h2 class="section-title">Every question, a new game</h2>
+          <p class="section-desc">A selection of the 125+ interactive templates that turn quiz questions into mini-games.</p>
+        </div>
+      </div>
+      <div class="template-scroll" aria-hidden="true">
+        <div class="template-card"><div class="template-icon">&#127993;</div><div class="template-name">Archery Range</div><div class="template-type">MCQ</div></div>
+        <div class="template-card"><div class="template-icon">&#128163;</div><div class="template-name">Bomb Defusal</div><div class="template-type">True / False</div></div>
+        <div class="template-card"><div class="template-icon">&#9978;</div><div class="template-name">Potion Bottles</div><div class="template-type">MCQ</div></div>
+        <div class="template-card"><div class="template-icon">&#127917;</div><div class="template-name">Piano Keys</div><div class="template-type">MCQ</div></div>
+        <div class="template-card"><div class="template-icon">&#128302;</div><div class="template-name">Crystal Shards</div><div class="template-type">MCQ</div></div>
+        <div class="template-card"><div class="template-icon">&#9775;</div><div class="template-name">Ancient Runes</div><div class="template-type">MCQ</div></div>
+        <div class="template-card"><div class="template-icon">&#9731;</div><div class="template-name">Arctic Ice Blocks</div><div class="template-type">True / False</div></div>
+        <div class="template-card"><div class="template-icon">&#128640;</div><div class="template-name">Space Defense</div><div class="template-type">MCQ</div></div>
+        <div class="template-card"><div class="template-icon">&#127774;</div><div class="template-name">Comet Capture</div><div class="template-type">MCQ</div></div>
+        <div class="template-card"><div class="template-icon">&#128506;</div><div class="template-name">Treasure Chests</div><div class="template-type">MCQ</div></div>
+        <div class="template-card"><div class="template-icon">&#128301;</div><div class="template-name">Constellation View</div><div class="template-type">MCQ</div></div>
+        <div class="template-card"><div class="template-icon">&#9876;</div><div class="template-name">Blacksmith Anvil</div><div class="template-type">MCQ</div></div>
+        <div class="template-card"><div class="template-icon">&#127861;</div><div class="template-name">Coffee Bean Sacks</div><div class="template-type">MCQ</div></div>
+        <div class="template-card"><div class="template-icon">&#128225;</div><div class="template-name">Vintage Radio</div><div class="template-type">MCQ</div></div>
+        <!-- Duplicated for seamless loop -->
+        <div class="template-card"><div class="template-icon">&#127993;</div><div class="template-name">Archery Range</div><div class="template-type">MCQ</div></div>
+        <div class="template-card"><div class="template-icon">&#128163;</div><div class="template-name">Bomb Defusal</div><div class="template-type">True / False</div></div>
+        <div class="template-card"><div class="template-icon">&#9978;</div><div class="template-name">Potion Bottles</div><div class="template-type">MCQ</div></div>
+        <div class="template-card"><div class="template-icon">&#127917;</div><div class="template-name">Piano Keys</div><div class="template-type">MCQ</div></div>
+        <div class="template-card"><div class="template-icon">&#128302;</div><div class="template-name">Crystal Shards</div><div class="template-type">MCQ</div></div>
+        <div class="template-card"><div class="template-icon">&#9775;</div><div class="template-name">Ancient Runes</div><div class="template-type">MCQ</div></div>
+        <div class="template-card"><div class="template-icon">&#9731;</div><div class="template-name">Arctic Ice Blocks</div><div class="template-type">True / False</div></div>
+        <div class="template-card"><div class="template-icon">&#128640;</div><div class="template-name">Space Defense</div><div class="template-type">MCQ</div></div>
+        <div class="template-card"><div class="template-icon">&#127774;</div><div class="template-name">Comet Capture</div><div class="template-type">MCQ</div></div>
+        <div class="template-card"><div class="template-icon">&#128506;</div><div class="template-name">Treasure Chests</div><div class="template-type">MCQ</div></div>
+        <div class="template-card"><div class="template-icon">&#128301;</div><div class="template-name">Constellation View</div><div class="template-type">MCQ</div></div>
+        <div class="template-card"><div class="template-icon">&#9876;</div><div class="template-name">Blacksmith Anvil</div><div class="template-type">MCQ</div></div>
+        <div class="template-card"><div class="template-icon">&#127861;</div><div class="template-name">Coffee Bean Sacks</div><div class="template-type">MCQ</div></div>
+        <div class="template-card"><div class="template-icon">&#128225;</div><div class="template-name">Vintage Radio</div><div class="template-type">MCQ</div></div>
+      </div>
+    </section>
+
+    <!-- Install -->
+    <section id="install" class="install-section fade-in">
+      <div class="container">
+        <div class="section-header">
+          <div class="section-label">Install</div>
+          <h2 class="section-title">Get started in 30 seconds</h2>
+          <p class="section-desc">No API keys, no accounts. Just add the server URL and start quizzing.</p>
+        </div>
+        <div class="install-card">
+          <div class="install-tabs">
+            <button class="install-tab active" onclick="switchTab('claude')" id="tab-claude">Claude</button>
+            <button class="install-tab" onclick="switchTab('chatgpt')" id="tab-chatgpt">ChatGPT</button>
+          </div>
+          <div class="install-panel active" id="panel-claude">
+            <h3>Claude Desktop &amp; Claude.ai</h3>
+            <p>Add this to your <code class="code-inline">claude_desktop_config.json</code>:</p>
+            <div class="code-block">
+              <button class="copy-btn" onclick="copyCode(this, 'claude-code')">Copy</button>
+              <pre id="claude-code"><span class="punc">{</span>
   <span class="key">"mcpServers"</span><span class="punc">:</span> <span class="punc">{</span>
     <span class="key">"quizhp"</span><span class="punc">:</span> <span class="punc">{</span>
       <span class="key">"url"</span><span class="punc">:</span> <span class="str">"https://mcp.quizhp.com/mcp"</span>
     <span class="punc">}</span>
   <span class="punc">}</span>
 <span class="punc">}</span></pre>
+            </div>
+            <p style="margin-top: 16px; font-size: 0.82rem; color: var(--text-tertiary);">
+              Works with Claude Desktop, Claude.ai, and Claude Code (via MCP settings).
+            </p>
           </div>
-          <p style="margin-top: 16px; font-size: 0.82rem; color: var(--text-muted);">
-            Works with Claude Desktop, Claude.ai, and Claude Code (via MCP settings).
-          </p>
-        </div>
-        <div class="install-panel" id="panel-chatgpt">
-          <h3>ChatGPT</h3>
-          <p>Connect the MCP server through ChatGPT's settings:</p>
-          <ol>
-            <li>Open <strong style="color: var(--text-primary)">Settings</strong> in ChatGPT</li>
-            <li>Go to <strong style="color: var(--text-primary)">Connected Apps</strong></li>
-            <li>Click <strong style="color: var(--text-primary)">Add MCP Server</strong></li>
-            <li>Enter the server URL:</li>
-          </ol>
-          <div style="margin-bottom: 16px;">
-            <span class="url-highlight">https://mcp.quizhp.com/mcp</span>
+          <div class="install-panel" id="panel-chatgpt">
+            <h3>ChatGPT</h3>
+            <p>Connect the MCP server through ChatGPT's settings:</p>
+            <ol>
+              <li>Open <strong style="color: var(--text)">Settings</strong> in ChatGPT</li>
+              <li>Go to <strong style="color: var(--text)">Connected Apps</strong></li>
+              <li>Click <strong style="color: var(--text)">Add MCP Server</strong></li>
+              <li>Enter the server URL:</li>
+            </ol>
+            <div style="margin-bottom: 16px;">
+              <span class="url-highlight">https://mcp.quizhp.com/mcp</span>
+            </div>
+            <p style="font-size: 0.82rem; color: var(--text-tertiary); margin-bottom: 0;">
+              Then ask ChatGPT to quiz you on any topic. It will use QuizHP automatically.
+            </p>
           </div>
-          <p style="font-size: 0.82rem; color: var(--text-muted); margin-bottom: 0;">
-            Then ask ChatGPT to quiz you on any topic. It will use QuizHP automatically.
-          </p>
         </div>
-      </div>
 
-      <!-- Example prompts -->
-      <div class="prompts-grid">
-        <div class="prompt-card">
-          <div class="prompt-text">"Quiz me on the solar system"</div>
-          <div class="prompt-desc">Great for quick knowledge checks on any topic</div>
-        </div>
-        <div class="prompt-card">
-          <div class="prompt-text">"Read this PDF and quiz me on the key concepts"</div>
-          <div class="prompt-desc">Upload documents for grounded, contextual quizzes</div>
-        </div>
-        <div class="prompt-card">
-          <div class="prompt-text">"15 hard true/false questions about JavaScript closures"</div>
-          <div class="prompt-desc">Customize count, difficulty, and question type</div>
+        <!-- Example prompts -->
+        <div class="prompts-grid">
+          <div class="prompt-card">
+            <div class="prompt-text">"Quiz me on the solar system"</div>
+            <div class="prompt-desc">Great for quick knowledge checks on any topic</div>
+          </div>
+          <div class="prompt-card">
+            <div class="prompt-text">"Read this PDF and quiz me on the key concepts"</div>
+            <div class="prompt-desc">Upload documents for grounded, contextual quizzes</div>
+          </div>
+          <div class="prompt-card">
+            <div class="prompt-text">"15 hard true/false questions about JavaScript closures"</div>
+            <div class="prompt-desc">Customize count, difficulty, and question type</div>
+          </div>
         </div>
       </div>
-    </div>
-  </section>
+    </section>
 
-  <!-- CTA -->
-  <section class="cta-section fade-in">
-    <div class="container" style="position: relative;">
-      <div class="section-label">Open Source</div>
-      <h2 class="section-title">Built in the open</h2>
-      <p class="section-desc">
-        QuizHP is MIT licensed. Star, fork, contribute, or self-host — it's yours.
-      </p>
-      <div class="hero-buttons">
-        <a href="https://github.com/bassimeledath/quizhp-mcp" target="_blank" rel="noopener" class="btn btn-primary">
-          <svg viewBox="0 0 24 24" fill="currentColor" width="18" height="18"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
-          Star on GitHub
-        </a>
-        <a href="#install" class="btn btn-secondary">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-          Install now
-        </a>
+    <!-- CTA -->
+    <section class="cta-section fade-in">
+      <div class="container">
+        <div class="section-label">Open Source</div>
+        <h2 class="section-title">Built in the open</h2>
+        <p class="section-desc" style="margin: 0 auto 32px; text-align: center;">
+          QuizHP is MIT licensed. Star, fork, contribute, or self-host&mdash;it's yours.
+        </p>
+        <div class="hero-buttons" style="justify-content: center;">
+          <a href="https://github.com/bassimeledath/quizhp-mcp" target="_blank" rel="noopener" class="btn btn-primary">
+            <svg viewBox="0 0 24 24" fill="currentColor" width="18" height="18"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
+            Star on GitHub
+          </a>
+          <a href="#install" class="btn btn-ghost">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            Install now
+          </a>
+        </div>
       </div>
-    </div>
-  </section>
+    </section>
 
-  <!-- Footer -->
-  <footer>
-    <div class="footer-inner">
-      <div class="footer-left">QuizHP &mdash; MIT License</div>
-      <div class="footer-links">
-        <a href="https://github.com/bassimeledath/quizhp-mcp" target="_blank" rel="noopener">GitHub</a>
-        <a href="https://github.com/bassimeledath/quizhp-mcp/issues" target="_blank" rel="noopener">Issues</a>
-        <a href="https://www.npmjs.com/package/quizhp" target="_blank" rel="noopener">npm</a>
+    <!-- Footer -->
+    <footer>
+      <div class="footer-inner">
+        <div class="footer-left">
+          Made with
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="rgb(236,72,153)" stroke="rgb(236,72,153)" stroke-width="1"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
+          for learners &mdash; MIT License
+        </div>
+        <div class="footer-links">
+          <a href="https://github.com/bassimeledath/quizhp-mcp" target="_blank" rel="noopener">GitHub</a>
+          <a href="https://github.com/bassimeledath/quizhp-mcp/issues" target="_blank" rel="noopener">Issues</a>
+          <a href="https://www.npmjs.com/package/quizhp" target="_blank" rel="noopener">npm</a>
+        </div>
       </div>
-    </div>
-  </footer>
+    </footer>
+  </div>
 
   <script>
-    // Tab switching
+    // ── Tab Switching ──
     function switchTab(tab) {
       document.querySelectorAll('.install-tab').forEach(t => t.classList.remove('active'));
       document.querySelectorAll('.install-panel').forEach(p => p.classList.remove('active'));
@@ -1122,17 +1244,34 @@
       document.getElementById('panel-' + tab).classList.add('active');
     }
 
-    // Copy code
+    // ── Copy Code ──
     function copyCode(btn, id) {
-      const el = document.getElementById(id);
-      const text = el.textContent;
+      const text = document.getElementById(id).textContent;
       navigator.clipboard.writeText(text).then(() => {
         btn.textContent = 'Copied!';
         setTimeout(() => { btn.textContent = 'Copy'; }, 2000);
       });
     }
 
-    // Intersection observer for fade-in animations
+    // ── Dark Mode Toggle ──
+    function toggleTheme() {
+      const html = document.documentElement;
+      const isDark = html.getAttribute('data-theme') === 'dark';
+      html.setAttribute('data-theme', isDark ? 'light' : 'dark');
+      document.querySelector('.sun-icon').style.display = isDark ? 'block' : 'none';
+      document.querySelector('.moon-icon').style.display = isDark ? 'none' : 'block';
+      // Redraw doodles with new color
+      if (typeof drawAllDoodles === 'function') drawAllDoodles();
+    }
+
+    // Detect system preference
+    if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
+      document.documentElement.setAttribute('data-theme', 'dark');
+      document.querySelector('.sun-icon').style.display = 'none';
+      document.querySelector('.moon-icon').style.display = 'block';
+    }
+
+    // ── Intersection Observer for Fade-in ──
     const observer = new IntersectionObserver((entries) => {
       entries.forEach(entry => {
         if (entry.isIntersecting) {
@@ -1141,15 +1280,469 @@
         }
       });
     }, { threshold: 0.1 });
-
     document.querySelectorAll('.fade-in').forEach(el => observer.observe(el));
 
-    // Close mobile menu on link click
+    // ── Close Mobile Menu on Link Click ──
     document.querySelectorAll('#nav-links a').forEach(a => {
       a.addEventListener('click', () => {
         document.getElementById('nav-links').classList.remove('open');
       });
     });
+
+    // ── Canvas Doodles ──
+    (function() {
+      const canvas = document.getElementById('doodles');
+      const ctx = canvas.getContext('2d');
+      const dpr = window.devicePixelRatio || 1;
+
+      const DOODLES = [
+        { top: 21, left: 8, size: 60, rotation: 33, opacity: 0.08 },
+        { top: 36, left: 14, size: 40, rotation: 72, opacity: 0.07 },
+        { top: 58, left: 13, size: 80, rotation: 11, opacity: 0.09 },
+        { top: 54, left: 5, size: 45, rotation: -63, opacity: 0.07 },
+        { top: 70, left: 12, size: 38, rotation: -21, opacity: 0.06 },
+        { top: 88, left: 22, size: 40, rotation: 42, opacity: 0.07 },
+        { top: 3, left: 72, size: 50, rotation: -25, opacity: 0.07 },
+        { top: 2, left: 85, size: 42, rotation: 35, opacity: 0.06 },
+        { top: 15, left: 93, size: 38, rotation: -40, opacity: 0.06 },
+        { top: 28, left: 94, size: 36, rotation: 15, opacity: 0.06 },
+        { top: 55, left: 80, size: 48, rotation: -55, opacity: 0.08 },
+        { top: 72, left: 85, size: 42, rotation: -20, opacity: 0.07 },
+        { top: 90, left: 82, size: 46, rotation: -35, opacity: 0.08 },
+        { top: 40, left: 92, size: 40, rotation: -55, opacity: 0.07 },
+      ];
+
+      function resizeCanvas() {
+        canvas.width = window.innerWidth * dpr;
+        canvas.height = window.innerHeight * dpr;
+        canvas.style.width = window.innerWidth + 'px';
+        canvas.style.height = window.innerHeight + 'px';
+      }
+
+      function jitter() { return (Math.random() - 0.5) * 3; }
+
+      const drawFns = [
+        // Circle
+        function(ctx, s) {
+          ctx.beginPath();
+          for (let a = 0; a < Math.PI * 2; a += 0.3) {
+            const r = s * 0.38;
+            const x = s/2 + Math.cos(a) * r + jitter();
+            const y = s/2 + Math.sin(a) * r + jitter();
+            a === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+          }
+          ctx.closePath(); ctx.stroke();
+        },
+        // Spiral
+        function(ctx, s) {
+          ctx.beginPath();
+          for (let t = 0; t < Math.PI * 6; t += 0.3) {
+            const r = t * s * 0.022;
+            const x = s/2 + Math.cos(t) * r + jitter();
+            const y = s/2 + Math.sin(t) * r + jitter();
+            t === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+          }
+          ctx.stroke();
+        },
+        // Cross
+        function(ctx, s) {
+          ctx.beginPath();
+          ctx.moveTo(s*0.2+jitter(), s*0.2+jitter());
+          ctx.lineTo(s*0.8+jitter(), s*0.8+jitter());
+          ctx.stroke();
+          ctx.beginPath();
+          ctx.moveTo(s*0.8+jitter(), s*0.2+jitter());
+          ctx.lineTo(s*0.2+jitter(), s*0.8+jitter());
+          ctx.stroke();
+        },
+        // Heart
+        function(ctx, s) {
+          ctx.beginPath();
+          ctx.moveTo(s/2+jitter(), s*0.85+jitter());
+          ctx.bezierCurveTo(s*0.1+jitter(), s*0.5+jitter(), s*0.1+jitter(), s*0.2+jitter(), s/2+jitter(), s*0.35+jitter());
+          ctx.bezierCurveTo(s*0.9+jitter(), s*0.2+jitter(), s*0.9+jitter(), s*0.5+jitter(), s/2+jitter(), s*0.85+jitter());
+          ctx.fill();
+        },
+        // Squiggle
+        function(ctx, s) {
+          ctx.beginPath();
+          ctx.moveTo(s*0.1+jitter(), s*0.5+jitter());
+          for (let x = 0.2; x <= 0.9; x += 0.12) {
+            const y = 0.5 + Math.sin(x * Math.PI * 4) * 0.2;
+            ctx.lineTo(s*x+jitter(), s*y+jitter());
+          }
+          ctx.stroke();
+        },
+        // Hash
+        function(ctx, s) {
+          ctx.beginPath(); ctx.moveTo(s*0.35+jitter(), s*0.1+jitter()); ctx.lineTo(s*0.3+jitter(), s*0.9+jitter()); ctx.stroke();
+          ctx.beginPath(); ctx.moveTo(s*0.65+jitter(), s*0.1+jitter()); ctx.lineTo(s*0.7+jitter(), s*0.9+jitter()); ctx.stroke();
+          ctx.beginPath(); ctx.moveTo(s*0.1+jitter(), s*0.35+jitter()); ctx.lineTo(s*0.9+jitter(), s*0.3+jitter()); ctx.stroke();
+          ctx.beginPath(); ctx.moveTo(s*0.1+jitter(), s*0.65+jitter()); ctx.lineTo(s*0.9+jitter(), s*0.7+jitter()); ctx.stroke();
+        },
+        // Arrow
+        function(ctx, s) {
+          ctx.beginPath();
+          ctx.moveTo(s*0.1+jitter(), s*0.5+jitter());
+          ctx.lineTo(s*0.85+jitter(), s*0.5+jitter());
+          ctx.stroke();
+          ctx.beginPath();
+          ctx.moveTo(s*0.7+jitter(), s*0.3+jitter());
+          ctx.lineTo(s*0.9+jitter(), s*0.5+jitter());
+          ctx.lineTo(s*0.7+jitter(), s*0.7+jitter());
+          ctx.stroke();
+        },
+        // Star
+        function(ctx, s) {
+          ctx.beginPath();
+          for (let i = 0; i < 10; i++) {
+            const a = (i / 10) * Math.PI * 2 - Math.PI / 2;
+            const r = i % 2 === 0 ? s * 0.38 : s * 0.18;
+            const x = s/2 + Math.cos(a) * r + jitter();
+            const y = s/2 + Math.sin(a) * r + jitter();
+            i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+          }
+          ctx.closePath(); ctx.stroke();
+        },
+      ];
+
+      function drawAllDoodles() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+        const color = isDark ? 'rgba(255,255,255,' : 'rgba(0,0,0,';
+
+        DOODLES.forEach((d, i) => {
+          const x = (d.left / 100) * window.innerWidth;
+          const y = (d.top / 100) * window.innerHeight;
+
+          ctx.save();
+          ctx.scale(dpr, dpr);
+          ctx.translate(x, y);
+          ctx.rotate(d.rotation * Math.PI / 180);
+          ctx.translate(-d.size/2, -d.size/2);
+          ctx.strokeStyle = color + d.opacity + ')';
+          ctx.fillStyle = color + d.opacity + ')';
+          ctx.lineWidth = 2;
+          ctx.lineCap = 'round';
+          ctx.lineJoin = 'round';
+          drawFns[i % drawFns.length](ctx, d.size);
+          ctx.restore();
+        });
+      }
+
+      // Expose for theme toggle
+      window.drawAllDoodles = drawAllDoodles;
+
+      resizeCanvas();
+      drawAllDoodles();
+
+      // Redraw periodically for hand-drawn feel
+      const prefersReduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      if (!prefersReduced) {
+        setInterval(drawAllDoodles, 600);
+      }
+
+      window.addEventListener('resize', () => { resizeCanvas(); drawAllDoodles(); });
+    })();
+
+    // ── Inject Game Template into iframe ──
+    (function() {
+      // Build the archery range game HTML with a real trivia question injected
+      const GAME_QUESTION = `const QUESTION = {
+    type: "mcq",
+    prompt: "Which planet is known as the Red Planet?",
+    choices: [
+      { text: "Venus", is_correct: false, explanation: "Venus is sometimes called Earth's sister planet, but not the Red Planet." },
+      { text: "Mars", is_correct: true, explanation: "Mars appears red due to iron oxide (rust) on its surface." },
+      { text: "Jupiter", is_correct: false, explanation: "Jupiter is known for its Great Red Spot, but isn't called the Red Planet." },
+      { text: "Saturn", is_correct: false, explanation: "Saturn is known for its beautiful rings, not its red color." }
+    ],
+    isLastQuestion: true
+  };`;
+
+      const gameHTML = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Archery Range Balloons</title>
+  <link href="https://fonts.googleapis.com/css2?family=Belanosima:wght@400;600;700&family=Nunito+Sans:wght@400;500;600;700&family=Nunito:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; overflow: hidden; }
+    body { display: flex; justify-content: center; align-items: center; background: #1a1a2e; font-family: 'Nunito Sans', system-ui, sans-serif; }
+    #gameCanvas { background: #16213e; border-radius: 8px; display: block; cursor: crosshair; }
+  </style>
+</head>
+<body>
+  <canvas id="gameCanvas"></canvas>
+  <` + `script>
+  ${GAME_QUESTION}
+
+  const canvas = document.getElementById('gameCanvas');
+  const ctx = canvas.getContext('2d');
+  const W = 720, H = 540;
+  let scale = 1, dpr = 1;
+  let gameState = 'playing';
+  let gameResult = null;
+  let gameExplanation = '';
+  let endScreenTime = 0;
+  let confettiParticles = [];
+
+  const restartButton = { x: W/2 - 170, y: H/2 + 60, w: 150, h: 48 };
+  const nextButton = { x: W/2 + 20, y: H/2 + 60, w: 150, h: 48 };
+
+  function pointInRect(px, py, r) { return px >= r.x && px <= r.x + r.w && py >= r.y && py <= r.y + r.h; }
+
+  function drawButton(r, label, color, pulse) {
+    const p = pulse ? 1 + Math.sin(endScreenTime * 4) * 0.03 : 1;
+    ctx.save(); ctx.translate(r.x+r.w/2, r.y+r.h/2); ctx.scale(p, p); ctx.translate(-(r.x+r.w/2), -(r.y+r.h/2));
+    ctx.fillStyle = color; ctx.beginPath(); ctx.roundRect(r.x, r.y, r.w, r.h, 12); ctx.fill();
+    ctx.fillStyle = '#FFF'; ctx.font = 'bold 18px system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(label, r.x+r.w/2, r.y+r.h/2); ctx.restore();
+  }
+
+  function resizeCanvas() {
+    dpr = window.devicePixelRatio || 1;
+    const sX = window.innerWidth / W, sY = window.innerHeight / H;
+    scale = Math.min(sX, sY);
+    canvas.width = W * scale * dpr; canvas.height = H * scale * dpr;
+    canvas.style.width = (W * scale) + 'px'; canvas.style.height = (H * scale) + 'px';
+  }
+
+  function screenToLogical(sx, sy) {
+    const r = canvas.getBoundingClientRect();
+    return { x: (sx - r.left) * (W / r.width), y: (sy - r.top) * (H / r.height) };
+  }
+
+  const engine = {
+    end(isCorrect, explanation) {
+      if (gameState === 'ended') return;
+      gameState = 'ended'; gameResult = isCorrect; gameExplanation = explanation || ''; endScreenTime = 0;
+      if (isCorrect) {
+        for (let i = 0; i < 50; i++) confettiParticles.push({
+          x: W/2, y: H/2, vx: (Math.random()-0.5)*600, vy: -Math.random()*400-100,
+          size: 4+Math.random()*6, color: ['#FFD700','#FF6B6B','#4ECDC4','#95E1D3','#F38181'][Math.floor(Math.random()*5)],
+          rotation: Math.random()*Math.PI*2, rotationSpeed: (Math.random()-0.5)*10
+        });
+      }
+      if (window.parent && window.parent !== window) window.parent.postMessage({ type: 'quiz-end', isCorrect, explanation: explanation||'' }, '*');
+    }
+  };
+
+  function drawEndScreen(dt) {
+    endScreenTime += dt;
+    confettiParticles = confettiParticles.filter(p => { p.vy += 800*dt; p.x += p.vx*dt; p.y += p.vy*dt; p.rotation += p.rotationSpeed*dt; p.vx *= 0.99; return p.y < H+50; });
+    ctx.fillStyle = 'rgba(0,0,0,0.85)'; ctx.fillRect(0, 0, W, H);
+    confettiParticles.forEach(p => { ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(p.rotation); ctx.fillStyle = p.color; ctx.fillRect(-p.size/2, -p.size/4, p.size, p.size/2); ctx.restore(); });
+    ctx.font = '72px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(gameResult ? '🎉' : '😢', W/2, H/2 - 50);
+    ctx.fillStyle = gameResult ? '#4ADE80' : '#F87171'; ctx.font = 'bold 36px system-ui, sans-serif';
+    ctx.fillText(gameResult ? 'Correct!' : 'Wrong!', W/2, H/2 + 20);
+    if (gameResult) { drawButton(restartButton, 'Restart', '#E87A3E', true); drawButton(nextButton, QUESTION.isLastQuestion ? 'Finish' : 'Next', '#4ECDC4', true); }
+    else { const cr = { x: W/2-75, y: H/2+60, w: 150, h: 48 }; drawButton(cr, 'Restart', '#E87A3E', true); }
+  }
+
+  const COLORS = { bgPrimary:'#FAFAF7', bgSurface:'#FFFFFF', textPrimary:'#2B2B28', textSecondary:'#5A5A54', orange:'#E87A3E', orangeHover:'#D66B31', amber:'#F5A742', cyan:'#4ECDC4', success:'#6BBF59', error:'#E85D4A', borderSubtle:'#E6E6E0', borderStrong:'#D4D4CC', peach:'#FFB89D' };
+  const BALLOON_COLORS = ['#E85D4A','#4ECDC4','#F5A742','#6BBF59'];
+  const BALLOON_LABEL_COLORS = ['#FFF','#FFF','#2B2B28','#FFF'];
+
+  const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  function playSound(type) {
+    const osc = audioCtx.createOscillator(), gain = audioCtx.createGain();
+    osc.connect(gain); gain.connect(audioCtx.destination); const now = audioCtx.currentTime;
+    if (type==='draw') { osc.type='sine'; osc.frequency.setValueAtTime(180,now); osc.frequency.linearRampToValueAtTime(120,now+0.15); gain.gain.setValueAtTime(0.08,now); gain.gain.linearRampToValueAtTime(0,now+0.15); osc.start(now); osc.stop(now+0.15); }
+    else if (type==='release') { osc.type='sawtooth'; osc.frequency.setValueAtTime(200,now); osc.frequency.linearRampToValueAtTime(600,now+0.08); gain.gain.setValueAtTime(0.12,now); gain.gain.linearRampToValueAtTime(0,now+0.2); osc.start(now); osc.stop(now+0.2); }
+    else if (type==='pop') { const n=audioCtx.createBufferSource(),b=audioCtx.createBuffer(1,audioCtx.sampleRate*0.1,audioCtx.sampleRate),d=b.getChannelData(0); for(let i=0;i<d.length;i++) d[i]=(Math.random()*2-1)*Math.exp(-i/(audioCtx.sampleRate*0.02)); n.buffer=b; const g=audioCtx.createGain(); g.gain.setValueAtTime(0.3,now); g.gain.linearRampToValueAtTime(0,now+0.1); n.connect(g); g.connect(audioCtx.destination); n.start(now); }
+    else if (type==='correct') { osc.type='sine'; osc.frequency.setValueAtTime(523,now); osc.frequency.setValueAtTime(659,now+0.1); osc.frequency.setValueAtTime(784,now+0.2); gain.gain.setValueAtTime(0.15,now); gain.gain.linearRampToValueAtTime(0,now+0.4); osc.start(now); osc.stop(now+0.4); }
+    else if (type==='wrong') { osc.type='square'; osc.frequency.setValueAtTime(200,now); osc.frequency.linearRampToValueAtTime(100,now+0.3); gain.gain.setValueAtTime(0.1,now); gain.gain.linearRampToValueAtTime(0,now+0.3); osc.start(now); osc.stop(now+0.3); }
+  }
+
+  let bow = { x: 80, y: 360, angle: -Math.PI/4, drawLength: 0, maxDraw: 80 };
+  let arrow = null, balloons = [], isDragging = false, dragStartY = 0, gameTime = 0, particles = [];
+  let popAnimation = null, selectedBalloon = -1, answerLocked = false;
+  const ANSWER_PANEL_W = 480, ANSWER_PANEL_X = 230, ANSWER_LINE_H = 15;
+
+  function wrapText(text, maxW, font) {
+    ctx.font = font; const words = text.split(' '), lines = []; let cur = '';
+    for (const w of words) { const t = cur ? cur+' '+w : w; if (ctx.measureText(t).width > maxW) { if (cur) lines.push(cur); cur = w; } else cur = t; }
+    if (cur) lines.push(cur); return lines;
+  }
+
+  function initGame() {
+    gameTime = 0; bow = { x: 80, y: 360, angle: -Math.PI/4, drawLength: 0, maxDraw: 80 };
+    arrow = null; isDragging = false; answerLocked = false; selectedBalloon = -1; popAnimation = null; particles = [];
+    const pos = [{ x:260, baseY:100 }, { x:380, baseY:160 }, { x:500, baseY:80 }, { x:620, baseY:140 }];
+    balloons = QUESTION.choices.map((c, i) => ({ x: pos[i].x, y: pos[i].baseY, baseY: pos[i].baseY, radius: 32, color: BALLOON_COLORS[i], labelColor: BALLOON_LABEL_COLORS[i], choice: c, index: i, alive: true, scale: 0, alpha: 0, bobOffset: Math.random()*Math.PI*2, entranceDelay: i*80 }));
+    balloons.forEach((b, i) => {
+      setTimeout(() => {
+        const st = performance.now(), dur = 350;
+        const anim = () => { const t = Math.min((performance.now()-st)/dur, 1); const sp = 1+Math.sin(t*Math.PI*2)*0.2*(1-t); b.scale = t*sp; b.alpha = t; if (t<1) requestAnimationFrame(anim); else { b.scale=1; b.alpha=1; } };
+        requestAnimationFrame(anim);
+      }, i*80);
+    });
+  }
+
+  function updateGame(dt) {
+    if (gameState !== 'playing') return;
+    gameTime += dt;
+    balloons.forEach(b => { if (b.alive) b.y = b.baseY + Math.sin(gameTime*1.5+b.bobOffset)*8; });
+    if (arrow && arrow.active) {
+      arrow.x += arrow.vx*dt; arrow.y += arrow.vy*dt; arrow.vy += 120*dt;
+      for (const b of balloons) {
+        if (!b.alive) continue;
+        const dx = arrow.x-b.x, dy = arrow.y-b.y;
+        if (Math.sqrt(dx*dx+dy*dy) < b.radius+6) {
+          b.alive = false; arrow.active = false; selectedBalloon = b.index; answerLocked = true; playSound('pop');
+          for (let i=0; i<12; i++) particles.push({ x:b.x, y:b.y, vx:(Math.random()-0.5)*300, vy:(Math.random()-0.5)*300-100, color:b.color, size:3+Math.random()*5, life:1, decay:1.5+Math.random() });
+          popAnimation = { x:b.x, y:b.y, time:0, color:b.color };
+          setTimeout(() => { playSound(b.choice.is_correct ? 'correct' : 'wrong'); engine.end(b.choice.is_correct, b.choice.explanation); }, 600);
+          break;
+        }
+      }
+      if (arrow.x > W+20 || arrow.y > H+20 || arrow.x < -20 || arrow.y < -50) { arrow.active = false; setTimeout(() => { if (gameState==='playing' && !answerLocked) arrow = null; }, 300); }
+    }
+    particles.forEach(p => { p.x += p.vx*dt; p.y += p.vy*dt; p.vy += 400*dt; p.life -= p.decay*dt; });
+    particles = particles.filter(p => p.life > 0);
+    if (popAnimation) { popAnimation.time += dt; if (popAnimation.time > 0.5) popAnimation = null; }
+  }
+
+  function drawGame() {
+    const sky = ctx.createLinearGradient(0,0,0,H); sky.addColorStop(0,'#87CEEB'); sky.addColorStop(0.6,'#B8E4F0'); sky.addColorStop(1,'#D4EDDA');
+    ctx.fillStyle = sky; ctx.fillRect(0,0,W,H);
+    drawCloud(150,40,0.7); drawCloud(450,70,0.5); drawCloud(600,25,0.6);
+    const gnd = ctx.createLinearGradient(0,H-100,0,H); gnd.addColorStop(0,'#7CB342'); gnd.addColorStop(1,'#558B2F');
+    ctx.fillStyle = gnd; ctx.fillRect(0,H-100,W,100);
+    ctx.strokeStyle = '#4E7C2A'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(0,H-100); ctx.lineTo(W,H-100); ctx.stroke();
+    drawRangePost(230,H-100); drawRangePost(650,H-100);
+    ctx.strokeStyle = '#8D6E63'; ctx.lineWidth = 2; ctx.setLineDash([8,4]); ctx.beginPath(); ctx.moveTo(230,H-140); ctx.lineTo(650,H-140); ctx.stroke(); ctx.setLineDash([]);
+    balloons.forEach(b => { if (!b.alive || b.alpha<0.1) return; ctx.save(); ctx.globalAlpha=b.alpha; ctx.strokeStyle='#8C8C84'; ctx.lineWidth=1.5; ctx.beginPath(); ctx.moveTo(b.x, b.y+b.radius*b.scale); const sl=50; for(let i=0;i<=10;i++){const t=i/10;ctx.lineTo(b.x+Math.sin(t*Math.PI*3+gameTime*2+b.bobOffset)*4, b.y+b.radius*b.scale+t*sl);} ctx.stroke(); ctx.restore(); });
+    balloons.forEach(b => { if (!b.alive || b.alpha<0.1) return; drawBalloon(b); });
+    if (popAnimation) { const t=popAnimation.time/0.5; ctx.save(); ctx.globalAlpha=1-t; ctx.strokeStyle=popAnimation.color; ctx.lineWidth=3*(1-t); ctx.beginPath(); ctx.arc(popAnimation.x,popAnimation.y,30+t*40,0,Math.PI*2); ctx.stroke(); ctx.restore(); }
+    particles.forEach(p => { ctx.save(); ctx.globalAlpha=Math.max(0,p.life); ctx.fillStyle=p.color; ctx.beginPath(); ctx.arc(p.x,p.y,p.size*p.life,0,Math.PI*2); ctx.fill(); ctx.restore(); });
+    drawBow();
+    if (arrow && arrow.active) drawArrow(arrow.x, arrow.y, Math.atan2(arrow.vy, arrow.vx));
+    else if (isDragging || (!arrow && !answerLocked)) { const nx = bow.x+Math.cos(bow.angle)*(-bow.drawLength); const ny = bow.y+Math.sin(bow.angle)*(-bow.drawLength); drawArrow(nx, ny, bow.angle); }
+    drawAnswerPanel();
+  }
+
+  function drawCloud(cx,cy,s) { ctx.save(); ctx.globalAlpha=0.6; ctx.fillStyle='#FFF'; ctx.beginPath(); ctx.arc(cx,cy,20*s,0,Math.PI*2); ctx.arc(cx+20*s,cy-8*s,16*s,0,Math.PI*2); ctx.arc(cx+40*s,cy,20*s,0,Math.PI*2); ctx.arc(cx+18*s,cy+6*s,14*s,0,Math.PI*2); ctx.fill(); ctx.restore(); }
+  function drawRangePost(x,gy) { ctx.fillStyle='#6D4C41'; ctx.fillRect(x-4,gy-60,8,60); ctx.fillStyle='#8D6E63'; ctx.fillRect(x-6,gy-62,12,6); }
+
+  function drawBalloon(b) {
+    ctx.save(); ctx.globalAlpha=b.alpha; ctx.translate(b.x,b.y); ctx.scale(b.scale,b.scale);
+    const g=ctx.createRadialGradient(-6,-8,4,0,0,b.radius); g.addColorStop(0,lc(b.color,40)); g.addColorStop(0.7,b.color); g.addColorStop(1,dc(b.color,30));
+    ctx.fillStyle=g; ctx.beginPath(); ctx.ellipse(0,0,b.radius*0.85,b.radius,0,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle='rgba(255,255,255,0.3)'; ctx.beginPath(); ctx.ellipse(-8,-10,6,10,-0.4,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle=dc(b.color,40); ctx.beginPath(); ctx.moveTo(-4,b.radius-2); ctx.lineTo(4,b.radius-2); ctx.lineTo(0,b.radius+6); ctx.closePath(); ctx.fill();
+    ctx.font="700 22px 'Belanosima',sans-serif"; ctx.fillStyle=b.labelColor; ctx.textAlign='center'; ctx.textBaseline='middle';
+    ctx.fillText(String.fromCharCode(65+b.index), 0, -2); ctx.restore();
+  }
+
+  function drawBow() {
+    ctx.save(); ctx.translate(bow.x,bow.y);
+    const bl=90, cv=25+bow.drawLength*0.15;
+    ctx.strokeStyle='#6D4C41'; ctx.lineWidth=5; ctx.lineCap='round'; ctx.beginPath(); ctx.moveTo(0,-bl/2); ctx.quadraticCurveTo(cv,0,0,bl/2); ctx.stroke();
+    ctx.strokeStyle='#8D6E63'; ctx.lineWidth=2; ctx.beginPath(); ctx.moveTo(1,-bl/2+5); ctx.quadraticCurveTo(cv-3,0,1,bl/2-5); ctx.stroke();
+    ctx.strokeStyle='#D4D4CC'; ctx.lineWidth=2; ctx.beginPath(); ctx.moveTo(0,-bl/2); ctx.lineTo(-bow.drawLength,0); ctx.lineTo(0,bl/2); ctx.stroke();
+    if (isDragging && bow.drawLength>5) { const pw=bow.drawLength/bow.maxDraw; ctx.fillStyle=pw<0.5?COLORS.amber:(pw<0.8?COLORS.orange:COLORS.error); ctx.globalAlpha=0.7; ctx.beginPath(); ctx.arc(-bow.drawLength-15,0,5,0,Math.PI*2); ctx.fill(); ctx.globalAlpha=1; }
+    ctx.restore();
+  }
+
+  function drawArrow(x,y,a) {
+    ctx.save(); ctx.translate(x,y); ctx.rotate(a); const l=50;
+    ctx.strokeStyle='#8D6E63'; ctx.lineWidth=2.5; ctx.beginPath(); ctx.moveTo(-l/2,0); ctx.lineTo(l/2,0); ctx.stroke();
+    ctx.fillStyle='#5A5A54'; ctx.beginPath(); ctx.moveTo(l/2+8,0); ctx.lineTo(l/2-4,-5); ctx.lineTo(l/2-4,5); ctx.closePath(); ctx.fill();
+    ctx.fillStyle=COLORS.error; ctx.beginPath(); ctx.moveTo(-l/2,0); ctx.lineTo(-l/2+10,-4); ctx.lineTo(-l/2+8,0); ctx.closePath(); ctx.fill();
+    ctx.fillStyle=COLORS.orange; ctx.beginPath(); ctx.moveTo(-l/2,0); ctx.lineTo(-l/2+10,4); ctx.lineTo(-l/2+8,0); ctx.closePath(); ctx.fill();
+    ctx.restore();
+  }
+
+  function drawAnswerPanel() {
+    const py=H-100, ph=100;
+    ctx.fillStyle='rgba(250,250,247,0.92)'; ctx.beginPath(); ctx.roundRect(ANSWER_PANEL_X-10,py,ANSWER_PANEL_W+20,ph,12); ctx.fill();
+    ctx.strokeStyle=COLORS.borderSubtle; ctx.lineWidth=1.5; ctx.beginPath(); ctx.roundRect(ANSWER_PANEL_X-10,py,ANSWER_PANEL_W+20,ph,12); ctx.stroke();
+    const gw=ANSWER_PANEL_W/2-6, gh=40, gap=5, sx=ANSWER_PANEL_X, sy=py+10;
+    QUESTION.choices.forEach((c,i) => {
+      const col=i%2, row=Math.floor(i/2), bx=sx+col*(gw+gap*2), by=sy+row*(gh+gap);
+      let bg=COLORS.bgSurface, bc=COLORS.borderSubtle; const isHit=selectedBalloon===i;
+      if (isHit) { bg=c.is_correct?'#E8F8E5':'#FDECEB'; bc=c.is_correct?COLORS.success:COLORS.error; }
+      ctx.fillStyle=bg; ctx.beginPath(); ctx.roundRect(bx,by,gw,gh,8); ctx.fill();
+      ctx.strokeStyle=bc; ctx.lineWidth=isHit?2:1; ctx.beginPath(); ctx.roundRect(bx,by,gw,gh,8); ctx.stroke();
+      ctx.fillStyle=BALLOON_COLORS[i]; ctx.beginPath(); ctx.arc(bx+16,by+gh/2,10,0,Math.PI*2); ctx.fill();
+      ctx.font="700 12px 'Belanosima',sans-serif"; ctx.fillStyle=BALLOON_LABEL_COLORS[i]; ctx.textAlign='center'; ctx.textBaseline='middle';
+      ctx.fillText(String.fromCharCode(65+i), bx+16, by+gh/2);
+      ctx.font="400 14px 'Nunito',sans-serif"; ctx.fillStyle=COLORS.textPrimary; ctx.textAlign='left'; ctx.textBaseline='top';
+      const tw=gw-38, lines=wrapText(c.text,tw,"400 14px 'Nunito',sans-serif"), tsy=by+(gh-lines.length*ANSWER_LINE_H)/2;
+      lines.forEach((ln,li) => ctx.fillText(ln, bx+32, tsy+li*ANSWER_LINE_H));
+    });
+  }
+
+  function lc(h,a) { const n=parseInt(h.slice(1),16); return 'rgb('+Math.min(255,(n>>16)+a)+','+Math.min(255,((n>>8)&0xff)+a)+','+Math.min(255,(n&0xff)+a)+')'; }
+  function dc(h,a) { const n=parseInt(h.slice(1),16); return 'rgb('+Math.max(0,(n>>16)-a)+','+Math.max(0,((n>>8)&0xff)-a)+','+Math.max(0,(n&0xff)-a)+')'; }
+
+  canvas.addEventListener('mousedown', e => {
+    if (gameState!=='playing'||answerLocked) return; if (arrow&&arrow.active) return;
+    const {x,y}=screenToLogical(e.clientX,e.clientY);
+    if (x<200&&y>200&&y<500) { isDragging=true; dragStartY=y; bow.drawLength=0; arrow=null; if(audioCtx.state==='suspended')audioCtx.resume(); playSound('draw'); }
+  });
+  canvas.addEventListener('mousemove', e => {
+    if (!isDragging||gameState!=='playing') return;
+    const {x,y}=screenToLogical(e.clientX,e.clientY);
+    bow.drawLength=Math.min(Math.max(0,bow.x+40-x),bow.maxDraw);
+    bow.angle=Math.max(-Math.PI/2.5,Math.min(Math.PI/6,Math.atan2(y-bow.y,x-bow.x)));
+  });
+  canvas.addEventListener('mouseup', e => {
+    if (!isDragging||gameState!=='playing') return; isDragging=false;
+    if (bow.drawLength>10) { const pw=(bow.drawLength/bow.maxDraw)*700+200; arrow={x:bow.x+Math.cos(bow.angle)*10,y:bow.y+Math.sin(bow.angle)*10,vx:Math.cos(bow.angle)*pw,vy:Math.sin(bow.angle)*pw,active:true}; playSound('release'); }
+    bow.drawLength=0;
+  });
+
+  // Touch support
+  canvas.addEventListener('touchstart', e => {
+    e.preventDefault(); const t = e.touches[0];
+    canvas.dispatchEvent(new MouseEvent('mousedown', { clientX: t.clientX, clientY: t.clientY }));
+  }, { passive: false });
+  canvas.addEventListener('touchmove', e => {
+    e.preventDefault(); const t = e.touches[0];
+    canvas.dispatchEvent(new MouseEvent('mousemove', { clientX: t.clientX, clientY: t.clientY }));
+  }, { passive: false });
+  canvas.addEventListener('touchend', e => {
+    e.preventDefault();
+    canvas.dispatchEvent(new MouseEvent('mouseup', {}));
+  }, { passive: false });
+
+  let lastTime = performance.now();
+  function gameLoop(now) {
+    const dt = Math.min((now - lastTime) / 1000, 0.05); lastTime = now;
+    ctx.setTransform(scale*dpr, 0, 0, scale*dpr, 0, 0);
+    if (gameState==='playing') { updateGame(dt); drawGame(); } else { drawGame(); drawEndScreen(dt); }
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    requestAnimationFrame(gameLoop);
+  }
+
+  document.addEventListener('keydown', e => { if (gameState==='ended'&&e.code==='KeyR') { gameState='playing'; gameResult=null; gameExplanation=''; confettiParticles=[]; initGame(); } });
+
+  canvas.addEventListener('click', e => {
+    if (gameState!=='ended') return;
+    const {x,y}=screenToLogical(e.clientX,e.clientY);
+    if (gameResult) {
+      if (pointInRect(x,y,restartButton)) { gameState='playing'; gameResult=null; gameExplanation=''; confettiParticles=[]; initGame(); return; }
+      if (pointInRect(x,y,nextButton)) { if(window.parent&&window.parent!==window) window.parent.postMessage({type:'quiz-next'},'*'); return; }
+    } else {
+      const cr={x:W/2-75,y:H/2+60,w:150,h:48};
+      if (pointInRect(x,y,cr)) { gameState='playing'; gameResult=null; gameExplanation=''; confettiParticles=[]; initGame(); }
+    }
+  });
+
+  window.addEventListener('resize', resizeCanvas);
+  resizeCanvas(); initGame(); requestAnimationFrame(gameLoop);
+  <` + `/script>
+</body>
+</html>`;
+
+      document.getElementById('game-demo').srcdoc = gameHTML;
+    })();
   </script>
 </body>
 </html>
