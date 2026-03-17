@@ -48,7 +48,16 @@ export function injectQuestionIntoTemplate(
   }
 
   result = injectResponsiveCSS(result);
-  result = appendPostMessageShim(result, sessionId);
+
+  // Inject sessionId as a global BEFORE the shim reads it.
+  // This is done as raw string manipulation (not via template literals)
+  // so Vite's minifier can't interfere with the value.
+  if (sessionId) {
+    const sidScript = '<script>window.__QUIZ_SESSION_ID=' + JSON.stringify(sessionId) + ';</script>';
+    result = result.replace(/<body[^>]*>/i, (match) => match + sidScript);
+  }
+
+  result = appendPostMessageShim(result);
 
   return result;
 }
@@ -88,39 +97,39 @@ canvas#game {
   return css + "\n" + html;
 }
 
-function appendPostMessageShim(html: string, sessionId?: string): string {
-  const sid = sessionId ? JSON.stringify(sessionId) : "null";
-  const shim = `
-<script>
-(function(){
-  var SESSION_ID = ${sid};
-  function post(type, detail){
-    try { parent.postMessage(Object.assign({type, sessionId: SESSION_ID}, detail), '*'); } catch(e){}
-  }
-
-  Object.defineProperty(window, '__report', {
-    value: function(choiceIndex, isCorrect, explanation){
-      post('quiz-choice', { choiceIndex, isCorrect: !!isCorrect, explanation: explanation || '' });
-    },
-    writable: false
-  });
-
-  var iv = setInterval(function(){
-    try {
-      if (window.engine && window.engine.end && !window.engine.__wrapped){
-        var _end = window.engine.end.bind(window.engine);
-        window.engine.end = function(ok, explanation){
-          try { post('quiz-end', { isCorrect: !!ok, explanation: explanation || '' }); } catch(e){}
-          return _end(ok, explanation);
-        };
-        window.engine.__wrapped = true;
-        try { post('quiz-ready', {}); } catch(e){}
-        clearInterval(iv);
-      }
-    } catch(e) {}
-  }, 50);
-})();
-</script>`.trim();
+function appendPostMessageShim(html: string): string {
+  const shim = [
+    "<script>",
+    "(function(){",
+    "  var SESSION_ID = window.__QUIZ_SESSION_ID || null;",
+    "  function post(type, detail){",
+    "    try { parent.postMessage(Object.assign({type: type, sessionId: SESSION_ID}, detail), '*'); } catch(e){}",
+    "  }",
+    "",
+    "  Object.defineProperty(window, '__report', {",
+    "    value: function(choiceIndex, isCorrect, explanation){",
+    "      post('quiz-choice', { choiceIndex: choiceIndex, isCorrect: !!isCorrect, explanation: explanation || '' });",
+    "    },",
+    "    writable: false",
+    "  });",
+    "",
+    "  var iv = setInterval(function(){",
+    "    try {",
+    "      if (window.engine && window.engine.end && !window.engine.__wrapped){",
+    "        var _end = window.engine.end.bind(window.engine);",
+    "        window.engine.end = function(ok, explanation){",
+    "          try { post('quiz-end', { isCorrect: !!ok, explanation: explanation || '' }); } catch(e){}",
+    "          return _end(ok, explanation);",
+    "        };",
+    "        window.engine.__wrapped = true;",
+    "        try { post('quiz-ready', {}); } catch(e){}",
+    "        clearInterval(iv);",
+    "      }",
+    "    } catch(e) {}",
+    "  }, 50);",
+    "})();",
+    "</script>",
+  ].join("\n");
 
   if (/(<\/body>\s*<\/html>\s*)$/i.test(html)) {
     return html.replace(/<\/body>\s*<\/html>\s*$/i, `${shim}\n</body></html>`);
