@@ -355,28 +355,26 @@ export function QuizContainer({
         <div className="flex-1 min-h-0 overflow-hidden relative">
           <button
             onClick={() => setShowInfo(true)}
+            className="flex items-center justify-center opacity-80 transition-all duration-200 hover:opacity-100 hover:scale-110"
             style={{
               position: "absolute",
               top: 6,
               left: 8,
               zIndex: 10,
-              fontSize: "12px",
-              fontWeight: 600,
-              color: "var(--qz-text-secondary)",
+              width: 24,
+              height: 24,
+              borderRadius: "50%",
+              border: "1.5px solid var(--qz-border-primary, rgba(255,255,255,0.2))",
               background: "rgba(0,0,0,0.45)",
-              borderRadius: "9999px",
-              width: 22,
-              height: 22,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              border: "none",
               cursor: "pointer",
-              opacity: 0.75,
+              padding: 0,
             }}
             aria-label="Game info"
           >
-            i
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--qz-text-secondary, #9ca3af)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 16v-4" />
+              <path d="M12 8h.01" />
+            </svg>
           </button>
           <span
             style={{
@@ -454,28 +452,26 @@ export function QuizContainer({
         <div className="relative w-full" style={{ maxWidth: 720 }}>
           <button
             onClick={() => setShowInfo(true)}
+            className="flex items-center justify-center opacity-80 transition-all duration-200 hover:opacity-100 hover:scale-110"
             style={{
               position: "absolute",
               top: 8,
               left: 10,
               zIndex: 10,
-              fontSize: "13px",
-              fontWeight: 600,
-              color: "var(--qz-text-secondary)",
+              width: 26,
+              height: 26,
+              borderRadius: "50%",
+              border: "1.5px solid var(--qz-border-primary, rgba(255,255,255,0.2))",
               background: "rgba(0,0,0,0.45)",
-              borderRadius: "9999px",
-              width: 24,
-              height: 24,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              border: "none",
               cursor: "pointer",
-              opacity: 0.75,
+              padding: 0,
             }}
             aria-label="Game info"
           >
-            i
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--qz-text-secondary, #9ca3af)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 16v-4" />
+              <path d="M12 8h.01" />
+            </svg>
           </button>
           <span
             style={{
