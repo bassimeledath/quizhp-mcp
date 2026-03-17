@@ -1,7 +1,7 @@
 name = "quizhp-mcp"
 main = "dist/server/worker.js"
 compatibility_date = "2024-12-01"
-account_id = "e0495ef26972403d37cdae7e9e807ed2"
+# account_id — set via `wrangler login` or the CLOUDFLARE_ACCOUNT_ID env var
 
 routes = [
   { pattern = "mcp.quizhp.com/*", zone_name = "quizhp.com" }

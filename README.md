@@ -1,10 +1,10 @@
 # QuizHP MCP Server
 
-An interactive quiz MCP server that turns any topic into playable mini-games. Each question renders as a unique canvas game — archery, puzzles, switches, and 100+ more templates.
+An interactive quiz MCP server that turns any topic into playable mini-games. Each question renders as a unique canvas game — archery, puzzles, switches, and 125+ more templates.
 
 ## Features
 
-- **100+ game templates** — MCQ and true/false questions each get a unique mini-game (piano keys, treasure chests, archery, bomb defusal, etc.)
+- **125+ game templates** — MCQ and true/false questions each get a unique mini-game (piano keys, treasure chests, archery, bomb defusal, etc.)
 - **Multi-platform** — responsive layouts for desktop and mobile with fullscreen support
 - **MCP App UI** — rich interactive widget rendered inside Claude or ChatGPT
 - **Three deployment modes** — stdio (Claude Desktop), HTTP (remote server), Cloudflare Worker
@@ -122,7 +122,7 @@ view/src/
   hooks/            — postMessage communication hook
   lib/              — Template injection utilities
 
-templates/          — 100+ HTML canvas game templates
+templates/          — 125+ HTML canvas game templates
   web/mcq/          — Desktop multiple-choice games
   web/true-false/   — Desktop true/false games
   mobile/mcq/       — Mobile multiple-choice games
