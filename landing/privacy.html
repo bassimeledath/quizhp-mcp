@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Privacy Policy — QuizHP</title>
+  <meta name="description" content="QuizHP privacy policy. We collect no personal data.">
+  <meta name="theme-color" content="#FAFAF7">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Belanosima:wght@400;600;700&family=Nunito+Sans:wght@400;500;600;700;800&family=Nunito:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #FAFAF7;
+      --surface: #FFFFFF;
+      --bg-secondary: #F5F5F0;
+      --text: #2B2B28;
+      --text-secondary: #5A5A54;
+      --text-tertiary: #8C8C84;
+      --border-subtle: #E6E6E0;
+      --border-strong: #D4D4CC;
+      --orange: #E87A3E;
+      --orange-hover: #D66B31;
+      --cyan: #4ECDC4;
+      --notebook-blue: #94C5DE;
+      --notebook-red: #E85C5C;
+    }
+
+    [data-theme="dark"] {
+      --bg: #1C1C1A;
+      --surface: #2A2A27;
+      --bg-secondary: #363633;
+      --text: #F5F5F0;
+      --text-secondary: #C2C2B8;
+      --text-tertiary: #8C8C84;
+      --border-subtle: #424240;
+      --border-strong: #5A5A56;
+    }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      font-family: 'Nunito', system-ui, -apple-system, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+      overflow-x: hidden;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* ── Notebook Background ── */
+    .notebook-lines {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      z-index: 0;
+      opacity: 0.10;
+      background-image: repeating-linear-gradient(
+        transparent, transparent 31px, var(--notebook-blue) 31px, var(--notebook-blue) 32px
+      );
+      background-size: 100% 32px;
+    }
+
+    .margin-line {
+      position: fixed;
+      left: 80px;
+      top: 0;
+      bottom: 0;
+      width: 2px;
+      background: var(--notebook-red);
+      opacity: 0.35;
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    .punch-holes {
+      position: fixed;
+      left: 28px;
+      top: 0;
+      bottom: 0;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-around;
+      padding: 48px 0;
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    .punch-hole {
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      border: 2px solid var(--border-subtle);
+      background: var(--surface);
+      opacity: 0.3;
+    }
+
+    /* ── Content Layer ── */
+    .content-layer {
+      position: relative;
+      z-index: 2;
+    }
+
+    /* ── Nav ── */
+    nav {
+      position: sticky;
+      top: 0;
+      z-index: 50;
+      background: color-mix(in srgb, var(--bg) 92%, transparent);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border-bottom: 2px dashed color-mix(in srgb, var(--border-subtle) 60%, transparent);
+    }
+
+    .nav-inner {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 0 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      height: 64px;
+    }
+
+    .nav-logo {
+      font-family: 'Belanosima', sans-serif;
+      font-size: 1.5rem;
+      font-weight: 700;
+      color: var(--text);
+      text-decoration: none;
+      transition: transform 0.2s;
+    }
+    .nav-logo:hover { transform: scale(1.05); }
+    .nav-logo span { color: var(--orange); }
+
+    .nav-right {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .theme-toggle {
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      border: 2px solid var(--border-subtle);
+      background: var(--orange);
+      color: #fff;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.3s;
+      font-size: 0;
+      flex-shrink: 0;
+    }
+    [data-theme="dark"] .theme-toggle { background: var(--cyan); }
+    .theme-toggle svg { width: 18px; height: 18px; }
+
+    /* ── Policy Content ── */
+    .policy {
+      max-width: 720px;
+      margin: 0 auto;
+      padding: 56px 24px 80px;
+    }
+
+    .policy h1 {
+      font-family: 'Belanosima', sans-serif;
+      font-size: clamp(2rem, 4vw, 2.75rem);
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      margin-bottom: 8px;
+      color: var(--text);
+    }
+
+    .policy .updated {
+      font-size: 0.875rem;
+      color: var(--text-tertiary);
+      margin-bottom: 40px;
+      font-family: 'Nunito Sans', sans-serif;
+    }
+
+    .policy h2 {
+      font-family: 'Nunito Sans', sans-serif;
+      font-size: 1.2rem;
+      font-weight: 700;
+      color: var(--text);
+      margin-top: 36px;
+      margin-bottom: 12px;
+    }
+
+    .policy p {
+      color: var(--text-secondary);
+      margin-bottom: 16px;
+      line-height: 1.7;
+    }
+
+    .policy ul {
+      list-style: none;
+      padding: 0;
+      margin-bottom: 16px;
+    }
+
+    .policy ul li {
+      position: relative;
+      padding-left: 20px;
+      color: var(--text-secondary);
+      margin-bottom: 8px;
+      line-height: 1.6;
+    }
+
+    .policy ul li::before {
+      content: '';
+      position: absolute;
+      left: 0;
+      top: 10px;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--orange);
+      opacity: 0.6;
+    }
+
+    .policy a {
+      color: var(--orange);
+      text-decoration: none;
+      transition: color 0.2s;
+    }
+    .policy a:hover { color: var(--orange-hover); }
+
+    /* ── Footer ── */
+    footer {
+      padding: 32px 24px;
+      border-top: 2px dashed color-mix(in srgb, var(--border-subtle) 50%, transparent);
+    }
+
+    .footer-inner {
+      max-width: 1200px;
+      margin: 0 auto;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .footer-left {
+      font-size: 0.82rem;
+      color: var(--text-tertiary);
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .footer-links {
+      display: flex;
+      gap: 24px;
+    }
+    .footer-links a {
+      font-size: 0.82rem;
+      color: var(--text-tertiary);
+      text-decoration: none;
+      transition: color 0.2s;
+    }
+    .footer-links a:hover { color: var(--text-secondary); }
+
+    /* ── Responsive ── */
+    @media (max-width: 768px) {
+      .margin-line, .punch-holes { display: none; }
+      .footer-inner { flex-direction: column; gap: 12px; text-align: center; }
+    }
+  </style>
+</head>
+<body>
+  <!-- Notebook texture -->
+  <div class="notebook-lines"></div>
+  <div class="margin-line"></div>
+  <div class="punch-holes">
+    <div class="punch-hole"></div>
+    <div class="punch-hole"></div>
+    <div class="punch-hole"></div>
+  </div>
+
+  <div class="content-layer">
+    <!-- Nav -->
+    <nav>
+      <div class="nav-inner">
+        <a href="/" class="nav-logo">Quiz<span>HP</span></a>
+        <div class="nav-right">
+          <button class="theme-toggle" onclick="toggleTheme()" aria-label="Toggle theme">
+            <svg class="sun-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+            <svg class="moon-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" style="display:none"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+          </button>
+        </div>
+      </div>
+    </nav>
+
+    <!-- Policy Content -->
+    <main class="policy">
+      <h1>Privacy Policy</h1>
+      <p class="updated">Last updated: March 2026</p>
+
+      <h2>1. What QuizHP Does</h2>
+      <p>QuizHP is an MCP (Model Context Protocol) server that generates interactive quiz games. When you ask an AI assistant (Claude or ChatGPT) to create a quiz, the assistant generates questions and sends them to QuizHP, which returns an interactive game widget.</p>
+
+      <h2>2. Data We Collect</h2>
+      <p>QuizHP collects <strong>no personal data</strong>. Specifically:</p>
+      <ul>
+        <li>No user accounts or authentication required</li>
+        <li>No cookies or tracking</li>
+        <li>No analytics or telemetry</li>
+        <li>No conversation data stored</li>
+        <li>No IP addresses logged</li>
+      </ul>
+
+      <h2>3. Data We Process Temporarily</h2>
+      <p>When a quiz is created, the questions and answers are held in server memory for up to 1 hour to support the active game session. This data is:</p>
+      <ul>
+        <li>Not written to any database or persistent storage</li>
+        <li>Not shared with any third party</li>
+        <li>Automatically deleted when the session expires or the server restarts</li>
+      </ul>
+
+      <h2>4. Data We Do NOT Collect</h2>
+      <ul>
+        <li>No personal information (name, email, etc.)</li>
+        <li>No conversation history</li>
+        <li>No AI chat context beyond the quiz questions</li>
+        <li>No payment or financial information</li>
+        <li>No health, government, or credential data</li>
+      </ul>
+
+      <h2>5. Third-Party Services</h2>
+      <p>QuizHP runs on Cloudflare Workers. Cloudflare may process connection metadata (IP addresses, TLS info) per their own privacy policy. QuizHP itself does not access or store this metadata.</p>
+
+      <h2>6. Children's Privacy</h2>
+      <p>QuizHP does not knowingly collect any personal information from anyone, including children under 13.</p>
+
+      <h2>7. Changes</h2>
+      <p>We may update this policy. Changes will be posted at this URL.</p>
+
+      <h2>8. Contact</h2>
+      <p>For privacy questions: <a href="mailto:[SUPPORT_EMAIL]">[SUPPORT_EMAIL]</a><br>
+      GitHub: <a href="https://github.com/bassimeledath/quizhp-mcp" target="_blank" rel="noopener">github.com/bassimeledath/quizhp-mcp</a></p>
+    </main>
+
+    <!-- Footer -->
+    <footer>
+      <div class="footer-inner">
+        <div class="footer-left">
+          Made with
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="rgb(236,72,153)" stroke="rgb(236,72,153)" stroke-width="1"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
+          for learners &mdash; MIT License
+        </div>
+        <div class="footer-links">
+          <a href="https://github.com/bassimeledath/quizhp-mcp" target="_blank" rel="noopener">GitHub</a>
+          <a href="https://github.com/bassimeledath/quizhp-mcp/issues" target="_blank" rel="noopener">Issues</a>
+          <a href="https://www.npmjs.com/package/quizhp" target="_blank" rel="noopener">npm</a>
+        </div>
+      </div>
+    </footer>
+  </div>
+
+  <script>
+    function toggleTheme() {
+      const html = document.documentElement;
+      const current = html.getAttribute('data-theme');
+      const next = current === 'dark' ? 'light' : 'dark';
+      html.setAttribute('data-theme', next);
+      localStorage.setItem('theme', next);
+      updateThemeIcon(next);
+    }
+
+    function updateThemeIcon(theme) {
+      const sun = document.querySelector('.sun-icon');
+      const moon = document.querySelector('.moon-icon');
+      if (theme === 'dark') {
+        sun.style.display = 'none';
+        moon.style.display = 'block';
+      } else {
+        sun.style.display = 'block';
+        moon.style.display = 'none';
+      }
+    }
+
+    // Init theme
+    const saved = localStorage.getItem('theme');
+    const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+    const theme = saved || (prefersDark ? 'dark' : 'light');
+    if (theme === 'dark') document.documentElement.setAttribute('data-theme', 'dark');
+    updateThemeIcon(theme);
+  </script>
+</body>
+</html>

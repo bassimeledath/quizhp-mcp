@@ -100,7 +100,7 @@ The quiz renders as interactive mini-games (archery, puzzles, switches, etc.) â€
       annotations: {
         readOnlyHint: true,
         destructiveHint: false,
-        idempotentHint: true,
+        idempotentHint: false,
         openWorldHint: false,
       },
       _meta: {
