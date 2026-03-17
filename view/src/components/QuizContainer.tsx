@@ -1,7 +1,7 @@
 import { useEffect, useCallback, useState, useMemo } from "react";
 import type { App } from "@modelcontextprotocol/ext-apps";
 import type { McpUiHostContext } from "@modelcontextprotocol/ext-apps";
-import type { Question, Platform, Template } from "../types";
+import type { Question, Template } from "../types";
 import { useQuizStore } from "../store/quiz-store";
 import { GameRuntime } from "./GameRuntime";
 import { EndScreen } from "./EndScreen";
@@ -17,16 +17,10 @@ import { injectQuestionIntoTemplate } from "../lib/template-injector";
 interface QuizContainerProps {
   app: App;
   questions: Question[];
-  title?: string;
-  gameId?: string;
   hostContext?: McpUiHostContext;
   preloadedTemplates?: Template[];
 }
 
-/**
- * Main quiz container — adapted from the ChatGPT widget's QuizContainer.
- * Uses MCP App class instead of OpenAI hooks.
- */
 export function QuizContainer({
   app,
   questions: inputQuestions,
@@ -54,11 +48,9 @@ export function QuizContainer({
     isLastQuestion,
   } = useQuizStore();
 
-  // Derive platform from host context
   const isMobile =
     hostContext?.platform === "mobile" ||
     hostContext?.deviceCapabilities?.touch === true;
-  const detectedPlatform: Platform = isMobile ? "mobile" : "web";
 
   // Derive display mode from host context
   const displayMode = hostContext?.displayMode ?? "inline";
@@ -112,9 +104,9 @@ export function QuizContainer({
     if (templates.length > 0) return;
 
     if (preloadedTemplates && preloadedTemplates.length > 0) {
-      setTemplates(preloadedTemplates, detectedPlatform);
+      setTemplates(preloadedTemplates);
     }
-  }, [questions, templates.length, preloadedTemplates, detectedPlatform, setTemplates]);
+  }, [questions, templates.length, preloadedTemplates, setTemplates]);
 
   // Report score to Claude when quiz completes
   useEffect(() => {
@@ -434,8 +426,6 @@ export function QuizContainer({
         {currentQuestion && (
           <QuestionCard
             questionText={currentQuestion.question}
-            currentIndex={currentQuestionIndex}
-            totalQuestions={questions.length}
             onPrevious={goToPreviousQuestion}
             onNext={goToNextQuestion}
             isPrevDisabled={isFirstQuestion()}

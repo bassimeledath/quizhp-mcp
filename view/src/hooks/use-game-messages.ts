@@ -1,4 +1,4 @@
-import { useEffect, useCallback, type RefObject } from "react";
+import { useEffect, useCallback } from "react";
 import type { ChoicePayload, QuizMessageEvent } from "../types";
 
 interface UseGameMessagesProps {

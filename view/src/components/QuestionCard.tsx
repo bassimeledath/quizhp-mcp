@@ -15,8 +15,6 @@ const arrowStyle = (disabled: boolean) => ({
 
 interface QuestionCardProps {
   questionText: string;
-  currentIndex: number;
-  totalQuestions: number;
   onPrevious: () => void;
   onNext: () => void;
   isPrevDisabled: boolean;

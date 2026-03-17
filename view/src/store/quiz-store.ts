@@ -2,9 +2,7 @@ import { create } from "zustand";
 import type {
   Question,
   Template,
-  Feedback,
   QuestionAttempt,
-  Platform,
   ChoicePayload,
 } from "../types";
 
@@ -13,26 +11,18 @@ interface QuizState {
   templates: Template[];
   currentQuestionIndex: number;
   quizCompleted: boolean;
-  feedback: Feedback | null;
   attemptRecords: QuestionAttempt[];
   isLoading: boolean;
   error: string | null;
-  platform: Platform;
-  templatePlatform: Platform | null;
 }
 
 interface QuizActions {
   setQuestions: (questions: Question[]) => void;
-  setTemplates: (templates: Template[], platform: Platform) => void;
-  setPlatform: (platform: Platform) => void;
-  goToQuestion: (index: number) => void;
+  setTemplates: (templates: Template[]) => void;
   goToNextQuestion: () => void;
   goToPreviousQuestion: () => void;
-  completeQuiz: () => void;
   resetQuiz: () => void;
-  setFeedback: (feedback: Feedback | null) => void;
   handleChoice: (payload: ChoicePayload) => void;
-  setLoading: (isLoading: boolean) => void;
   setError: (error: string | null) => void;
   getCurrentQuestion: () => Question | null;
   getCurrentTemplate: () => Template | null;
@@ -47,12 +37,9 @@ export const useQuizStore = create<QuizStore>((set, get) => ({
   templates: [],
   currentQuestionIndex: 0,
   quizCompleted: false,
-  feedback: null,
   attemptRecords: [],
   isLoading: false,
   error: null,
-  platform: "web",
-  templatePlatform: null,
 
   setQuestions: (questions) => {
     set({
@@ -63,44 +50,28 @@ export const useQuizStore = create<QuizStore>((set, get) => ({
       })),
       currentQuestionIndex: 0,
       quizCompleted: false,
-      feedback: null,
     });
   },
 
-  setTemplates: (templates, platform) => {
-    set({ templates, templatePlatform: platform, isLoading: false });
-  },
-
-  setPlatform: (platform) => {
-    set({ platform });
-  },
-
-  goToQuestion: (index) => {
-    const { questions } = get();
-    if (index >= 0 && index < questions.length) {
-      set({ currentQuestionIndex: index, feedback: null });
-    }
+  setTemplates: (templates) => {
+    set({ templates, isLoading: false });
   },
 
   goToNextQuestion: () => {
     const { currentQuestionIndex, questions, quizCompleted } = get();
     if (quizCompleted) return;
     if (currentQuestionIndex < questions.length - 1) {
-      set({ currentQuestionIndex: currentQuestionIndex + 1, feedback: null });
+      set({ currentQuestionIndex: currentQuestionIndex + 1 });
     } else {
-      set({ quizCompleted: true, feedback: null });
+      set({ quizCompleted: true });
     }
   },
 
   goToPreviousQuestion: () => {
     const { currentQuestionIndex } = get();
     if (currentQuestionIndex > 0) {
-      set({ currentQuestionIndex: currentQuestionIndex - 1, feedback: null });
+      set({ currentQuestionIndex: currentQuestionIndex - 1 });
     }
-  },
-
-  completeQuiz: () => {
-    set({ quizCompleted: true, feedback: null });
   },
 
   resetQuiz: () => {
@@ -108,7 +79,6 @@ export const useQuizStore = create<QuizStore>((set, get) => ({
     set({
       currentQuestionIndex: 0,
       quizCompleted: false,
-      feedback: null,
       attemptRecords: questions.map(() => ({
         wrongAttempts: 0,
         completed: false,
@@ -116,19 +86,8 @@ export const useQuizStore = create<QuizStore>((set, get) => ({
     });
   },
 
-  setFeedback: (feedback) => {
-    set({ feedback });
-  },
-
   handleChoice: (payload) => {
     const { currentQuestionIndex, attemptRecords } = get();
-    set({
-      feedback: {
-        isCorrect: payload.isCorrect,
-        explanation: payload.explanation,
-      },
-    });
-
     const updated = [...attemptRecords];
     const record = updated[currentQuestionIndex];
     if (record) {
@@ -142,10 +101,6 @@ export const useQuizStore = create<QuizStore>((set, get) => ({
       }
       set({ attemptRecords: updated });
     }
-  },
-
-  setLoading: (isLoading) => {
-    set({ isLoading });
   },
 
   setError: (error) => {

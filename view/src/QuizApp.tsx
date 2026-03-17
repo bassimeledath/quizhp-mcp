@@ -128,8 +128,6 @@ export function QuizApp() {
     <QuizContainer
       app={app!}
       questions={quizData.questions}
-      title={quizData.title}
-      gameId={quizData.gameId}
       preloadedTemplates={quizData.templates}
       hostContext={hostContext}
     />
