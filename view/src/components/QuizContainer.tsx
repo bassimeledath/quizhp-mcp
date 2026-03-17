@@ -274,6 +274,7 @@ export function QuizContainer({
                 onNext={goToNextQuestion}
                 fullscreen
                 displayMode={displayMode}
+                sessionId={sessionId}
               />
               <div className="absolute inset-0 bg-black/30 flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity">
                 <div className="bg-white/90 px-4 py-2 rounded-full text-sm font-medium text-gray-700 shadow-lg">
