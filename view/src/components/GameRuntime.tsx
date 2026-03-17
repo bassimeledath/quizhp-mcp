@@ -12,6 +12,7 @@ interface GameRuntimeProps {
   fullscreen?: boolean;
   maxHeight?: string;
   displayMode?: string;
+  sessionId?: string;
 }
 
 /**
@@ -25,6 +26,7 @@ export function GameRuntime({
   fullscreen = false,
   maxHeight,
   displayMode,
+  sessionId,
 }: GameRuntimeProps) {
   const frameRef = useRef<HTMLIFrameElement>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
@@ -35,7 +37,7 @@ export function GameRuntime({
     onReady: () => {
       frameRef.current?.focus();
     },
-    iframeRef: frameRef,
+    sessionId,
   });
 
   const iframeKey = useMemo(() => hashKey(srcDoc), [srcDoc]);

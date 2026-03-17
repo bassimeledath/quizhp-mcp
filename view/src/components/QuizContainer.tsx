@@ -38,7 +38,6 @@ export function QuizContainer({
     templates,
     currentQuestionIndex,
     quizCompleted,
-    feedback,
     attemptRecords,
     isLoading,
     error,
@@ -50,7 +49,6 @@ export function QuizContainer({
     goToNextQuestion,
     goToPreviousQuestion,
     resetQuiz,
-    setFeedback,
     handleChoice: rawHandleChoice,
     setLoading,
     setError,
@@ -58,7 +56,6 @@ export function QuizContainer({
     getCurrentTemplate,
     isFirstQuestion,
     isLastQuestion,
-    resetGeneration,
   } = useQuizStore();
 
   // Derive platform from host context
@@ -70,14 +67,22 @@ export function QuizContainer({
   // Derive display mode from host context
   const displayMode = hostContext?.displayMode ?? "inline";
 
-  // Feedback is LOCAL state only — never read from the store.
-  // This eliminates all race conditions with stale iframe postMessages.
+  // Session ID — changes on every restart, used to tag iframe postMessages.
+  // Stale messages from old sessions are rejected by use-game-messages.
+  const [sessionId, setSessionId] = useState(() => crypto.randomUUID());
   const [visibleFeedback, setVisibleFeedback] = useState<import("../types").Feedback | null>(null);
 
-  // Clear feedback on question change or restart
+  // Reset sessionId + clear feedback on restart
+  const handleRestart = useCallback(() => {
+    resetQuiz();
+    setSessionId(crypto.randomUUID());
+    setVisibleFeedback(null);
+  }, [resetQuiz]);
+
+  // Clear feedback on question change
   useEffect(() => {
     setVisibleFeedback(null);
-  }, [currentQuestionIndex, resetGeneration]);
+  }, [currentQuestionIndex]);
 
   const handleChoice = useCallback(
     (payload: ChoicePayload) => {
@@ -169,7 +174,8 @@ export function QuizContainer({
       ? injectQuestionIntoTemplate(
           currentTemplate.code,
           currentQuestion,
-          isLastQuestion()
+          isLastQuestion(),
+          sessionId
         )
       : "";
 
@@ -218,7 +224,7 @@ export function QuizContainer({
           <EndScreen
             totalQuestions={questions.length}
             attemptRecords={attemptRecords}
-            onPlayAgain={resetQuiz}
+            onPlayAgain={handleRestart}
           />
         </div>
       </div>
@@ -390,6 +396,7 @@ export function QuizContainer({
             onNext={goToNextQuestion}
             fullscreen
             displayMode={displayMode}
+            sessionId={sessionId}
           />
           {visibleFeedback && (
             <FeedbackToast
@@ -487,6 +494,7 @@ export function QuizContainer({
             onNext={goToNextQuestion}
             maxHeight={displayMode === "inline" ? "420px" : "480px"}
             displayMode={displayMode}
+            sessionId={sessionId}
           />
           {visibleFeedback && (
             <FeedbackToast

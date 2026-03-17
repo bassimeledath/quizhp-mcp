@@ -19,7 +19,6 @@ interface QuizState {
   error: string | null;
   platform: Platform;
   templatePlatform: Platform | null;
-  resetGeneration: number;
 }
 
 interface QuizActions {
@@ -54,7 +53,6 @@ export const useQuizStore = create<QuizStore>((set, get) => ({
   error: null,
   platform: "web",
   templatePlatform: null,
-  resetGeneration: 0,
 
   setQuestions: (questions) => {
     set({
@@ -106,25 +104,16 @@ export const useQuizStore = create<QuizStore>((set, get) => ({
   },
 
   resetQuiz: () => {
-    const { questions, resetGeneration } = get();
-    const newGen = resetGeneration + 1;
+    const { questions } = get();
     set({
       currentQuestionIndex: 0,
       quizCompleted: false,
       feedback: null,
-      resetGeneration: newGen,
       attemptRecords: questions.map(() => ({
         wrongAttempts: 0,
         completed: false,
       })),
     });
-    // Clear feedback again after any pending postMessage handlers run.
-    // This catches stale game-iframe messages queued before the reset.
-    setTimeout(() => {
-      if (get().resetGeneration === newGen) {
-        set({ feedback: null });
-      }
-    }, 0);
   },
 
   setFeedback: (feedback) => {
@@ -132,8 +121,7 @@ export const useQuizStore = create<QuizStore>((set, get) => ({
   },
 
   handleChoice: (payload) => {
-    const { currentQuestionIndex, attemptRecords, quizCompleted } = get();
-    if (quizCompleted) return;
+    const { currentQuestionIndex, attemptRecords } = get();
     set({
       feedback: {
         isCorrect: payload.isCorrect,

@@ -27,7 +27,8 @@ const QUESTION_BLOCK = /const\s+QUESTION\s*=\s*\{[\s\S]*?\};/;
 export function injectQuestionIntoTemplate(
   html: string,
   question: Question,
-  isLastQuestion: boolean = false
+  isLastQuestion: boolean = false,
+  sessionId?: string
 ): string {
   const serialized = serializeQuestion(question, isLastQuestion);
   const json = JSON.stringify(serialized, null, 2);
@@ -47,7 +48,7 @@ export function injectQuestionIntoTemplate(
   }
 
   result = injectResponsiveCSS(result);
-  result = appendPostMessageShim(result);
+  result = appendPostMessageShim(result, sessionId);
 
   return result;
 }
@@ -87,12 +88,14 @@ canvas#game {
   return css + "\n" + html;
 }
 
-function appendPostMessageShim(html: string): string {
+function appendPostMessageShim(html: string, sessionId?: string): string {
+  const sid = sessionId ? JSON.stringify(sessionId) : "null";
   const shim = `
 <script>
 (function(){
+  var SESSION_ID = ${sid};
   function post(type, detail){
-    try { parent.postMessage(Object.assign({type}, detail), '*'); } catch(e){}
+    try { parent.postMessage(Object.assign({type, sessionId: SESSION_ID}, detail), '*'); } catch(e){}
   }
 
   Object.defineProperty(window, '__report', {

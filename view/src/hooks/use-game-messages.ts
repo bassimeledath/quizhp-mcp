@@ -5,30 +5,26 @@ interface UseGameMessagesProps {
   onChoice: (payload: ChoicePayload) => void;
   onNext?: () => void;
   onReady?: () => void;
-  iframeRef?: RefObject<HTMLIFrameElement | null>;
+  sessionId?: string;
 }
 
 /**
  * Hook to handle postMessage communication from the game iframe.
- * When iframeRef is provided, ignores messages from stale/destroyed iframes.
+ * Only accepts messages with a matching sessionId to reject stale messages.
  */
 export function useGameMessages({
   onChoice,
   onNext,
   onReady,
-  iframeRef,
+  sessionId,
 }: UseGameMessagesProps) {
   const handleMessage = useCallback(
     (event: MessageEvent) => {
-      // Guard: ignore messages from stale iframes after navigation.
-      // Also reject when contentWindow is null (iframe not yet loaded).
-      if (iframeRef) {
-        const win = iframeRef.current?.contentWindow;
-        if (!win || event.source !== win) return;
-      }
-
-      const data = event.data as QuizMessageEvent;
+      const data = event.data as QuizMessageEvent & { sessionId?: string };
       if (!data || typeof data !== "object" || !data.type) return;
+
+      // Reject messages from old game sessions
+      if (sessionId && data.sessionId !== sessionId) return;
 
       switch (data.type) {
         case "quiz-choice":
@@ -52,7 +48,7 @@ export function useGameMessages({
           break;
       }
     },
-    [onChoice, onNext, onReady, iframeRef]
+    [onChoice, onNext, onReady, sessionId]
   );
 
   useEffect(() => {
