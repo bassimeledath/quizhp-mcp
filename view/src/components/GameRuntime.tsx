@@ -1,9 +1,16 @@
-import { useEffect, useRef, useMemo } from "react";
+import { useEffect, useRef, useMemo, useCallback } from "react";
 import type { ChoicePayload } from "../types";
 import { useGameMessages } from "../hooks/use-game-messages";
 
 const GAME_WIDTH = 720;
 const GAME_HEIGHT = 540;
+
+const TOUCH_DISABLE_STYLE = {
+  touchAction: "none",
+  WebkitTouchCallout: "none",
+  WebkitUserSelect: "none",
+  userSelect: "none",
+} as const;
 
 interface GameRuntimeProps {
   srcDoc: string;
@@ -31,12 +38,14 @@ export function GameRuntime({
   const frameRef = useRef<HTMLIFrameElement>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
 
+  const handleReady = useCallback(() => {
+    frameRef.current?.focus();
+  }, []);
+
   useGameMessages({
     onChoice,
     onNext,
-    onReady: () => {
-      frameRef.current?.focus();
-    },
+    onReady: handleReady,
     sessionId,
   });
 
@@ -62,12 +71,7 @@ export function GameRuntime({
         ref={wrapperRef}
         onClick={handleWrapperClick}
         className="w-full h-full"
-        style={{
-          touchAction: "none",
-          WebkitTouchCallout: "none",
-          WebkitUserSelect: "none",
-          userSelect: "none",
-        }}
+        style={TOUCH_DISABLE_STYLE}
       >
         <iframe
           key={iframeKey}
@@ -90,10 +94,7 @@ export function GameRuntime({
         maxWidth: `${GAME_WIDTH}px`,
         aspectRatio: `${GAME_WIDTH} / ${GAME_HEIGHT}`,
         maxHeight: maxHeight ?? undefined,
-        touchAction: "none",
-        WebkitTouchCallout: "none",
-        WebkitUserSelect: "none",
-        userSelect: "none",
+        ...TOUCH_DISABLE_STYLE,
       }}
     >
       <iframe

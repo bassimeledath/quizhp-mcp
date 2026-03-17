@@ -1,3 +1,18 @@
+const arrowStyle = (disabled: boolean) => ({
+  color: disabled
+    ? "var(--qz-text-secondary)"
+    : "var(--qz-text-primary)",
+  background: "transparent",
+  border: "none",
+  cursor: disabled ? "not-allowed" : "pointer",
+  opacity: disabled ? 0.3 : 0.8,
+  padding: "4px 6px",
+  fontSize: "16px",
+  lineHeight: 1,
+  flexShrink: 0 as const,
+  transition: "opacity 0.15s",
+});
+
 interface QuestionCardProps {
   questionText: string;
   currentIndex: number;
@@ -17,20 +32,6 @@ export function QuestionCard({
   isNextDisabled,
   isLastQuestion,
 }: QuestionCardProps) {
-  const arrowStyle = (disabled: boolean) => ({
-    color: disabled
-      ? "var(--qz-text-secondary)"
-      : "var(--qz-text-primary)",
-    background: "transparent",
-    border: "none",
-    cursor: disabled ? "not-allowed" : "pointer",
-    opacity: disabled ? 0.3 : 0.8,
-    padding: "4px 6px",
-    fontSize: "16px",
-    lineHeight: 1,
-    flexShrink: 0 as const,
-    transition: "opacity 0.15s",
-  });
 
   return (
     <div

@@ -39,14 +39,16 @@ export function EndScreen({
   attemptRecords,
   onPlayAgain,
 }: EndScreenProps) {
-  const completedCount = attemptRecords.filter((a) => a.completed).length;
-  const perfectCount = attemptRecords.filter(
-    (a) => a.completed && a.wrongAttempts === 0
-  ).length;
-  const totalWrongAttempts = attemptRecords.reduce(
-    (sum, a) => sum + a.wrongAttempts,
-    0
-  );
+  let completedCount = 0;
+  let perfectCount = 0;
+  let totalWrongAttempts = 0;
+  for (const a of attemptRecords) {
+    totalWrongAttempts += a.wrongAttempts;
+    if (a.completed) {
+      completedCount++;
+      if (a.wrongAttempts === 0) perfectCount++;
+    }
+  }
 
   return (
     <div className="flex flex-col items-center justify-center p-4 text-center w-full"

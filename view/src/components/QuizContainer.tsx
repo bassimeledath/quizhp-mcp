@@ -1,4 +1,4 @@
-import { useEffect, useCallback, useState } from "react";
+import { useEffect, useCallback, useState, useMemo } from "react";
 import type { App } from "@modelcontextprotocol/ext-apps";
 import type { McpUiHostContext } from "@modelcontextprotocol/ext-apps";
 import type { Question, Platform, Template } from "../types";
@@ -41,16 +41,12 @@ export function QuizContainer({
     attemptRecords,
     isLoading,
     error,
-    platform,
-    templatePlatform,
     setQuestions,
     setTemplates,
-    setPlatform,
     goToNextQuestion,
     goToPreviousQuestion,
     resetQuiz,
     handleChoice: rawHandleChoice,
-    setLoading,
     setError,
     getCurrentQuestion,
     getCurrentTemplate,
@@ -110,33 +106,30 @@ export function QuizContainer({
     }
   }, [inputQuestions, setQuestions]);
 
-  // Update platform
-  useEffect(() => {
-    setPlatform(detectedPlatform);
-  }, [detectedPlatform, setPlatform]);
-
   // Use templates delivered via structuredContent
   useEffect(() => {
     if (questions.length === 0) return;
     if (templates.length > 0) return;
 
     if (preloadedTemplates && preloadedTemplates.length > 0) {
-      setTemplates(preloadedTemplates, platform);
+      setTemplates(preloadedTemplates, detectedPlatform);
     }
-  }, [questions, templates.length, preloadedTemplates, platform, setTemplates]);
+  }, [questions, templates.length, preloadedTemplates, detectedPlatform, setTemplates]);
 
   // Report score to Claude when quiz completes
   useEffect(() => {
     if (!quizCompleted) return;
 
-    const completedCount = attemptRecords.filter((a) => a.completed).length;
-    const totalWrongAttempts = attemptRecords.reduce(
-      (sum, a) => sum + a.wrongAttempts,
-      0
-    );
-    const perfectCount = attemptRecords.filter(
-      (a) => a.completed && a.wrongAttempts === 0
-    ).length;
+    let completedCount = 0;
+    let perfectCount = 0;
+    let totalWrongAttempts = 0;
+    for (const a of attemptRecords) {
+      totalWrongAttempts += a.wrongAttempts;
+      if (a.completed) {
+        completedCount++;
+        if (a.wrongAttempts === 0) perfectCount++;
+      }
+    }
 
     app
       .updateModelContext({
@@ -168,16 +161,20 @@ export function QuizContainer({
   const isReady = !isLoading && templates.length > 0 && questions.length > 0;
   const currentQuestion = getCurrentQuestion();
   const currentTemplate = getCurrentTemplate();
+  const isLast = isLastQuestion();
 
-  const hydratedHTML =
-    currentQuestion && currentTemplate
-      ? injectQuestionIntoTemplate(
-          currentTemplate.code,
-          currentQuestion,
-          isLastQuestion(),
-          sessionId
-        )
-      : "";
+  const hydratedHTML = useMemo(
+    () =>
+      currentQuestion && currentTemplate
+        ? injectQuestionIntoTemplate(
+            currentTemplate.code,
+            currentQuestion,
+            isLast,
+            sessionId
+          )
+        : "",
+    [currentQuestion, currentTemplate, isLast, sessionId]
+  );
 
   // Error state (must be checked before loading — when templates fail,
   // isReady is false but we want to show the error, not a spinner)
