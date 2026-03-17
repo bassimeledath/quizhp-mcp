@@ -70,21 +70,31 @@ export function QuizContainer({
   // Derive display mode from host context
   const displayMode = hostContext?.displayMode ?? "inline";
 
-  // Clear feedback whenever quizCompleted transitions to true, as a safety net
-  // against any stale postMessage that might set feedback during the transition.
-  useEffect(() => {
-    if (quizCompleted) setFeedback(null);
-  }, [quizCompleted, setFeedback]);
+  // Local feedback state — keyed to question + generation so it auto-resets
+  // on navigation and restart. This bypasses all store race conditions.
+  const feedbackKey = `${currentQuestionIndex}-${resetGeneration}`;
+  const [localFeedback, setLocalFeedback] = useState<{ key: string; feedback: import("../types").Feedback } | null>(null);
 
-  // Wrap handleChoice to ignore stale postMessages from a previous game session.
-  // After resetQuiz increments resetGeneration, any callback created with the
-  // old generation will see a mismatch and discard the message.
+  // Clear local feedback whenever question or generation changes
+  useEffect(() => {
+    setLocalFeedback(null);
+  }, [feedbackKey]);
+
+  // Sync store feedback to local (only if key matches current question)
+  useEffect(() => {
+    if (feedback) {
+      setLocalFeedback({ key: feedbackKey, feedback });
+    }
+  }, [feedback, feedbackKey]);
+
+  // The feedback to actually render — only if it's for the current question
+  const visibleFeedback = localFeedback?.key === feedbackKey ? localFeedback.feedback : null;
+
   const handleChoice = useCallback(
     (payload: ChoicePayload) => {
-      if (useQuizStore.getState().resetGeneration !== resetGeneration) return;
       rawHandleChoice(payload);
     },
-    [rawHandleChoice, resetGeneration]
+    [rawHandleChoice]
   );
 
   const requestDisplayMode = useCallback(
@@ -393,10 +403,10 @@ export function QuizContainer({
             fullscreen
             displayMode={displayMode}
           />
-          {feedback && (
+          {visibleFeedback && (
             <FeedbackToast
-              feedback={feedback}
-              onDismiss={() => setFeedback(null)}
+              feedback={visibleFeedback}
+              onDismiss={() => setLocalFeedback(null)}
             />
           )}
           {showInfo && currentTemplate && (
@@ -492,10 +502,10 @@ export function QuizContainer({
             maxHeight={displayMode === "inline" ? "420px" : "480px"}
             displayMode={displayMode}
           />
-          {feedback && (
+          {visibleFeedback && (
             <FeedbackToast
-              feedback={feedback}
-              onDismiss={() => setFeedback(null)}
+              feedback={visibleFeedback}
+              onDismiss={() => setLocalFeedback(null)}
             />
           )}
           {showInfo && currentTemplate && (
