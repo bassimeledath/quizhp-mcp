@@ -39,6 +39,12 @@ const questionSchema = z
       message:
         "true_false questions must have exactly 2 choices with text 'true' or 'false', mcq questions must have exactly 4 choices",
     }
+  )
+  .refine(
+    (q) => q.choices.filter((c) => c.is_correct).length === 1,
+    {
+      message: "Each question must have exactly one correct answer",
+    }
   );
 
 export interface QuizServerConfig {

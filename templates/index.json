@@ -6,7 +6,7 @@
       "path": "web/mcq/piano-keys.html",
       "platform": "web",
       "questionType": "mcq",
-      "instructions": "Click a piano key or press the corresponding letter key (A, B, C, D) to select your answer. Each key plays its musical note when pressed.",
+      "instructions": "Click a piano key or press A/B/C/D to select your answer.",
       "controls": [
         {
           "type": "mouse",
@@ -26,7 +26,7 @@
       "path": "web/mcq/treasure-chest-key.html",
       "platform": "web",
       "questionType": "mcq",
-      "instructions": "Click on the treasure chest that contains the correct answer. Your golden key will fly toward the chest and attempt to unlock it. Choose wisely - the correct chest will open to reveal treasure, while the wrong one will shake and stay locked!",
+      "instructions": "Click the treasure chest with the correct answer to unlock it.",
       "controls": [
         {
           "type": "mouse",
@@ -272,7 +272,7 @@
       "path": "web/true-false/arrow-ufo-hunter.html",
       "platform": "web",
       "questionType": "true_false",
-      "instructions": "Shoot the UFO with the correct answer! Click and drag away from the bow to aim and build power, then release to fire your arrow.",
+      "instructions": "Drag away from the bow to aim, release to fire at the correct UFO.",
       "controls": [
         {
           "type": "click-drag",
@@ -336,7 +336,7 @@
       "path": "web/mcq/snake-answer-eater.html",
       "platform": "web",
       "questionType": "mcq",
-      "instructions": "Use arrow keys to control the snake's direction. Press any arrow key to start moving. Navigate to the correct answer while avoiding walls and your own body.",
+      "instructions": "Use arrow keys to steer the snake to the correct answer. Avoid walls and your body.",
       "controls": [
         {
           "keys": [
@@ -758,7 +758,7 @@
       "path": "web/true-false/answer-pump.html",
       "platform": "web",
       "questionType": "true_false",
-      "instructions": "Click the triangular button below your chosen answer repeatedly to inflate its pressure meter. Each pump requires about 6 clicks to reach 100%. When fully pumped, your answer is submitted with an explosion effect.",
+      "instructions": "Click the pump button below your answer repeatedly to fill its meter and submit.",
       "controls": [
         {
           "type": "mouse",
@@ -830,26 +830,6 @@
           "type": "button",
           "label": "Forward",
           "description": "Move tank forward"
-        }
-      ]
-    },
-    {
-      "name": "Pokemon Battle Arena",
-      "path": "web/mcq/pokemon-battle-arena.html",
-      "platform": "web",
-      "questionType": "mcq",
-      "instructions": "Click answer buttons to attack! Choose the correct answer to defeat your opponent.",
-      "controls": [
-        {
-          "type": "mouse",
-          "description": "Click answer button to attack"
-        },
-        {
-          "type": "keyboard",
-          "description": "Restart game",
-          "keys": [
-            "R"
-          ]
         }
       ]
     },

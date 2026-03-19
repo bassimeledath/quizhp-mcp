@@ -4,3 +4,5 @@ dist/
 *.tsbuildinfo
 .DS_Store
 src/worker-bundle.ts
+.env
+.env.*
