@@ -1534,7 +1534,14 @@
       // Use Blob URL instead of srcdoc for Safari compatibility
       var blob = new Blob([gameHTML], { type: 'text/html' });
       var url = URL.createObjectURL(blob);
-      document.getElementById('game-demo').src = url;
+      var iframe = document.getElementById('game-demo');
+      iframe.src = url;
+      // Auto-focus iframe so keyboard controls work without clicking
+      iframe.addEventListener('load', function() { iframe.focus(); });
+      // Re-focus when user hovers or scrolls near the game
+      iframe.addEventListener('mouseenter', function() { iframe.focus(); });
+      // Also focus on any click on the game frame wrapper
+      iframe.closest('.game-frame').addEventListener('click', function() { iframe.focus(); });
     })();
   </script>
 </body>
