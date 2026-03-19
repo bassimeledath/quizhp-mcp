@@ -1,0 +1,1233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Treasure Chest Key</title>
+  <!--
+  ╔══════════════════════════════════════════════════════════════════════════════╗
+  ║  GAME FACTORY TEMPLATE                                                        ║
+  ║  This template enforces critical invariants. Follow the section markers.      ║
+  ╚══════════════════════════════════════════════════════════════════════════════╝
+  -->
+  <link href="https://fonts.googleapis.com/css2?family=Belanosima:wght@400;600;700&family=Nunito+Sans:wght@400;500;600;700&family=Nunito:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    /* ═══════════════════════════════════════════════════════════════════════════
+       BASE STYLES - Can be extended, not removed
+       ═══════════════════════════════════════════════════════════════════════════ */
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+    }
+    body {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      background: #1C1C1A;
+      font-family: 'Nunito Sans', system-ui, -apple-system, sans-serif;
+    }
+    #gameCanvas {
+      background: #2A2A27;
+      border-radius: 12px;
+      display: block;
+    }
+  </style>
+</head>
+<body>
+  <!-- ═══════════════════════════════════════════════════════════════════════════
+       CANVAS - Sized dynamically to fill available space
+       ═══════════════════════════════════════════════════════════════════════════ -->
+  <canvas id="gameCanvas"></canvas>
+
+  <script>
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 1: QUESTION PLACEHOLDER - DO NOT MODIFY FORMAT                    ║
+  // ║  Platform replaces this at runtime. Use these exact 60-char answers.       ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  const QUESTION = {
+    type: "mcq",
+    prompt: "Sample question text",
+    choices: [
+      { text: "This is sample answer A which is long enough to test text overflow", is_correct: true, explanation: "Why A is correct" },
+      { text: "This is sample answer B which is long enough to test text overflow", is_correct: false, explanation: "Why B is wrong" },
+      { text: "This is sample answer C which is long enough to test text overflow", is_correct: false, explanation: "Why C is wrong" },
+      { text: "This is sample answer D which is long enough to test text overflow", is_correct: false, explanation: "Why D is wrong" }
+    ],
+    isLastQuestion: false
+  };
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 2: ENGINE CORE - DO NOT MODIFY                                    ║
+  // ║  Standard engine interface and end screen. This is sacred.                 ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  const canvas = document.getElementById('gameCanvas');
+  const ctx = canvas.getContext('2d');
+
+  // Logical dimensions (game code works in this coordinate space)
+  const W = 720, H = 540;
+
+  // Scaling state (computed on resize)
+  let scale = 1;
+  let dpr = 1;
+
+  let gameState = 'playing'; // 'playing' | 'ended'
+  let gameResult = null;     // true (correct) | false (wrong)
+  let gameExplanation = '';
+  let endScreenTime = 0;
+  let confettiParticles = [];
+
+  // End screen button bounds (logical coordinates)
+  const restartButton = { x: W / 2 - 170, y: H / 2 + 60, w: 150, h: 48 };
+  const nextButton = { x: W / 2 + 20, y: H / 2 + 60, w: 150, h: 48 };
+
+  /** Check if point is inside rectangle */
+  function pointInRect(px, py, rect) {
+    return px >= rect.x && px <= rect.x + rect.w &&
+           py >= rect.y && py <= rect.y + rect.h;
+  }
+
+  /** Draw a styled button */
+  function drawButton(rect, label, color, pulse) {
+    const p = pulse ? 1 + Math.sin(endScreenTime * 4) * 0.03 : 1;
+    ctx.save();
+    ctx.translate(rect.x + rect.w / 2, rect.y + rect.h / 2);
+    ctx.scale(p, p);
+    ctx.translate(-(rect.x + rect.w / 2), -(rect.y + rect.h / 2));
+
+    // Button background
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.roundRect(rect.x, rect.y, rect.w, rect.h, 12);
+    ctx.fill();
+
+    // Button text
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = 'bold 18px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, rect.x + rect.w / 2, rect.y + rect.h / 2);
+
+    ctx.restore();
+  }
+
+  /**
+   * Resize canvas to fill available space with proper DPR scaling.
+   * Maintains logical coordinate system (720×540).
+   */
+  function resizeCanvas() {
+    dpr = window.devicePixelRatio || 1;
+
+    // Get available space
+    const availW = window.innerWidth;
+    const availH = window.innerHeight;
+
+    // Calculate scale to fit logical space (720×540) in available space
+    const scaleX = availW / W;
+    const scaleY = availH / H;
+    scale = Math.min(scaleX, scaleY);
+
+    // Physical canvas buffer (DPR-scaled for crisp rendering)
+    canvas.width = W * scale * dpr;
+    canvas.height = H * scale * dpr;
+
+    // CSS display size
+    canvas.style.width = (W * scale) + 'px';
+    canvas.style.height = (H * scale) + 'px';
+  }
+
+  /**
+   * Convert screen coordinates to logical coordinates.
+   * Use this for mouse/click events to get positions in 720×540 space.
+   */
+  function screenToLogical(screenX, screenY) {
+    const rect = canvas.getBoundingClientRect();
+    return {
+      x: (screenX - rect.left) * (W / rect.width),
+      y: (screenY - rect.top) * (H / rect.height)
+    };
+  }
+
+  const engine = {
+    /** Call this to end the game. DO NOT draw your own end screen. */
+    end(isCorrect, explanation) {
+      if (gameState === 'ended') return;
+      gameState = 'ended';
+      gameResult = isCorrect;
+      gameExplanation = explanation || '';
+      endScreenTime = 0;
+
+      // Spawn confetti for correct answers
+      if (isCorrect) {
+        for (let i = 0; i < 50; i++) {
+          confettiParticles.push({
+            x: W / 2,
+            y: H / 2,
+            vx: (Math.random() - 0.5) * 600,
+            vy: -Math.random() * 400 - 100,
+            size: 4 + Math.random() * 6,
+            color: ['#FFD700', '#FF6B6B', '#4ECDC4', '#95E1D3', '#F38181'][Math.floor(Math.random() * 5)],
+            rotation: Math.random() * Math.PI * 2,
+            rotationSpeed: (Math.random() - 0.5) * 10
+          });
+        }
+      }
+
+      // Notify parent frame
+      if (window.parent && window.parent !== window) {
+        window.parent.postMessage({
+          type: 'quiz-end',
+          isCorrect: isCorrect,
+          explanation: explanation || ''
+        }, '*');
+      }
+    }
+  };
+
+  /** STANDARD END SCREEN - DO NOT MODIFY */
+  function drawEndScreen(dt) {
+    endScreenTime += dt;
+
+    // Update confetti
+    confettiParticles = confettiParticles.filter(p => {
+      p.vy += 800 * dt; // gravity
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.rotation += p.rotationSpeed * dt;
+      p.vx *= 0.99;
+      return p.y < H + 50;
+    });
+
+    // Dark overlay
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
+    ctx.fillRect(0, 0, W, H);
+
+    // Draw confetti
+    confettiParticles.forEach(p => {
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rotation);
+      ctx.fillStyle = p.color;
+      ctx.fillRect(-p.size / 2, -p.size / 4, p.size, p.size / 2);
+      ctx.restore();
+    });
+
+    // Result emoji
+    ctx.font = '72px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(gameResult ? '🎉' : '😢', W / 2, H / 2 - 50);
+
+    // Result text
+    ctx.fillStyle = gameResult ? '#4ADE80' : '#F87171';
+    ctx.font = 'bold 36px system-ui, sans-serif';
+    ctx.fillText(gameResult ? 'Correct!' : 'Wrong!', W / 2, H / 2 + 20);
+
+    // Buttons
+    if (gameResult) {
+      // Correct: show both Restart and Next/Finish
+      drawButton(restartButton, 'Restart', '#E87A3E', true);
+      const nextLabel = QUESTION.isLastQuestion ? 'Finish' : 'Next';
+      drawButton(nextButton, nextLabel, '#4ECDC4', true);
+    } else {
+      // Wrong: show only centered Restart button
+      const centeredRestart = { x: W / 2 - 75, y: H / 2 + 60, w: 150, h: 48 };
+      drawButton(centeredRestart, 'Restart', '#E87A3E', true);
+    }
+  }
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 3: YOUR GAME CODE - IMPLEMENT THESE FUNCTIONS                     ║
+  // ║  Treasure Chest Key - Click on a chest to unlock it with the golden key   ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+
+  // QuizHP Colors
+  const COLORS = {
+    bgPrimary: '#1C1C1A',
+    bgSurface: '#2A2A27',
+    textPrimary: '#F5F5F0',
+    textSecondary: '#C2C2B8',
+    orange: '#E87A3E',
+    amber: '#F5A742',
+    cyan: '#4ECDC4',
+    success: '#6BBF59',
+    error: '#E85D4A'
+  };
+
+  // Reduced motion preference
+  const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  // Audio context for sound effects
+  let audioCtx = null;
+  let ambientOsc = null;
+  let ambientGain = null;
+
+  function initAudio() {
+    if (audioCtx) return;
+    try {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    } catch (e) {
+      console.warn('Web Audio API not supported');
+    }
+  }
+
+  function playSound(type) {
+    if (!audioCtx || prefersReducedMotion) return;
+    if (audioCtx.state === 'suspended') {
+      audioCtx.resume();
+    }
+
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+
+    if (type === 'jingle') {
+      // Magical key jingle - ascending sparkly notes
+      osc.type = 'sine';
+      const now = audioCtx.currentTime;
+      osc.frequency.setValueAtTime(880, now);
+      osc.frequency.setValueAtTime(1047, now + 0.05);
+      osc.frequency.setValueAtTime(1319, now + 0.1);
+      osc.frequency.setValueAtTime(1568, now + 0.15);
+      gain.gain.setValueAtTime(0.15, now);
+      gain.gain.exponentialRampToValueAtTime(0.01, now + 0.3);
+      osc.start(now);
+      osc.stop(now + 0.3);
+    } else if (type === 'unlock') {
+      // Triumphant chest open sound
+      osc.type = 'sine';
+      const now = audioCtx.currentTime;
+      osc.frequency.setValueAtTime(523, now);
+      osc.frequency.setValueAtTime(659, now + 0.1);
+      osc.frequency.setValueAtTime(784, now + 0.2);
+      osc.frequency.setValueAtTime(1047, now + 0.3);
+      gain.gain.setValueAtTime(0.25, now);
+      gain.gain.exponentialRampToValueAtTime(0.01, now + 0.5);
+      osc.start(now);
+      osc.stop(now + 0.5);
+    } else if (type === 'reject') {
+      // Lock rattling/rejection - dissonant buzz
+      osc.type = 'sawtooth';
+      const now = audioCtx.currentTime;
+      osc.frequency.setValueAtTime(150, now);
+      osc.frequency.setValueAtTime(120, now + 0.1);
+      osc.frequency.setValueAtTime(100, now + 0.2);
+      gain.gain.setValueAtTime(0.15, now);
+      gain.gain.exponentialRampToValueAtTime(0.01, now + 0.3);
+      osc.start(now);
+      osc.stop(now + 0.3);
+    } else if (type === 'click') {
+      // Subtle click
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(600, audioCtx.currentTime);
+      gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.05);
+      osc.start();
+      osc.stop(audioCtx.currentTime + 0.05);
+    }
+  }
+
+  function startAmbientHum() {
+    if (!audioCtx || prefersReducedMotion || ambientOsc) return;
+    if (audioCtx.state === 'suspended') return;
+
+    ambientOsc = audioCtx.createOscillator();
+    ambientGain = audioCtx.createGain();
+    const filter = audioCtx.createBiquadFilter();
+
+    ambientOsc.type = 'sine';
+    ambientOsc.frequency.setValueAtTime(110, audioCtx.currentTime);
+
+    filter.type = 'lowpass';
+    filter.frequency.setValueAtTime(200, audioCtx.currentTime);
+
+    ambientGain.gain.setValueAtTime(0.03, audioCtx.currentTime);
+
+    ambientOsc.connect(filter);
+    filter.connect(ambientGain);
+    ambientGain.connect(audioCtx.destination);
+
+    ambientOsc.start();
+  }
+
+  function stopAmbientHum() {
+    if (ambientOsc) {
+      ambientGain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.5);
+      ambientOsc.stop(audioCtx.currentTime + 0.5);
+      ambientOsc = null;
+      ambientGain = null;
+    }
+  }
+
+  // Game state
+  let key = null;
+  let chests = [];
+  let selectedChest = null;
+  let hoveredChest = null;
+  let particles = [];
+  let keySparkles = [];
+  let keyTrail = [];
+  let dustParticles = [];
+  let treasureBurst = [];
+  let magicOrbs = [];
+  let animationTime = 0;
+  let stars = [];
+
+  // Text wrapping helper
+  function wrapText(text, maxWidth, fontSize) {
+    ctx.font = `600 ${fontSize}px 'Nunito', sans-serif`;
+    const words = text.split(' ');
+    const lines = [];
+    let currentLine = words[0] || '';
+
+    for (let i = 1; i < words.length; i++) {
+      const testLine = currentLine + ' ' + words[i];
+      if (ctx.measureText(testLine).width < maxWidth) {
+        currentLine = testLine;
+      } else {
+        lines.push(currentLine);
+        currentLine = words[i];
+      }
+    }
+    lines.push(currentLine);
+    return lines;
+  }
+
+  function initGame() {
+    initAudio();
+
+    // Initialize key at top center
+    key = {
+      x: W / 2,
+      y: 55,
+      baseY: 55,
+      size: 40,
+      rotation: 0,
+      animating: false,
+      targetX: 0,
+      targetY: 0,
+      speed: 500,
+      glowPhase: 0,
+      bobPhase: 0,
+      scale: 1
+    };
+
+    // Initialize chests in 2x2 grid
+    chests = [];
+    const chestW = 150;
+    const chestH = 100;
+    const spacing = 60;
+    const verticalSpacing = 130;
+    const startX = (W - (chestW * 2 + spacing)) / 2;
+    const startY = 120;
+
+    for (let i = 0; i < 4 && i < QUESTION.choices.length; i++) {
+      const col = i % 2;
+      const row = Math.floor(i / 2);
+      chests.push({
+        x: startX + col * (chestW + spacing),
+        y: startY + row * (chestH + verticalSpacing),
+        baseY: startY + row * (chestH + verticalSpacing),
+        width: chestW,
+        height: chestH,
+        choiceIndex: i,
+        state: 'idle', // idle, shaking, opening
+        shakeTime: 0,
+        openProgress: 0,
+        lidAngle: 0,
+        text: QUESTION.choices[i].text,
+        glowIntensity: 0,
+        scale: 0, // Start at 0 for entrance animation
+        alpha: 0
+      });
+    }
+
+    selectedChest = null;
+    hoveredChest = null;
+    particles = [];
+    keySparkles = [];
+    keyTrail = [];
+    dustParticles = [];
+    treasureBurst = [];
+    animationTime = 0;
+
+    // Generate background stars
+    stars = [];
+    for (let i = 0; i < 80; i++) {
+      stars.push({
+        x: (i * 137.5) % W,
+        y: (i * 47.3) % H,
+        size: 1 + (i % 3),
+        phase: i,
+        color: i % 5 === 0 ? COLORS.amber : (i % 7 === 0 ? COLORS.cyan : COLORS.textSecondary)
+      });
+    }
+
+    // Generate magic orbs floating in background
+    magicOrbs = [];
+    for (let i = 0; i < 8; i++) {
+      magicOrbs.push({
+        x: Math.random() * W,
+        y: Math.random() * H,
+        vx: (Math.random() - 0.5) * 20,
+        vy: (Math.random() - 0.5) * 20,
+        size: 3 + Math.random() * 5,
+        phase: Math.random() * Math.PI * 2,
+        color: [COLORS.orange, COLORS.amber, COLORS.cyan][Math.floor(Math.random() * 3)]
+      });
+    }
+
+    // Entrance animation for chests
+    if (!prefersReducedMotion) {
+      chests.forEach((chest, i) => {
+        setTimeout(() => {
+          bounceInChest(chest);
+        }, i * 100);
+      });
+    } else {
+      chests.forEach(chest => {
+        chest.scale = 1;
+        chest.alpha = 1;
+      });
+    }
+
+    // Start ambient hum after user interaction
+    setTimeout(() => {
+      if (audioCtx && audioCtx.state === 'running') {
+        startAmbientHum();
+      }
+    }, 500);
+  }
+
+  function bounceInChest(chest) {
+    const start = performance.now();
+    const duration = 400;
+    const animate = (now) => {
+      const t = Math.min((now - start) / duration, 1);
+      const spring = 1 + Math.sin(t * Math.PI * 2) * 0.2 * (1 - t);
+      chest.scale = t * spring;
+      chest.alpha = t;
+      if (t < 1) requestAnimationFrame(animate);
+      else { chest.scale = 1; chest.alpha = 1; }
+    };
+    requestAnimationFrame(animate);
+  }
+
+  function spawnKeySparkles() {
+    // Spawn magical sparkles around the key
+    if (Math.random() < 0.3 && !prefersReducedMotion) {
+      const angle = Math.random() * Math.PI * 2;
+      const dist = 15 + Math.random() * 20;
+      keySparkles.push({
+        x: key.x + Math.cos(angle) * dist,
+        y: key.y + Math.sin(angle) * dist,
+        vx: (Math.random() - 0.5) * 30,
+        vy: -Math.random() * 40 - 10,
+        size: 2 + Math.random() * 4,
+        life: 1,
+        decay: 1.5 + Math.random(),
+        color: Math.random() > 0.5 ? COLORS.amber : COLORS.orange
+      });
+    }
+  }
+
+  function spawnKeyTrail() {
+    if (key.animating && !prefersReducedMotion) {
+      keyTrail.push({
+        x: key.x,
+        y: key.y,
+        size: 8 + Math.random() * 6,
+        life: 1,
+        decay: 3,
+        color: COLORS.amber
+      });
+    }
+  }
+
+  function spawnDustParticles(chest) {
+    // Dust burst when chest shakes (wrong answer)
+    const cx = chest.x + chest.width / 2;
+    const cy = chest.y + chest.height;
+    for (let i = 0; i < 15; i++) {
+      dustParticles.push({
+        x: cx + (Math.random() - 0.5) * chest.width,
+        y: cy,
+        vx: (Math.random() - 0.5) * 100,
+        vy: -Math.random() * 60 - 20,
+        size: 3 + Math.random() * 4,
+        life: 1,
+        decay: 1.5 + Math.random(),
+        color: '#8B7355'
+      });
+    }
+  }
+
+  function spawnTreasureBurst(chest) {
+    // Dramatic treasure burst for correct answer
+    const cx = chest.x + chest.width / 2;
+    const cy = chest.y + chest.height / 2;
+    const colors = [COLORS.amber, COLORS.orange, COLORS.cyan, COLORS.success, '#FFD700'];
+
+    // Main burst particles
+    for (let i = 0; i < 40; i++) {
+      const angle = (i / 40) * Math.PI * 2;
+      const speed = 150 + Math.random() * 200;
+      treasureBurst.push({
+        x: cx,
+        y: cy,
+        vx: Math.cos(angle) * speed + (Math.random() - 0.5) * 50,
+        vy: Math.sin(angle) * speed - 100 + (Math.random() - 0.5) * 50,
+        size: 4 + Math.random() * 8,
+        life: 1,
+        decay: 0.8 + Math.random() * 0.4,
+        color: colors[Math.floor(Math.random() * colors.length)],
+        rotation: Math.random() * Math.PI * 2,
+        rotationSpeed: (Math.random() - 0.5) * 8,
+        type: Math.random() > 0.7 ? 'star' : 'rect'
+      });
+    }
+
+    // Gold coins shooting up
+    for (let i = 0; i < 10; i++) {
+      treasureBurst.push({
+        x: cx + (Math.random() - 0.5) * 40,
+        y: cy,
+        vx: (Math.random() - 0.5) * 80,
+        vy: -250 - Math.random() * 150,
+        size: 10 + Math.random() * 6,
+        life: 1.5,
+        decay: 0.6,
+        color: '#FFD700',
+        rotation: 0,
+        rotationSpeed: (Math.random() - 0.5) * 15,
+        type: 'coin'
+      });
+    }
+  }
+
+  function updateGame(dt) {
+    if (gameState !== 'playing') return;
+
+    animationTime += dt;
+
+    // Update key bobbing animation when idle
+    if (!key.animating && !prefersReducedMotion) {
+      key.bobPhase += dt * 2;
+      key.y = key.baseY + Math.sin(key.bobPhase) * 6;
+      key.rotation = Math.sin(key.bobPhase * 0.7) * 0.1;
+      key.glowPhase += dt * 3;
+      spawnKeySparkles();
+    }
+
+    // Update key animation
+    if (key.animating) {
+      const dx = key.targetX - key.x;
+      const dy = key.targetY - key.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+
+      spawnKeyTrail();
+
+      if (dist < 5) {
+        // Key reached the chest
+        key.animating = false;
+        const chest = selectedChest;
+        const choice = QUESTION.choices[chest.choiceIndex];
+
+        if (choice.is_correct) {
+          // Correct answer - open chest
+          chest.state = 'opening';
+          playSound('unlock');
+          spawnTreasureBurst(chest);
+          stopAmbientHum();
+
+          // End game after animation
+          setTimeout(() => {
+            engine.end(true, choice.explanation);
+          }, 800);
+        } else {
+          // Wrong answer - shake chest
+          chest.state = 'shaking';
+          chest.shakeTime = 0.6;
+          playSound('reject');
+          spawnDustParticles(chest);
+
+          // End after shake
+          setTimeout(() => {
+            stopAmbientHum();
+            engine.end(false, choice.explanation);
+          }, 700);
+        }
+      } else {
+        // Move key toward target with acceleration
+        const accel = Math.min(dist / 50, 1);
+        const speed = key.speed * (0.5 + accel * 0.5);
+        const moveX = (dx / dist) * speed * dt;
+        const moveY = (dy / dist) * speed * dt;
+        key.x += moveX;
+        key.y += moveY;
+        key.rotation += dt * 12;
+      }
+    }
+
+    // Update chest animations
+    for (const chest of chests) {
+      if (chest.state === 'shaking') {
+        chest.shakeTime = Math.max(0, chest.shakeTime - dt);
+        if (chest.shakeTime <= 0) {
+          chest.state = 'idle';
+        }
+      } else if (chest.state === 'opening') {
+        chest.openProgress = Math.min(1, chest.openProgress + dt * 2.5);
+        chest.lidAngle = Math.min(1, chest.lidAngle + dt * 3);
+      }
+
+      // Update hover glow
+      if (chest === hoveredChest && chest.state === 'idle') {
+        chest.glowIntensity = Math.min(1, chest.glowIntensity + dt * 4);
+      } else {
+        chest.glowIntensity = Math.max(0, chest.glowIntensity - dt * 4);
+      }
+    }
+
+    // Update magic orbs
+    for (const orb of magicOrbs) {
+      orb.x += orb.vx * dt;
+      orb.y += orb.vy * dt;
+      orb.phase += dt * 2;
+
+      // Bounce off edges
+      if (orb.x < 0 || orb.x > W) orb.vx *= -1;
+      if (orb.y < 0 || orb.y > H) orb.vy *= -1;
+      orb.x = Math.max(0, Math.min(W, orb.x));
+      orb.y = Math.max(0, Math.min(H, orb.y));
+    }
+
+    // Update key sparkles
+    for (let i = keySparkles.length - 1; i >= 0; i--) {
+      const p = keySparkles[i];
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.vy += 50 * dt;
+      p.life -= p.decay * dt;
+      if (p.life <= 0) keySparkles.splice(i, 1);
+    }
+
+    // Update key trail
+    for (let i = keyTrail.length - 1; i >= 0; i--) {
+      const p = keyTrail[i];
+      p.life -= p.decay * dt;
+      p.size *= 0.95;
+      if (p.life <= 0) keyTrail.splice(i, 1);
+    }
+
+    // Update dust particles
+    for (let i = dustParticles.length - 1; i >= 0; i--) {
+      const p = dustParticles[i];
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.vy += 150 * dt;
+      p.life -= p.decay * dt;
+      if (p.life <= 0) dustParticles.splice(i, 1);
+    }
+
+    // Update treasure burst
+    for (let i = treasureBurst.length - 1; i >= 0; i--) {
+      const p = treasureBurst[i];
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.vy += 400 * dt; // gravity
+      p.rotation += p.rotationSpeed * dt;
+      p.life -= p.decay * dt;
+      if (p.life <= 0) treasureBurst.splice(i, 1);
+    }
+
+    // Update old particles system
+    for (let i = particles.length - 1; i >= 0; i--) {
+      const p = particles[i];
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.vy += 200 * dt;
+      p.life -= p.decay * dt;
+      if (p.life <= 0) particles.splice(i, 1);
+    }
+  }
+
+  function drawGame() {
+    // Clear canvas with dark warm background
+    ctx.fillStyle = COLORS.bgPrimary;
+    ctx.fillRect(0, 0, W, H);
+
+    // Draw magical atmosphere gradient
+    const atmosGrad = ctx.createRadialGradient(W/2, H/2, 0, W/2, H/2, W * 0.7);
+    atmosGrad.addColorStop(0, 'rgba(232, 122, 62, 0.05)');
+    atmosGrad.addColorStop(0.5, 'rgba(78, 205, 196, 0.03)');
+    atmosGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+    ctx.fillStyle = atmosGrad;
+    ctx.fillRect(0, 0, W, H);
+
+    // Draw magic orbs (background atmosphere)
+    for (const orb of magicOrbs) {
+      const pulse = Math.sin(orb.phase) * 0.3 + 0.7;
+      ctx.globalAlpha = 0.3 * pulse;
+      const orbGrad = ctx.createRadialGradient(orb.x, orb.y, 0, orb.x, orb.y, orb.size * 2);
+      orbGrad.addColorStop(0, orb.color);
+      orbGrad.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = orbGrad;
+      ctx.beginPath();
+      ctx.arc(orb.x, orb.y, orb.size * 2, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+
+    // Draw twinkling stars
+    for (const star of stars) {
+      const twinkle = Math.sin(animationTime * 2 + star.phase) * 0.4 + 0.6;
+      ctx.globalAlpha = twinkle * 0.7;
+      ctx.fillStyle = star.color;
+      ctx.fillRect(Math.floor(star.x), Math.floor(star.y), star.size, star.size);
+    }
+    ctx.globalAlpha = 1;
+
+    // Draw key trail
+    for (const p of keyTrail) {
+      ctx.globalAlpha = p.life * 0.6;
+      const trailGrad = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, p.size);
+      trailGrad.addColorStop(0, COLORS.amber);
+      trailGrad.addColorStop(1, 'rgba(245, 167, 66, 0)');
+      ctx.fillStyle = trailGrad;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+
+    // Draw treasure chests
+    for (const chest of chests) {
+      if (chest.alpha === 0) continue;
+
+      let offsetX = 0;
+      let offsetY = 0;
+
+      // More dramatic shake effect
+      if (chest.state === 'shaking') {
+        const intensity = chest.shakeTime / 0.6;
+        offsetX = Math.sin(chest.shakeTime * 60) * 12 * intensity;
+        offsetY = Math.cos(chest.shakeTime * 50) * 6 * intensity;
+      }
+
+      ctx.save();
+      ctx.globalAlpha = chest.alpha;
+
+      const cx = chest.x + chest.width / 2;
+      const cy = chest.y + chest.height / 2;
+
+      // Apply scale transformation
+      ctx.translate(cx + offsetX, cy + offsetY);
+      ctx.scale(chest.scale, chest.scale);
+      ctx.translate(-cx, -cy);
+
+      const x = chest.x;
+      const y = chest.y;
+
+      // Draw hover glow
+      if (chest.glowIntensity > 0) {
+        ctx.globalAlpha = chest.glowIntensity * 0.4 * chest.alpha;
+        const glowGrad = ctx.createRadialGradient(
+          cx, cy, chest.width * 0.3,
+          cx, cy, chest.width * 0.8
+        );
+        glowGrad.addColorStop(0, COLORS.cyan);
+        glowGrad.addColorStop(1, 'rgba(78, 205, 196, 0)');
+        ctx.fillStyle = glowGrad;
+        ctx.fillRect(x - 30, y - 30, chest.width + 60, chest.height + 60);
+        ctx.globalAlpha = chest.alpha;
+      }
+
+      // Draw shadow
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
+      ctx.beginPath();
+      ctx.ellipse(cx, y + chest.height + 5, chest.width * 0.4, 8, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Draw chest base with better gradient
+      const gradient = ctx.createLinearGradient(x, y, x, y + chest.height);
+      gradient.addColorStop(0, '#A0522D');
+      gradient.addColorStop(0.3, '#8B4513');
+      gradient.addColorStop(0.7, '#654321');
+      gradient.addColorStop(1, '#3E2723');
+      ctx.fillStyle = gradient;
+
+      // Rounded rect for chest body
+      ctx.beginPath();
+      ctx.roundRect(x, y + 20, chest.width, chest.height - 20, 6);
+      ctx.fill();
+
+      // Draw chest lid
+      if (chest.state === 'opening') {
+        // Animated lid opening
+        ctx.save();
+        ctx.translate(x, y + 20);
+        ctx.rotate(-chest.lidAngle * 0.8);
+        ctx.translate(-x, -(y + 20));
+
+        const lidGrad = ctx.createLinearGradient(x, y, x, y + 25);
+        lidGrad.addColorStop(0, '#B8860B');
+        lidGrad.addColorStop(1, '#8B4513');
+        ctx.fillStyle = lidGrad;
+        ctx.beginPath();
+        ctx.roundRect(x, y, chest.width, 25, [6, 6, 0, 0]);
+        ctx.fill();
+
+        ctx.strokeStyle = COLORS.amber;
+        ctx.lineWidth = 2;
+        ctx.strokeRect(x + 5, y + 5, chest.width - 10, 15);
+        ctx.restore();
+      } else {
+        // Closed lid
+        const lidGrad = ctx.createLinearGradient(x, y, x, y + 25);
+        lidGrad.addColorStop(0, '#B8860B');
+        lidGrad.addColorStop(1, '#8B4513');
+        ctx.fillStyle = lidGrad;
+        ctx.beginPath();
+        ctx.roundRect(x, y, chest.width, 25, [6, 6, 0, 0]);
+        ctx.fill();
+      }
+
+      // Draw chest border (gold with glow)
+      ctx.strokeStyle = COLORS.amber;
+      ctx.lineWidth = 3;
+      ctx.strokeRect(x, y, chest.width, chest.height);
+
+      // Draw decorative bands
+      ctx.strokeStyle = COLORS.orange;
+      ctx.lineWidth = 2;
+      ctx.strokeRect(x + 8, y + 8, chest.width - 16, chest.height - 16);
+
+      // Draw metal corners
+      const cornerSize = 12;
+      ctx.fillStyle = '#FFD700';
+      // Top-left
+      ctx.fillRect(x - 2, y - 2, cornerSize, 4);
+      ctx.fillRect(x - 2, y - 2, 4, cornerSize);
+      // Top-right
+      ctx.fillRect(x + chest.width - cornerSize + 2, y - 2, cornerSize, 4);
+      ctx.fillRect(x + chest.width - 2, y - 2, 4, cornerSize);
+      // Bottom-left
+      ctx.fillRect(x - 2, y + chest.height - 2, cornerSize, 4);
+      ctx.fillRect(x - 2, y + chest.height - cornerSize + 2, 4, cornerSize);
+      // Bottom-right
+      ctx.fillRect(x + chest.width - cornerSize + 2, y + chest.height - 2, cornerSize, 4);
+      ctx.fillRect(x + chest.width - 2, y + chest.height - cornerSize + 2, 4, cornerSize);
+
+      // Draw lock or treasure
+      if (chest.state === 'opening') {
+        // Show treasure emerging
+        const emergeY = chest.openProgress * 20;
+        ctx.globalAlpha = chest.openProgress * chest.alpha;
+
+        // Glow behind treasure
+        const treasureGlow = ctx.createRadialGradient(cx, cy - emergeY, 0, cx, cy - emergeY, 40);
+        treasureGlow.addColorStop(0, 'rgba(255, 215, 0, 0.6)');
+        treasureGlow.addColorStop(1, 'rgba(255, 215, 0, 0)');
+        ctx.fillStyle = treasureGlow;
+        ctx.beginPath();
+        ctx.arc(cx, cy - emergeY, 40, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.font = '48px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('💎', cx, cy - emergeY);
+        ctx.globalAlpha = chest.alpha;
+      } else {
+        // Lock with subtle shine
+        ctx.font = '28px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('🔒', cx, cy + 10);
+      }
+
+      ctx.restore();
+
+      // Draw answer text below chest
+      const fontSize = 14;
+      const lineHeight = fontSize * 1.3;
+      const lines = wrapText(chest.text, chest.width + 20, fontSize);
+
+      ctx.font = `600 ${fontSize}px 'Nunito', sans-serif`;
+      ctx.fillStyle = COLORS.textPrimary;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'top';
+
+      for (let i = 0; i < lines.length; i++) {
+        ctx.fillText(lines[i], chest.x + chest.width / 2, chest.y + chest.height + 10 + i * lineHeight);
+      }
+    }
+
+    // Draw dust particles
+    for (const p of dustParticles) {
+      ctx.globalAlpha = p.life * 0.7;
+      ctx.fillStyle = p.color;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+
+    // Draw treasure burst particles
+    for (const p of treasureBurst) {
+      ctx.save();
+      ctx.globalAlpha = Math.min(1, p.life);
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rotation);
+      ctx.fillStyle = p.color;
+
+      if (p.type === 'star') {
+        // Draw star shape
+        ctx.beginPath();
+        for (let i = 0; i < 5; i++) {
+          const angle = (i * Math.PI * 2) / 5 - Math.PI / 2;
+          const r = i % 2 === 0 ? p.size : p.size * 0.5;
+          if (i === 0) ctx.moveTo(Math.cos(angle) * r, Math.sin(angle) * r);
+          else ctx.lineTo(Math.cos(angle) * r, Math.sin(angle) * r);
+        }
+        ctx.closePath();
+        ctx.fill();
+      } else if (p.type === 'coin') {
+        // Draw coin (circle with shine)
+        ctx.beginPath();
+        ctx.arc(0, 0, p.size / 2, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#FFF8DC';
+        ctx.globalAlpha *= 0.5;
+        ctx.beginPath();
+        ctx.arc(-p.size * 0.15, -p.size * 0.15, p.size * 0.2, 0, Math.PI * 2);
+        ctx.fill();
+      } else {
+        ctx.fillRect(-p.size / 2, -p.size / 4, p.size, p.size / 2);
+      }
+      ctx.restore();
+    }
+    ctx.globalAlpha = 1;
+
+    // Draw key sparkles
+    for (const p of keySparkles) {
+      ctx.globalAlpha = p.life;
+      ctx.fillStyle = p.color;
+      ctx.beginPath();
+      // Draw diamond shape
+      ctx.moveTo(p.x, p.y - p.size);
+      ctx.lineTo(p.x + p.size * 0.6, p.y);
+      ctx.lineTo(p.x, p.y + p.size);
+      ctx.lineTo(p.x - p.size * 0.6, p.y);
+      ctx.closePath();
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+
+    // Draw key with glow
+    ctx.save();
+    ctx.translate(Math.floor(key.x), Math.floor(key.y));
+    ctx.rotate(key.rotation);
+    ctx.scale(key.scale, key.scale);
+
+    // Key glow effect
+    if (!prefersReducedMotion) {
+      const glowPulse = Math.sin(key.glowPhase) * 0.3 + 0.7;
+      ctx.globalAlpha = 0.4 * glowPulse;
+      const keyGlow = ctx.createRadialGradient(0, 0, 0, 0, 0, key.size);
+      keyGlow.addColorStop(0, COLORS.amber);
+      keyGlow.addColorStop(1, 'rgba(245, 167, 66, 0)');
+      ctx.fillStyle = keyGlow;
+      ctx.beginPath();
+      ctx.arc(0, 0, key.size, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.globalAlpha = 1;
+    }
+
+    ctx.font = `${key.size}px sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('🔑', 0, 0);
+    ctx.restore();
+
+    // Reset text alignment
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+  }
+
+  function handleInput(e) {
+    if (gameState !== 'playing') return;
+    // No keyboard input needed - game uses mouse/click
+  }
+
+  // Mouse move handler for hover effects
+  canvas.addEventListener('mousemove', (e) => {
+    if (gameState !== 'playing') return;
+    if (key.animating) return;
+
+    const { x: mx, y: my } = screenToLogical(e.clientX, e.clientY);
+    hoveredChest = null;
+
+    for (const chest of chests) {
+      if (mx >= chest.x && mx <= chest.x + chest.width &&
+          my >= chest.y && my <= chest.y + chest.height) {
+        hoveredChest = chest;
+        canvas.style.cursor = 'pointer';
+        break;
+      }
+    }
+
+    if (!hoveredChest) {
+      canvas.style.cursor = 'default';
+    }
+  });
+
+  // Mouse click handler for chest selection
+  canvas.addEventListener('click', (e) => {
+    if (gameState !== 'playing') return;
+    if (key.animating) return;
+
+    // Initialize audio on first interaction
+    initAudio();
+    if (audioCtx && audioCtx.state === 'suspended') {
+      audioCtx.resume().then(() => {
+        startAmbientHum();
+      });
+    }
+
+    const { x: mx, y: my } = screenToLogical(e.clientX, e.clientY);
+
+    // Check which chest was clicked
+    for (const chest of chests) {
+      if (mx >= chest.x && mx <= chest.x + chest.width &&
+          my >= chest.y && my <= chest.y + chest.height) {
+        // Start key animation toward this chest
+        key.animating = true;
+        key.targetX = chest.x + chest.width / 2;
+        key.targetY = chest.y + chest.height / 2;
+        selectedChest = chest;
+        playSound('jingle');
+        canvas.style.cursor = 'default';
+        break;
+      }
+    }
+  });
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 4: GAME LOOP - DO NOT MODIFY                                      ║
+  // ║  Standard loop with responsive scaling and DPR support.                    ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  let lastTime = performance.now();
+
+  function gameLoop(now) {
+    const dt = Math.min((now - lastTime) / 1000, 0.05); // Cap at 50ms
+    lastTime = now;
+
+    // Apply transform for logical coordinate system
+    ctx.setTransform(scale * dpr, 0, 0, scale * dpr, 0, 0);
+
+    if (gameState === 'playing') {
+      updateGame(dt);
+      drawGame();
+    } else {
+      drawGame(); // Draw game state behind overlay
+      drawEndScreen(dt);
+    }
+
+    // Reset transform for next frame
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+    requestAnimationFrame(gameLoop);
+  }
+
+  // Input handlers
+  document.addEventListener('keydown', (e) => {
+    if (gameState === 'ended' && (e.code === 'KeyR')) {
+      // Restart game
+      gameState = 'playing';
+      gameResult = null;
+      gameExplanation = '';
+      confettiParticles = [];
+      initGame();
+      return;
+    }
+    handleInput(e);
+  });
+
+  document.addEventListener('keyup', (e) => {
+    // Optional: handle key release in your handleInput
+  });
+
+  // Canvas click handler for end screen buttons
+  canvas.addEventListener('click', (e) => {
+    if (gameState !== 'ended') return;
+
+    const { x, y } = screenToLogical(e.clientX, e.clientY);
+
+    if (gameResult) {
+      // Correct answer: check both buttons
+      if (pointInRect(x, y, restartButton)) {
+        gameState = 'playing';
+        gameResult = null;
+        gameExplanation = '';
+        confettiParticles = [];
+        initGame();
+        return;
+      }
+      if (pointInRect(x, y, nextButton)) {
+        // Notify parent to go to next question
+        if (window.parent && window.parent !== window) {
+          window.parent.postMessage({ type: 'quiz-next' }, '*');
+        }
+        return;
+      }
+    } else {
+      // Wrong answer: check centered restart button
+      const centeredRestart = { x: W / 2 - 75, y: H / 2 + 60, w: 150, h: 48 };
+      if (pointInRect(x, y, centeredRestart)) {
+        gameState = 'playing';
+        gameResult = null;
+        gameExplanation = '';
+        confettiParticles = [];
+        initGame();
+        return;
+      }
+    }
+  });
+
+
+  // Cursor change handler for end screen buttons
+  canvas.addEventListener('mousemove', (e) => {
+    if (gameState !== 'ended') {
+      canvas.style.cursor = 'default';
+      return;
+    }
+    const { x, y } = screenToLogical(e.clientX, e.clientY);
+    if (gameResult) {
+      if (pointInRect(x, y, restartButton) || pointInRect(x, y, nextButton)) {
+        canvas.style.cursor = 'pointer';
+        return;
+      }
+    } else {
+      const centeredRestart = { x: W / 2 - 75, y: H / 2 + 60, w: 150, h: 48 };
+      if (pointInRect(x, y, centeredRestart)) {
+        canvas.style.cursor = 'pointer';
+        return;
+      }
+    }
+    canvas.style.cursor = 'default';
+  });
+
+  // Handle resize
+  window.addEventListener('resize', resizeCanvas);
+
+  // Initialize
+  resizeCanvas();
+  initGame();
+  requestAnimationFrame(gameLoop);
+  </script>
+</body>
+</html>
