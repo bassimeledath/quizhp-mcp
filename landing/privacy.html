@@ -298,12 +298,15 @@
     <!-- Policy Content -->
     <main class="policy">
       <h1>Privacy Policy</h1>
-      <p class="updated">Last updated: March 2026</p>
+      <p class="updated">Last updated: March 18, 2026</p>
+
+      <p>This Privacy Policy explains how <strong>Hunch AI, LLC</strong> ("Hunch AI," "QuizHP," "we," "us," or "our") handles your information when you use the QuizHP MCP server and related services (the "Service").</p>
+      <p>By using the Service, you acknowledge that you have read and understood this Privacy Policy.</p>
 
       <h2>1. What QuizHP Does</h2>
-      <p>QuizHP is an MCP (Model Context Protocol) server that generates interactive quiz games. When you ask an AI assistant (Claude or ChatGPT) to create a quiz, the assistant generates questions and sends them to QuizHP, which returns an interactive game widget.</p>
+      <p>QuizHP is an MCP (Model Context Protocol) server that generates interactive quiz games. When you ask an AI assistant (Claude or ChatGPT) to create a quiz, the assistant generates questions and sends them to QuizHP, which returns an interactive game widget. No account or authentication is required.</p>
 
-      <h2>2. Data We Collect</h2>
+      <h2>2. Information We Collect</h2>
       <p>QuizHP collects <strong>no personal data</strong>. Specifically:</p>
       <ul>
         <li>No user accounts or authentication required</li>
@@ -311,6 +314,7 @@
         <li>No analytics or telemetry</li>
         <li>No conversation data stored</li>
         <li>No IP addresses logged</li>
+        <li>No payment or financial information</li>
       </ul>
 
       <h2>3. Data We Process Temporarily</h2>
@@ -321,26 +325,53 @@
         <li>Automatically deleted when the session expires or the server restarts</li>
       </ul>
 
-      <h2>4. Data We Do NOT Collect</h2>
+      <h2>4. How We Use Information</h2>
+      <p>The only information processed is quiz question data sent by the AI assistant. This data is used solely to:</p>
       <ul>
-        <li>No personal information (name, email, etc.)</li>
-        <li>No conversation history</li>
-        <li>No AI chat context beyond the quiz questions</li>
-        <li>No payment or financial information</li>
-        <li>No health, government, or credential data</li>
+        <li>Render interactive quiz game widgets</li>
+        <li>Track game session state (correct/incorrect answers) during the active session</li>
       </ul>
 
-      <h2>5. Third-Party Services</h2>
-      <p>QuizHP runs on Cloudflare Workers. Cloudflare may process connection metadata (IP addresses, TLS info) per their own privacy policy. QuizHP itself does not access or store this metadata.</p>
+      <h2>5. How We Share Information</h2>
+      <p>We do <strong>not sell personal information</strong>. The only third party involved in processing is:</p>
+      <ul>
+        <li><strong>Cloudflare</strong> (hosting) &mdash; Cloudflare may process connection metadata (IP addresses, TLS info) per their own privacy policy. QuizHP itself does not access or store this metadata.</li>
+      </ul>
 
-      <h2>6. Children's Privacy</h2>
-      <p>QuizHP does not knowingly collect any personal information from anyone, including children under 13.</p>
+      <h2>6. Data Retention</h2>
+      <ul>
+        <li>Quiz session data is held in memory for up to 1 hour, then automatically deleted</li>
+        <li>No data is persisted to any database or file storage</li>
+        <li>Server restarts clear all session data</li>
+      </ul>
 
-      <h2>7. Changes</h2>
-      <p>We may update this policy. Changes will be posted at this URL.</p>
+      <h2>7. Your Rights</h2>
+      <p>Since QuizHP collects no personal data, there is no personal data to access, correct, or delete. If you have questions about data handling, contact us at the address below.</p>
 
-      <h2>8. Contact</h2>
-      <p>For privacy questions: <a href="mailto:[SUPPORT_EMAIL]">[SUPPORT_EMAIL]</a><br>
+      <h2>8. GDPR / UK-GDPR</h2>
+      <p>If you are located in the EU or UK: QuizHP processes no personal data as defined under GDPR. No data controller registration is required. Connection metadata processed by Cloudflare is governed by Cloudflare's privacy policy and Data Processing Addendum.</p>
+
+      <h2>9. CCPA / California Privacy Rights</h2>
+      <p>If you reside in California: QuizHP does not collect, sell, or share personal information. No categories of personal information are collected.</p>
+
+      <h2>10. Children's Privacy</h2>
+      <p>QuizHP is a general-audience service. We do not knowingly collect any personal information from anyone, including children under 13. Since no personal data is collected, there is no risk of inadvertent collection.</p>
+
+      <h2>11. Data Security</h2>
+      <p>We implement reasonable security measures including:</p>
+      <ul>
+        <li>Encryption in transit (HTTPS/TLS)</li>
+        <li>Stateless architecture with no persistent data storage</li>
+        <li>Cloudflare's infrastructure security</li>
+      </ul>
+
+      <h2>12. Changes to This Policy</h2>
+      <p>We may update this Privacy Policy from time to time. Changes will be posted at this URL. Your continued use of the Service signifies acceptance of the updated policy.</p>
+
+      <h2>13. Contact Us</h2>
+      <p>For privacy inquiries or data requests:</p>
+      <p><strong>Hunch AI, LLC</strong><br>
+      Email: <a href="mailto:support@quizhp.com">support@quizhp.com</a><br>
       GitHub: <a href="https://github.com/bassimeledath/quizhp-mcp" target="_blank" rel="noopener">github.com/bassimeledath/quizhp-mcp</a></p>
     </main>
 
