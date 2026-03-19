@@ -184,8 +184,13 @@
       "instructions": "Click a glowing radio dial to tune into your answer.",
       "controls": [
         {
-          "key": "click",
-          "action": "Select answer dial"
+          "type": "mouse",
+          "description": "Click dial to select answer"
+        },
+        {
+          "type": "keyboard",
+          "description": "Restart game",
+          "keys": ["R"]
         }
       ]
     },
@@ -844,15 +849,16 @@
       "path": "web/mcq/coffee-bean-sacks.html",
       "platform": "web",
       "questionType": "mcq",
-      "instructions": "Cycle through coffee sacks with arrows, spacebar to pick.",
+      "instructions": "Use arrows to select a coffee sack, press Space to confirm your choice.",
       "controls": [
         {
-          "key": "ArrowLeft / ArrowRight",
-          "action": "Cycle through sacks"
+          "type": "keyboard",
+          "description": "Navigate sacks and select",
+          "keys": ["ArrowLeft", "ArrowRight", "Space", "R"]
         },
         {
-          "key": "Space",
-          "action": "Select highlighted sack"
+          "type": "mouse",
+          "description": "Click end screen buttons"
         }
       ]
     },
@@ -864,12 +870,13 @@
       "instructions": "Steer your spacecraft into a comet to select an answer.",
       "controls": [
         {
-          "key": "arrow keys",
-          "action": "Steer spacecraft"
+          "type": "keyboard",
+          "description": "Steer spacecraft",
+          "keys": ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "W", "A", "S", "D", "R"]
         },
         {
-          "key": "WASD",
-          "action": "Steer spacecraft (alternate)"
+          "type": "mouse",
+          "description": "Click end screen buttons"
         }
       ]
     },
@@ -1156,11 +1163,25 @@
       "path": "web/mcq/space-station-hatchways.html",
       "platform": "web",
       "questionType": "mcq",
-      "instructions": "Click a numbered hatchway to open it and select your answer.",
+      "instructions": "Click a hatchway or press 1-4 to select your answer.",
       "controls": [
         {
-          "key": "click",
-          "action": "Select answer"
+          "type": "keyboard",
+          "description": "Select answer",
+          "keys": ["1", "2", "3", "4"]
+        },
+        {
+          "type": "mouse",
+          "description": "Hover to highlight"
+        },
+        {
+          "type": "mouse",
+          "description": "Click to select answer"
+        },
+        {
+          "type": "keyboard",
+          "description": "Restart game",
+          "keys": ["R"]
         }
       ]
     },
@@ -1172,8 +1193,14 @@
       "instructions": "Press 1-4 to release steam and lock in your answer.",
       "controls": [
         {
-          "key": "1-4",
-          "action": "Select answer gauge"
+          "type": "keyboard",
+          "description": "Release steam and select gauge",
+          "keys": ["1", "2", "3", "4"]
+        },
+        {
+          "type": "keyboard",
+          "description": "Restart game",
+          "keys": ["R"]
         }
       ]
     },
@@ -1267,12 +1294,20 @@
       "instructions": "Drag the star into your chosen celestial gate to answer.",
       "controls": [
         {
-          "key": "drag",
-          "action": "Move guiding star"
+          "type": "touch",
+          "description": "Drag star horizontally to gate"
         },
         {
-          "key": "release",
-          "action": "Select gate answer"
+          "type": "touch",
+          "description": "Release to select gate"
+        },
+        {
+          "type": "mouse",
+          "description": "Drag star (desktop testing)"
+        },
+        {
+          "type": "touch",
+          "description": "Tap Restart/Next on end screen"
         }
       ]
     },
@@ -1284,8 +1319,16 @@
       "instructions": "Tap the balloon carrying your answer choice",
       "controls": [
         {
-          "key": "tap",
-          "action": "Select answer"
+          "type": "touch",
+          "description": "Tap balloon card to select answer"
+        },
+        {
+          "type": "mouse",
+          "description": "Click balloon card (desktop testing)"
+        },
+        {
+          "type": "touch",
+          "description": "Tap Restart/Next on end screen"
         }
       ]
     },
@@ -1678,15 +1721,21 @@
       "path": "web/mcq/barometric-mercury-glass-shatter.html",
       "platform": "web",
       "questionType": "mcq",
-      "instructions": "Slide the brass scale and launch the weight to shatter a glass bulb.",
+      "instructions": "Press Space or Enter to stop the spinning dial and select a potion vial",
       "controls": [
         {
-          "key": "arrow_keys/wasd",
-          "action": "Slide brass scale left/right"
+          "type": "keyboard",
+          "description": "Stop the rotating dial",
+          "keys": ["Space", "Enter"]
         },
         {
-          "key": "space/enter",
-          "action": "Launch lead weight"
+          "type": "keyboard",
+          "description": "Restart game",
+          "keys": ["R"]
+        },
+        {
+          "type": "mouse",
+          "description": "Click end screen buttons"
         }
       ]
     },
@@ -1851,12 +1900,23 @@
       "instructions": "Aim the signal mirror and flash light at the correct tower",
       "controls": [
         {
-          "key": "Arrow Keys / WASD",
-          "action": "Aim mirror"
+          "type": "keyboard",
+          "description": "Aim signal mirror left/right",
+          "keys": ["ArrowLeft", "ArrowRight", "KeyA", "KeyD"]
         },
         {
-          "key": "Space / Enter",
-          "action": "Flash beam"
+          "type": "keyboard",
+          "description": "Fire laser beam",
+          "keys": ["Space", "Enter"]
+        },
+        {
+          "type": "keyboard",
+          "description": "Restart game",
+          "keys": ["KeyR"]
+        },
+        {
+          "type": "mouse",
+          "description": "Click end screen buttons"
         }
       ]
     },
@@ -1868,12 +1928,23 @@
       "instructions": "Aim your glowing arrow at silk banners and shoot to answer",
       "controls": [
         {
-          "key": "Arrow Keys / WASD",
-          "action": "Aim arrow trajectory"
+          "type": "keyboard",
+          "description": "Aim arrow trajectory angle",
+          "keys": ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "KeyW", "KeyA", "KeyS", "KeyD"]
         },
         {
-          "key": "Space / Enter",
-          "action": "Shoot arrow"
+          "type": "keyboard",
+          "description": "Shoot arrow",
+          "keys": ["Space", "Enter"]
+        },
+        {
+          "type": "keyboard",
+          "description": "Restart game",
+          "keys": ["KeyR"]
+        },
+        {
+          "type": "mouse",
+          "description": "Click end screen buttons"
         }
       ]
     },
