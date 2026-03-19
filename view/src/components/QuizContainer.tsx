@@ -350,17 +350,14 @@ export function QuizContainer({
               width: 24,
               height: 24,
               borderRadius: "50%",
-              border: "1.5px solid var(--qz-border-primary, rgba(255,255,255,0.2))",
-              background: "rgba(0,0,0,0.45)",
+              border: "1.5px solid #F5A742",
+              background: "rgba(245,167,66,0.15)",
               cursor: "pointer",
               padding: 0,
             }}
             aria-label="Game info"
           >
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--qz-text-secondary, #9ca3af)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M12 16v-4" />
-              <path d="M12 8h.01" />
-            </svg>
+            <span style={{ fontFamily: "Georgia, 'Times New Roman', serif", fontStyle: "italic", fontWeight: 700, fontSize: "14px", color: "#F5A742", lineHeight: 1 }}>i</span>
           </button>
           <span
             style={{
@@ -446,17 +443,14 @@ export function QuizContainer({
               width: 26,
               height: 26,
               borderRadius: "50%",
-              border: "1.5px solid var(--qz-border-primary, rgba(255,255,255,0.2))",
-              background: "rgba(0,0,0,0.45)",
+              border: "1.5px solid #F5A742",
+              background: "rgba(245,167,66,0.15)",
               cursor: "pointer",
               padding: 0,
             }}
             aria-label="Game info"
           >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--qz-text-secondary, #9ca3af)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M12 16v-4" />
-              <path d="M12 8h.01" />
-            </svg>
+            <span style={{ fontFamily: "Georgia, 'Times New Roman', serif", fontStyle: "italic", fontWeight: 700, fontSize: "16px", color: "#F5A742", lineHeight: 1 }}>i</span>
           </button>
           <span
             style={{
