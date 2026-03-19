@@ -14,13 +14,32 @@ const choiceSchema = z.object({
   explanation: z.string().describe("Explanation for this choice"),
 });
 
-const questionSchema = z.object({
-  question_type: z
-    .enum(["mcq", "true_false"])
-    .describe("Type of question: 'mcq' for multiple choice (4 options) or 'true_false' for true/false (2 options)"),
-  question: z.string().min(1).describe("The question text"),
-  choices: z.array(choiceSchema).min(2).max(6).describe("Array of answer choices"),
-});
+const questionSchema = z
+  .object({
+    question_type: z
+      .enum(["mcq", "true_false"])
+      .describe("Type of question: 'mcq' for multiple choice (4 options) or 'true_false' for true/false (2 options)"),
+    question: z.string().min(1).describe("The question text"),
+    choices: z.array(choiceSchema).min(2).max(6).describe("Array of answer choices"),
+  })
+  .refine(
+    (q) =>
+      q.question_type === "true_false"
+        ? q.choices.length === 2 &&
+          q.choices.some((c) => c.text.toLowerCase() === "true") &&
+          q.choices.some((c) => c.text.toLowerCase() === "false")
+        : q.choices.length === 4,
+    {
+      message:
+        "true_false questions must have exactly 2 choices with text 'true' or 'false', mcq questions must have exactly 4 choices",
+    }
+  )
+  .refine(
+    (q) => q.choices.filter((c) => c.is_correct).length === 1,
+    {
+      message: "Each question must have exactly one correct answer",
+    }
+  );
 
 export interface QuizServerConfig {
   gameStore: GameStore;
