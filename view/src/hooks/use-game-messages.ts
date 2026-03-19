@@ -23,8 +23,10 @@ export function useGameMessages({
       const data = event.data as QuizMessageEvent & { sessionId?: string };
       if (!data || typeof data !== "object" || !data.type) return;
 
-      // Reject messages from old game sessions
-      if (sessionId && data.sessionId !== sessionId) return;
+      // Reject messages from old game sessions.
+      // quiz-next is exempt: templates send it directly (not through the shim)
+      // so it has no sessionId. It's a safe navigation signal with no choice data.
+      if (sessionId && data.sessionId !== sessionId && data.type !== "quiz-next") return;
 
       switch (data.type) {
         case "quiz-choice":
