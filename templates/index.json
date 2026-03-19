@@ -79,8 +79,15 @@
       "instructions": "Hold mouse to blow wind, release to chime your answer.",
       "controls": [
         {
-          "key": "click",
-          "action": "Select answer label or hold to create breeze"
+          "type": "mouse",
+          "description": "Select answer label or hold to create breeze"
+        },
+        {
+          "type": "keyboard",
+          "description": "Restart game",
+          "keys": [
+            "R"
+          ]
         }
       ]
     },
@@ -190,7 +197,9 @@
         {
           "type": "keyboard",
           "description": "Restart game",
-          "keys": ["R"]
+          "keys": [
+            "R"
+          ]
         }
       ]
     },
@@ -268,6 +277,13 @@
         {
           "type": "click-drag",
           "description": "Click and drag to aim and power your shot, release to fire"
+        },
+        {
+          "type": "keyboard",
+          "description": "Restart game",
+          "keys": [
+            "R"
+          ]
         }
       ]
     },
@@ -281,6 +297,13 @@
         {
           "type": "mouse",
           "description": "Click and hold the right/left half of the canvas to tilt the beam toward the right bucket"
+        },
+        {
+          "type": "keyboard",
+          "description": "Restart game",
+          "keys": [
+            "R"
+          ]
         }
       ]
     },
@@ -360,10 +383,23 @@
       "platform": "web",
       "questionType": "mcq",
       "instructions": "Click a contestant to give them the rose and reveal if they have the correct answer.",
-      "controls": {
-        "select": "Click on contestant",
-        "preview": "Hover over contestant to highlight"
-      }
+      "controls": [
+        {
+          "type": "mouse",
+          "description": "Click on contestant to give them the rose"
+        },
+        {
+          "type": "mouse",
+          "description": "Hover over contestant to highlight"
+        },
+        {
+          "type": "keyboard",
+          "description": "Restart game",
+          "keys": [
+            "R"
+          ]
+        }
+      ]
     },
     {
       "name": "bomb-defusal",
@@ -407,7 +443,7 @@
       "controls": [
         {
           "type": "tap",
-          "action": "Select answer"
+          "description": "Select answer"
         }
       ]
     },
@@ -419,16 +455,23 @@
       "instructions": "Aim with mouse, hold to charge, release to putt!",
       "controls": [
         {
-          "key": "Mouse",
-          "action": "Aim toward cursor"
+          "type": "mouse",
+          "description": "Aim toward cursor"
         },
         {
-          "key": "Click + Hold",
-          "action": "Charge power"
+          "type": "mouse",
+          "description": "Charge power"
         },
         {
-          "key": "Release",
-          "action": "Hit the ball"
+          "type": "mouse",
+          "description": "Hit the ball"
+        },
+        {
+          "type": "keyboard",
+          "description": "Restart game",
+          "keys": [
+            "R"
+          ]
         }
       ]
     },
@@ -440,7 +483,7 @@
       "instructions": "Feed the hungry monster the correct answer!",
       "controls": [
         {
-          "action": "tap",
+          "type": "tap",
           "description": "Tap a food to feed the monster"
         }
       ]
@@ -453,8 +496,15 @@
       "instructions": "Find and select TRUE or FALSE hidden in the letter grid by dragging across the letters.",
       "controls": [
         {
-          "action": "drag",
+          "type": "drag",
           "description": "Drag across letters to select them"
+        },
+        {
+          "type": "keyboard",
+          "description": "Restart game",
+          "keys": [
+            "R"
+          ]
         }
       ]
     },
@@ -486,16 +536,16 @@
       "instructions": "Fly through an exit to select your answer!",
       "controls": [
         {
-          "input": "Hold 🚀 button",
-          "action": "Fly upward with jetpack"
+          "type": "tap",
+          "description": "Hold 🚀 button: Fly upward with jetpack"
         },
         {
-          "input": "◀ / ▶ buttons",
-          "action": "Move left or right"
+          "type": "tap",
+          "description": "◀ / ▶ buttons: Move left or right"
         },
         {
-          "input": "Fly through exit",
-          "action": "Select that answer"
+          "type": "tap",
+          "description": "Fly through exit: Select that answer"
         }
       ]
     },
@@ -507,12 +557,25 @@
       "instructions": "Press 1-4 to grab a glowing potion bottle",
       "controls": [
         {
-          "key": "1-4",
-          "action": "Select potion bottle"
+          "type": "keyboard",
+          "description": "Select potion bottle",
+          "keys": [
+            "1",
+            "2",
+            "3",
+            "4"
+          ]
         },
         {
-          "key": "click",
-          "action": "Select potion bottle"
+          "type": "mouse",
+          "description": "Select potion bottle"
+        },
+        {
+          "type": "keyboard",
+          "description": "Restart game",
+          "keys": [
+            "R"
+          ]
         }
       ]
     },
@@ -542,7 +605,7 @@
       "controls": [
         {
           "type": "tap",
-          "action": "Select answer"
+          "description": "Select answer"
         }
       ]
     },
@@ -554,12 +617,25 @@
       "instructions": "Water a flower to full bloom to select your answer.",
       "controls": [
         {
-          "key": "Mouse click/hold",
-          "action": "Water flower under cursor"
+          "type": "mouse",
+          "description": "Water flower under cursor"
         },
         {
-          "key": "1-4",
-          "action": "Water flower by number"
+          "type": "keyboard",
+          "description": "Water flower by number",
+          "keys": [
+            "1",
+            "2",
+            "3",
+            "4"
+          ]
+        },
+        {
+          "type": "keyboard",
+          "description": "Restart game",
+          "keys": [
+            "R"
+          ]
         }
       ]
     },
@@ -597,8 +673,8 @@
       "instructions": "Drag the wire from the correct answer to the matching colored hole",
       "controls": [
         {
-          "action": "Drag wire",
-          "description": "Connect to matching color hole"
+          "type": "drag",
+          "description": "Drag wire: Connect to matching color hole"
         }
       ]
     },
@@ -609,9 +685,18 @@
       "questionType": "true_false",
       "instructions": "Find the word TRUE or FALSE hidden in the letter grid to answer the question.",
       "controls": [
-        "Drag across letters in the grid to select them",
-        "Select letters in a straight line (horizontal, vertical, or diagonal)",
-        "Find and select TRUE or FALSE to submit your answer"
+        {
+          "type": "drag",
+          "description": "Drag across letters in the grid to select them"
+        },
+        {
+          "type": "drag",
+          "description": "Select letters in a straight line (horizontal, vertical, or diagonal)"
+        },
+        {
+          "type": "drag",
+          "description": "Find and select TRUE or FALSE to submit your answer"
+        }
       ]
     },
     {
@@ -620,7 +705,23 @@
       "platform": "web",
       "questionType": "true_false",
       "instructions": "Drag the ball from the slingshot and release to launch toward the True or False target",
-      "controls": {}
+      "controls": [
+        {
+          "type": "mouse",
+          "description": "Click and drag ball to aim slingshot"
+        },
+        {
+          "type": "mouse",
+          "description": "Release to launch ball at target"
+        },
+        {
+          "type": "keyboard",
+          "description": "Restart game",
+          "keys": [
+            "R"
+          ]
+        }
+      ]
     },
     {
       "name": "ipod-quiz",
@@ -630,12 +731,12 @@
       "instructions": "Swipe the clickwheel to navigate, tap center to select your answer.",
       "controls": [
         {
-          "action": "Swipe wheel",
-          "description": "Navigate between answers"
+          "type": "swipe",
+          "description": "Swipe wheel: Navigate between answers"
         },
         {
-          "action": "Tap center",
-          "description": "Select answer"
+          "type": "tap",
+          "description": "Tap center: Select answer"
         }
       ]
     },
@@ -694,12 +795,12 @@
       "instructions": "Swipe toward the correct hoop to score!",
       "controls": [
         {
-          "action": "Swipe up-left",
-          "description": "Shoot toward TRUE hoop"
+          "type": "swipe",
+          "description": "Swipe up-left: Shoot toward TRUE hoop"
         },
         {
-          "action": "Swipe up-right",
-          "description": "Shoot toward FALSE hoop"
+          "type": "swipe",
+          "description": "Swipe up-right: Shoot toward FALSE hoop"
         }
       ]
     },
@@ -738,7 +839,19 @@
       "platform": "web",
       "questionType": "mcq",
       "instructions": "Click answer buttons to attack! Choose the correct answer to defeat your opponent.",
-      "controls": {}
+      "controls": [
+        {
+          "type": "mouse",
+          "description": "Click answer button to attack"
+        },
+        {
+          "type": "keyboard",
+          "description": "Restart game",
+          "keys": [
+            "R"
+          ]
+        }
+      ]
     },
     {
       "name": "soccer-kicker",
@@ -749,8 +862,14 @@
       "controls": [
         {
           "type": "mouse",
-          "action": "click",
           "description": "Click on a goal to kick the ball"
+        },
+        {
+          "type": "keyboard",
+          "description": "Restart game",
+          "keys": [
+            "R"
+          ]
         }
       ]
     },
@@ -762,8 +881,15 @@
       "instructions": "Click a glowing rune to absorb its power and answer.",
       "controls": [
         {
-          "key": "click",
-          "action": "Select answer"
+          "type": "mouse",
+          "description": "Select answer"
+        },
+        {
+          "type": "keyboard",
+          "description": "Restart game",
+          "keys": [
+            "R"
+          ]
         }
       ]
     },
@@ -775,8 +901,15 @@
       "instructions": "Click an ancient scroll to reveal your answer.",
       "controls": [
         {
-          "key": "click",
-          "action": "Select answer scroll"
+          "type": "mouse",
+          "description": "Select answer scroll"
+        },
+        {
+          "type": "keyboard",
+          "description": "Restart game",
+          "keys": [
+            "R"
+          ]
         }
       ]
     },
@@ -788,12 +921,19 @@
       "instructions": "Draw the bow and fire arrows at balloons to answer!",
       "controls": [
         {
-          "key": "click+drag",
-          "action": "Draw bow and aim"
+          "type": "mouse",
+          "description": "Draw bow and aim"
         },
         {
-          "key": "release",
-          "action": "Fire arrow at balloon"
+          "type": "mouse",
+          "description": "Fire arrow at balloon"
+        },
+        {
+          "type": "keyboard",
+          "description": "Restart game",
+          "keys": [
+            "R"
+          ]
         }
       ]
     },
@@ -805,12 +945,26 @@
       "instructions": "Spin the vault dial to True or False, then crack it open!",
       "controls": [
         {
-          "key": "left/right arrows",
-          "action": "Rotate dial"
+          "type": "keyboard",
+          "description": "Rotate dial",
+          "keys": [
+            "ArrowLeft",
+            "ArrowRight"
+          ]
         },
         {
-          "key": "spacebar",
-          "action": "Crack the vault"
+          "type": "keyboard",
+          "description": "Crack the vault",
+          "keys": [
+            "Space"
+          ]
+        },
+        {
+          "type": "keyboard",
+          "description": "Restart game",
+          "keys": [
+            "R"
+          ]
         }
       ]
     },
@@ -822,8 +976,15 @@
       "instructions": "Click a concrete slab to choose your answer.",
       "controls": [
         {
-          "key": "click",
-          "action": "Select answer"
+          "type": "mouse",
+          "description": "Select answer"
+        },
+        {
+          "type": "keyboard",
+          "description": "Restart game",
+          "keys": [
+            "R"
+          ]
         }
       ]
     },
@@ -835,12 +996,26 @@
       "instructions": "Aim the catapult and launch a rock at the correct banner!",
       "controls": [
         {
-          "key": "←/→",
-          "action": "Adjust catapult angle"
+          "type": "keyboard",
+          "description": "Adjust catapult angle",
+          "keys": [
+            "ArrowLeft",
+            "ArrowRight"
+          ]
         },
         {
-          "key": "Space",
-          "action": "Launch rock"
+          "type": "keyboard",
+          "description": "Launch rock",
+          "keys": [
+            "Space"
+          ]
+        },
+        {
+          "type": "keyboard",
+          "description": "Restart game",
+          "keys": [
+            "R"
+          ]
         }
       ]
     },
@@ -854,7 +1029,12 @@
         {
           "type": "keyboard",
           "description": "Navigate sacks and select",
-          "keys": ["ArrowLeft", "ArrowRight", "Space", "R"]
+          "keys": [
+            "ArrowLeft",
+            "ArrowRight",
+            "Space",
+            "R"
+          ]
         },
         {
           "type": "mouse",
@@ -872,7 +1052,17 @@
         {
           "type": "keyboard",
           "description": "Steer spacecraft",
-          "keys": ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "W", "A", "S", "D", "R"]
+          "keys": [
+            "ArrowUp",
+            "ArrowDown",
+            "ArrowLeft",
+            "ArrowRight",
+            "W",
+            "A",
+            "S",
+            "D",
+            "R"
+          ]
         },
         {
           "type": "mouse",
@@ -888,12 +1078,19 @@
       "instructions": "Hover over a constellation and click to select your answer.",
       "controls": [
         {
-          "key": "mouse",
-          "action": "Hover to highlight constellation"
+          "type": "mouse",
+          "description": "Hover to highlight constellation"
         },
         {
-          "key": "click",
-          "action": "Select answer"
+          "type": "mouse",
+          "description": "Select answer"
+        },
+        {
+          "type": "keyboard",
+          "description": "Restart game",
+          "keys": [
+            "R"
+          ]
         }
       ]
     },
@@ -905,12 +1102,28 @@
       "instructions": "Fly the drone over a pad and drop your cargo",
       "controls": [
         {
-          "key": "arrows",
-          "action": "Move drone"
+          "type": "keyboard",
+          "description": "Move drone",
+          "keys": [
+            "ArrowUp",
+            "ArrowDown",
+            "ArrowLeft",
+            "ArrowRight"
+          ]
         },
         {
-          "key": "space",
-          "action": "Drop cargo"
+          "type": "keyboard",
+          "description": "Drop cargo",
+          "keys": [
+            "Space"
+          ]
+        },
+        {
+          "type": "keyboard",
+          "description": "Restart game",
+          "keys": [
+            "R"
+          ]
         }
       ]
     },
@@ -922,8 +1135,15 @@
       "instructions": "Pull a lever to open its gate and choose your path",
       "controls": [
         {
-          "key": "click",
-          "action": "Pull a lever to select answer"
+          "type": "mouse",
+          "description": "Pull a lever to select answer"
+        },
+        {
+          "type": "keyboard",
+          "description": "Restart game",
+          "keys": [
+            "R"
+          ]
         }
       ]
     },
@@ -935,12 +1155,25 @@
       "instructions": "Use arrow keys to divert the robot onto your chosen path",
       "controls": [
         {
-          "key": "ArrowLeft",
-          "action": "Divert robot left"
+          "type": "keyboard",
+          "description": "Divert robot left",
+          "keys": [
+            "ArrowLeft"
+          ]
         },
         {
-          "key": "ArrowRight",
-          "action": "Divert robot right"
+          "type": "keyboard",
+          "description": "Divert robot right",
+          "keys": [
+            "ArrowRight"
+          ]
+        },
+        {
+          "type": "keyboard",
+          "description": "Restart game",
+          "keys": [
+            "R"
+          ]
         }
       ]
     },
@@ -952,8 +1185,15 @@
       "instructions": "Click a dome section to snap its final piece and select your answer.",
       "controls": [
         {
-          "key": "click",
-          "action": "Select answer"
+          "type": "mouse",
+          "description": "Select answer"
+        },
+        {
+          "type": "keyboard",
+          "description": "Restart game",
+          "keys": [
+            "R"
+          ]
         }
       ]
     },
@@ -965,12 +1205,25 @@
       "instructions": "Press 1-4 to select a glowing crystal shard",
       "controls": [
         {
-          "key": "1-4",
-          "action": "Select crystal shard"
+          "type": "keyboard",
+          "description": "Select crystal shard",
+          "keys": [
+            "1",
+            "2",
+            "3",
+            "4"
+          ]
         },
         {
-          "key": "click",
-          "action": "Select crystal shard"
+          "type": "mouse",
+          "description": "Select crystal shard"
+        },
+        {
+          "type": "keyboard",
+          "description": "Restart game",
+          "keys": [
+            "R"
+          ]
         }
       ]
     },
@@ -982,8 +1235,15 @@
       "instructions": "Flip a toggle switch to choose True or False.",
       "controls": [
         {
-          "key": "click",
-          "action": "Flip a toggle switch"
+          "type": "mouse",
+          "description": "Flip a toggle switch"
+        },
+        {
+          "type": "keyboard",
+          "description": "Restart game",
+          "keys": [
+            "R"
+          ]
         }
       ]
     },
@@ -995,8 +1255,15 @@
       "instructions": "Click a glowing target to strike it with lightning.",
       "controls": [
         {
-          "key": "click",
-          "action": "Strike target with lightning"
+          "type": "mouse",
+          "description": "Strike target with lightning"
+        },
+        {
+          "type": "keyboard",
+          "description": "Restart game",
+          "keys": [
+            "R"
+          ]
         }
       ]
     },
@@ -1008,8 +1275,15 @@
       "instructions": "Click a glowing wax seal to press your answer.",
       "controls": [
         {
-          "key": "click",
-          "action": "Select answer"
+          "type": "mouse",
+          "description": "Select answer"
+        },
+        {
+          "type": "keyboard",
+          "description": "Restart game",
+          "keys": [
+            "R"
+          ]
         }
       ]
     },
@@ -1021,12 +1295,25 @@
       "instructions": "Press 1-4 to solidify your answer node selection.",
       "controls": [
         {
-          "key": "1-4",
-          "action": "Select answer node"
+          "type": "keyboard",
+          "description": "Select answer node",
+          "keys": [
+            "1",
+            "2",
+            "3",
+            "4"
+          ]
         },
         {
-          "key": "click",
-          "action": "Select answer node"
+          "type": "mouse",
+          "description": "Select answer node"
+        },
+        {
+          "type": "keyboard",
+          "description": "Restart game",
+          "keys": [
+            "R"
+          ]
         }
       ]
     },
@@ -1038,12 +1325,25 @@
       "instructions": "Press 1-4 to activate a vacuum tube and answer.",
       "controls": [
         {
-          "key": "1-4",
-          "action": "Select answer"
+          "type": "keyboard",
+          "description": "Select answer",
+          "keys": [
+            "1",
+            "2",
+            "3",
+            "4"
+          ]
         },
         {
-          "key": "click",
-          "action": "Select answer"
+          "type": "mouse",
+          "description": "Select answer"
+        },
+        {
+          "type": "keyboard",
+          "description": "Restart game",
+          "keys": [
+            "R"
+          ]
         }
       ]
     },
@@ -1055,12 +1355,29 @@
       "instructions": "Switch channels with arrow keys, press Enter to lock in your answer.",
       "controls": [
         {
-          "key": "Arrow Keys",
-          "action": "Switch channels"
+          "type": "keyboard",
+          "description": "Switch channels",
+          "keys": [
+            "ArrowUp",
+            "ArrowDown",
+            "ArrowLeft",
+            "ArrowRight"
+          ]
         },
         {
-          "key": "Enter/Space",
-          "action": "Select answer"
+          "type": "keyboard",
+          "description": "Select answer",
+          "keys": [
+            "Space",
+            "Enter"
+          ]
+        },
+        {
+          "type": "keyboard",
+          "description": "Restart game",
+          "keys": [
+            "R"
+          ]
         }
       ]
     },
@@ -1072,12 +1389,25 @@
       "instructions": "Click a glowing totem to select your answer.",
       "controls": [
         {
-          "key": "click",
-          "action": "Select a totem"
+          "type": "mouse",
+          "description": "Select a totem"
         },
         {
-          "key": "1-4",
-          "action": "Select totem by number"
+          "type": "keyboard",
+          "description": "Select totem by number",
+          "keys": [
+            "1",
+            "2",
+            "3",
+            "4"
+          ]
+        },
+        {
+          "type": "keyboard",
+          "description": "Restart game",
+          "keys": [
+            "R"
+          ]
         }
       ]
     },
@@ -1089,8 +1419,15 @@
       "instructions": "Click a wanted poster to choose your answer",
       "controls": [
         {
-          "key": "click",
-          "action": "Select a wanted poster"
+          "type": "mouse",
+          "description": "Select a wanted poster"
+        },
+        {
+          "type": "keyboard",
+          "description": "Restart game",
+          "keys": [
+            "R"
+          ]
         }
       ]
     },
@@ -1102,12 +1439,25 @@
       "instructions": "Hover over a crystal to amplify its glow, then click to select",
       "controls": [
         {
-          "key": "click",
-          "action": "Select crystal answer"
+          "type": "mouse",
+          "description": "Select crystal answer"
         },
         {
-          "key": "1-4",
-          "action": "Select crystal by number"
+          "type": "keyboard",
+          "description": "Select crystal by number",
+          "keys": [
+            "1",
+            "2",
+            "3",
+            "4"
+          ]
+        },
+        {
+          "type": "keyboard",
+          "description": "Restart game",
+          "keys": [
+            "R"
+          ]
         }
       ]
     },
@@ -1119,8 +1469,25 @@
       "instructions": "Steer the snake with arrow keys to eat the apple with your answer.",
       "controls": [
         {
-          "key": "Arrow Keys / WASD",
-          "action": "Steer the snake"
+          "type": "keyboard",
+          "description": "Steer the snake",
+          "keys": [
+            "ArrowUp",
+            "ArrowDown",
+            "ArrowLeft",
+            "ArrowRight",
+            "W",
+            "A",
+            "S",
+            "D"
+          ]
+        },
+        {
+          "type": "keyboard",
+          "description": "Restart game",
+          "keys": [
+            "R"
+          ]
         }
       ]
     },
@@ -1132,12 +1499,26 @@
       "instructions": "Aim your ship and blast the asteroid with your answer!",
       "controls": [
         {
-          "key": "ArrowLeft / ArrowRight",
-          "action": "Rotate ship"
+          "type": "keyboard",
+          "description": "Rotate ship",
+          "keys": [
+            "ArrowLeft",
+            "ArrowRight"
+          ]
         },
         {
-          "key": "Space",
-          "action": "Fire bullet"
+          "type": "keyboard",
+          "description": "Fire bullet",
+          "keys": [
+            "Space"
+          ]
+        },
+        {
+          "type": "keyboard",
+          "description": "Restart game",
+          "keys": [
+            "R"
+          ]
         }
       ]
     },
@@ -1149,12 +1530,19 @@
       "instructions": "Aim your laser cannon at an alien craft and fire to select your answer.",
       "controls": [
         {
-          "key": "mouse",
-          "action": "Aim laser cannon"
+          "type": "mouse",
+          "description": "Aim laser cannon"
         },
         {
-          "key": "click",
-          "action": "Fire laser at target"
+          "type": "mouse",
+          "description": "Fire laser at target"
+        },
+        {
+          "type": "keyboard",
+          "description": "Restart game",
+          "keys": [
+            "R"
+          ]
         }
       ]
     },
@@ -1168,7 +1556,12 @@
         {
           "type": "keyboard",
           "description": "Select answer",
-          "keys": ["1", "2", "3", "4"]
+          "keys": [
+            "1",
+            "2",
+            "3",
+            "4"
+          ]
         },
         {
           "type": "mouse",
@@ -1181,7 +1574,9 @@
         {
           "type": "keyboard",
           "description": "Restart game",
-          "keys": ["R"]
+          "keys": [
+            "R"
+          ]
         }
       ]
     },
@@ -1195,12 +1590,19 @@
         {
           "type": "keyboard",
           "description": "Release steam and select gauge",
-          "keys": ["1", "2", "3", "4"]
+          "keys": [
+            "1",
+            "2",
+            "3",
+            "4"
+          ]
         },
         {
           "type": "keyboard",
           "description": "Restart game",
-          "keys": ["R"]
+          "keys": [
+            "R"
+          ]
         }
       ]
     },
@@ -1212,8 +1614,15 @@
       "instructions": "Click a lever to pull it and lock in your answer.",
       "controls": [
         {
-          "key": "click",
-          "action": "Select lever"
+          "type": "mouse",
+          "description": "Select lever"
+        },
+        {
+          "type": "keyboard",
+          "description": "Restart game",
+          "keys": [
+            "R"
+          ]
         }
       ]
     },
@@ -1225,12 +1634,27 @@
       "instructions": "Steer the train onto a branch to choose your answer.",
       "controls": [
         {
-          "key": "Up/Down Arrow",
-          "action": "Switch between tracks"
+          "type": "keyboard",
+          "description": "Switch between tracks",
+          "keys": [
+            "ArrowUp",
+            "ArrowDown"
+          ]
         },
         {
-          "key": "Enter/Right Arrow",
-          "action": "Send train down selected track"
+          "type": "keyboard",
+          "description": "Send train down selected track",
+          "keys": [
+            "Enter",
+            "ArrowRight"
+          ]
+        },
+        {
+          "type": "keyboard",
+          "description": "Restart game",
+          "keys": [
+            "R"
+          ]
         }
       ]
     },
@@ -1242,8 +1666,8 @@
       "instructions": "Tap a potion vial to shatter it and select your answer.",
       "controls": [
         {
-          "key": "tap",
-          "action": "Select answer by shattering vial"
+          "type": "tap",
+          "description": "Select answer by shattering vial"
         }
       ]
     },
@@ -1255,8 +1679,8 @@
       "instructions": "Tap a glowing seed pod to burst it open",
       "controls": [
         {
-          "key": "tap",
-          "action": "Select answer"
+          "type": "tap",
+          "description": "Select answer"
         }
       ]
     },
@@ -1268,8 +1692,8 @@
       "instructions": "Tap a stone tablet to crumble it and reveal your answer.",
       "controls": [
         {
-          "key": "tap",
-          "action": "Select answer tablet"
+          "type": "tap",
+          "description": "Select answer tablet"
         }
       ]
     },
@@ -1281,8 +1705,8 @@
       "instructions": "Tap a bubble tea cup to pop its pearls and select your answer",
       "controls": [
         {
-          "key": "tap",
-          "action": "Select answer"
+          "type": "tap",
+          "description": "Select answer"
         }
       ]
     },
@@ -1340,8 +1764,8 @@
       "instructions": "Tap a clay tablet to stamp your answer into it",
       "controls": [
         {
-          "key": "tap",
-          "action": "Stamp answer into clay tablet"
+          "type": "tap",
+          "description": "Stamp answer into clay tablet"
         }
       ]
     },
@@ -1353,12 +1777,12 @@
       "instructions": "Swipe up toward a True or False rock hold to climb and grab your answer.",
       "controls": [
         {
-          "key": "swipe",
-          "action": "Swipe up-left or up-right toward a rock hold to grab it"
+          "type": "swipe",
+          "description": "Swipe up-left or up-right toward a rock hold to grab it"
         },
         {
-          "key": "tap",
-          "action": "Tap directly on a rock hold to select it"
+          "type": "tap",
+          "description": "Tap directly on a rock hold to select it"
         }
       ]
     },
@@ -1370,8 +1794,8 @@
       "instructions": "Tap a paint blob to splash your answer",
       "controls": [
         {
-          "key": "tap",
-          "action": "Select answer"
+          "type": "tap",
+          "description": "Select answer"
         }
       ]
     },
@@ -1383,8 +1807,8 @@
       "instructions": "Stop the spinning reels then pick your answer!",
       "controls": [
         {
-          "key": "tap",
-          "action": "Stop reels / Select answer"
+          "type": "tap",
+          "description": "Stop reels / Select answer"
         }
       ]
     },
@@ -1396,8 +1820,8 @@
       "instructions": "Tap a glowing crystal to select your answer",
       "controls": [
         {
-          "key": "tap",
-          "action": "Select answer"
+          "type": "tap",
+          "description": "Select answer"
         }
       ]
     },
@@ -1409,8 +1833,8 @@
       "instructions": "Tap a diver helmet to lock in your answer.",
       "controls": [
         {
-          "key": "tap",
-          "action": "Select answer"
+          "type": "tap",
+          "description": "Select answer"
         }
       ]
     },
@@ -1422,8 +1846,8 @@
       "instructions": "Tap a blooming cactus to select your answer.",
       "controls": [
         {
-          "key": "tap",
-          "action": "Select answer"
+          "type": "tap",
+          "description": "Select answer"
         }
       ]
     },
@@ -1435,8 +1859,8 @@
       "instructions": "Tap a desert well to draw your answer",
       "controls": [
         {
-          "key": "tap",
-          "action": "Select a well"
+          "type": "tap",
+          "description": "Select a well"
         }
       ]
     },
@@ -1448,8 +1872,8 @@
       "instructions": "Tap a glimmering gemstone to claim your answer.",
       "controls": [
         {
-          "key": "tap",
-          "action": "Select gemstone answer"
+          "type": "tap",
+          "description": "Select gemstone answer"
         }
       ]
     },
@@ -1461,8 +1885,8 @@
       "instructions": "Tap a moving package on the conveyor belt to grab it.",
       "controls": [
         {
-          "key": "tap",
-          "action": "Select answer package"
+          "type": "tap",
+          "description": "Select answer package"
         }
       ]
     },
@@ -1474,8 +1898,8 @@
       "instructions": "Tap a molten glass form to solidify your answer",
       "controls": [
         {
-          "key": "tap",
-          "action": "Select and solidify a glass form"
+          "type": "tap",
+          "description": "Select and solidify a glass form"
         }
       ]
     },
@@ -1487,12 +1911,12 @@
       "instructions": "Swipe the film strip and tap a frame to develop your answer",
       "controls": [
         {
-          "key": "swipe",
-          "action": "Scroll film strip"
+          "type": "swipe",
+          "description": "Scroll film strip"
         },
         {
-          "key": "tap",
-          "action": "Develop frame to reveal answer"
+          "type": "tap",
+          "description": "Develop frame to reveal answer"
         }
       ]
     },
@@ -1504,8 +1928,8 @@
       "instructions": "Tap when the pendulum swings to your answer",
       "controls": [
         {
-          "key": "tap",
-          "action": "Lock in answer based on pendulum position"
+          "type": "tap",
+          "description": "Lock in answer based on pendulum position"
         }
       ]
     },
@@ -1517,12 +1941,12 @@
       "instructions": "Aim the cannon and fire at your answer!",
       "controls": [
         {
-          "key": "drag",
-          "action": "Aim cannon left or right"
+          "type": "drag",
+          "description": "Aim cannon left or right"
         },
         {
-          "key": "tap",
-          "action": "Fire cannonball at target"
+          "type": "tap",
+          "description": "Fire cannonball at target"
         }
       ]
     },
@@ -1534,8 +1958,8 @@
       "instructions": "Tap a crate to smash it open and reveal your answer!",
       "controls": [
         {
-          "key": "tap",
-          "action": "Smash a crate to select answer"
+          "type": "tap",
+          "description": "Smash a crate to select answer"
         }
       ]
     },
@@ -1547,8 +1971,8 @@
       "instructions": "Tap a radio dial to tune into your answer",
       "controls": [
         {
-          "key": "tap",
-          "action": "Select answer"
+          "type": "tap",
+          "description": "Select answer"
         }
       ]
     },
@@ -1560,8 +1984,8 @@
       "instructions": "Tap a petal to select your answer",
       "controls": [
         {
-          "key": "tap",
-          "action": "Select answer petal"
+          "type": "tap",
+          "description": "Select answer petal"
         }
       ]
     },
@@ -1573,8 +1997,8 @@
       "instructions": "Swipe a valve left or right to open it and answer",
       "controls": [
         {
-          "key": "swipe",
-          "action": "Turn valve to select answer"
+          "type": "swipe",
+          "description": "Turn valve to select answer"
         }
       ]
     },
@@ -1586,8 +2010,8 @@
       "instructions": "Tap a rotating gear to lock in your answer",
       "controls": [
         {
-          "key": "tap",
-          "action": "Select answer gear"
+          "type": "tap",
+          "description": "Select answer gear"
         }
       ]
     },
@@ -1599,8 +2023,8 @@
       "instructions": "Tap a clockwork gear to select your answer",
       "controls": [
         {
-          "key": "tap",
-          "action": "Select answer gear"
+          "type": "tap",
+          "description": "Select answer gear"
         }
       ]
     },
@@ -1612,8 +2036,8 @@
       "instructions": "Tap a typewriter key to type your answer",
       "controls": [
         {
-          "key": "tap",
-          "action": "Select answer"
+          "type": "tap",
+          "description": "Select answer"
         }
       ]
     },
@@ -1625,12 +2049,12 @@
       "instructions": "Drag the sieve to catch falling tokens or tap an answer",
       "controls": [
         {
-          "key": "drag",
-          "action": "Move sieve to catch tokens"
+          "type": "drag",
+          "description": "Move sieve to catch tokens"
         },
         {
-          "key": "tap",
-          "action": "Select answer"
+          "type": "tap",
+          "description": "Select answer"
         }
       ]
     },
@@ -1642,8 +2066,8 @@
       "instructions": "Tap the glowing vacuum tube with the correct answer",
       "controls": [
         {
-          "key": "tap",
-          "action": "Select answer tube"
+          "type": "tap",
+          "description": "Select answer tube"
         }
       ]
     },
@@ -1655,8 +2079,8 @@
       "instructions": "Drag to tilt the ice and guide the brass bead into a hole",
       "controls": [
         {
-          "key": "drag",
-          "action": "Tilt the ice surface to slide the bead"
+          "type": "drag",
+          "description": "Tilt the ice surface to slide the bead"
         }
       ]
     },
@@ -1668,8 +2092,8 @@
       "instructions": "Tap octopuses to reveal answers, tap again to select your choice",
       "controls": [
         {
-          "key": "tap",
-          "action": "Reveal octopus or select answer"
+          "type": "tap",
+          "description": "Reveal octopus or select answer"
         }
       ]
     },
@@ -1681,8 +2105,8 @@
       "instructions": "Tap to drop the stone onto the correct reed bundle",
       "controls": [
         {
-          "key": "tap",
-          "action": "Release stone weight"
+          "type": "tap",
+          "description": "Release stone weight"
         }
       ]
     },
@@ -1694,8 +2118,19 @@
       "instructions": "Stop the spinning brass dial to select a potion vial.",
       "controls": [
         {
-          "key": "space/enter",
-          "action": "Stop the rotating dial"
+          "type": "keyboard",
+          "description": "Stop the rotating dial",
+          "keys": [
+            "Space",
+            "Enter"
+          ]
+        },
+        {
+          "type": "keyboard",
+          "description": "Restart game",
+          "keys": [
+            "R"
+          ]
         }
       ]
     },
@@ -1707,12 +2142,33 @@
       "instructions": "Move your knife to ice cubes and slash to answer",
       "controls": [
         {
-          "key": "Arrow Keys / WASD",
-          "action": "Move knife"
+          "type": "keyboard",
+          "description": "Move knife",
+          "keys": [
+            "ArrowUp",
+            "ArrowDown",
+            "ArrowLeft",
+            "ArrowRight",
+            "W",
+            "A",
+            "S",
+            "D"
+          ]
         },
         {
-          "key": "Space / Enter",
-          "action": "Slash ice cube"
+          "type": "keyboard",
+          "description": "Slash ice cube",
+          "keys": [
+            "Space",
+            "Enter"
+          ]
+        },
+        {
+          "type": "keyboard",
+          "description": "Restart game",
+          "keys": [
+            "R"
+          ]
         }
       ]
     },
@@ -1726,12 +2182,17 @@
         {
           "type": "keyboard",
           "description": "Stop the rotating dial",
-          "keys": ["Space", "Enter"]
+          "keys": [
+            "Space",
+            "Enter"
+          ]
         },
         {
           "type": "keyboard",
           "description": "Restart game",
-          "keys": ["R"]
+          "keys": [
+            "R"
+          ]
         },
         {
           "type": "mouse",
@@ -1747,12 +2208,33 @@
       "instructions": "Move blade with arrows and slash glowing fungi with spacebar",
       "controls": [
         {
-          "key": "Arrow Keys / WASD",
-          "action": "Move blade"
+          "type": "keyboard",
+          "description": "Move blade",
+          "keys": [
+            "ArrowUp",
+            "ArrowDown",
+            "ArrowLeft",
+            "ArrowRight",
+            "W",
+            "A",
+            "S",
+            "D"
+          ]
         },
         {
-          "key": "Space / Enter",
-          "action": "Slash mushroom"
+          "type": "keyboard",
+          "description": "Slash mushroom",
+          "keys": [
+            "Space",
+            "Enter"
+          ]
+        },
+        {
+          "type": "keyboard",
+          "description": "Restart game",
+          "keys": [
+            "R"
+          ]
         }
       ]
     },
@@ -1764,12 +2246,29 @@
       "instructions": "Aim your heat beam at a shield and fire to answer.",
       "controls": [
         {
-          "key": "up/down or W/S",
-          "action": "Aim beam at shield"
+          "type": "keyboard",
+          "description": "Aim beam at shield",
+          "keys": [
+            "ArrowUp",
+            "ArrowDown",
+            "W",
+            "S"
+          ]
         },
         {
-          "key": "space/enter",
-          "action": "Fire beam"
+          "type": "keyboard",
+          "description": "Fire beam",
+          "keys": [
+            "Space",
+            "Enter"
+          ]
+        },
+        {
+          "type": "keyboard",
+          "description": "Restart game",
+          "keys": [
+            "R"
+          ]
         }
       ]
     },
@@ -1781,12 +2280,33 @@
       "instructions": "Aim the catapult and launch the stone to shatter an ice block",
       "controls": [
         {
-          "key": "Arrow Keys / WASD",
-          "action": "Move catapult left and right"
+          "type": "keyboard",
+          "description": "Move catapult left and right",
+          "keys": [
+            "ArrowUp",
+            "ArrowDown",
+            "ArrowLeft",
+            "ArrowRight",
+            "W",
+            "A",
+            "S",
+            "D"
+          ]
         },
         {
-          "key": "Space / Enter",
-          "action": "Launch stone"
+          "type": "keyboard",
+          "description": "Launch stone",
+          "keys": [
+            "Space",
+            "Enter"
+          ]
+        },
+        {
+          "type": "keyboard",
+          "description": "Restart game",
+          "keys": [
+            "R"
+          ]
         }
       ]
     },
@@ -1798,12 +2318,33 @@
       "instructions": "Aim telescope at a zodiac sculpture and lock on",
       "controls": [
         {
-          "key": "WASD / Arrow Keys",
-          "action": "Move telescope"
+          "type": "keyboard",
+          "description": "Move telescope",
+          "keys": [
+            "ArrowUp",
+            "ArrowDown",
+            "ArrowLeft",
+            "ArrowRight",
+            "W",
+            "A",
+            "S",
+            "D"
+          ]
         },
         {
-          "key": "Enter / Space",
-          "action": "Lock onto sculpture"
+          "type": "keyboard",
+          "description": "Lock onto sculpture",
+          "keys": [
+            "Space",
+            "Enter"
+          ]
+        },
+        {
+          "type": "keyboard",
+          "description": "Restart game",
+          "keys": [
+            "R"
+          ]
         }
       ]
     },
@@ -1815,12 +2356,29 @@
       "instructions": "Select the correct polyp to restore the coral reef",
       "controls": [
         {
-          "key": "↑/↓ or W/S",
-          "action": "Navigate polyp choices"
+          "type": "keyboard",
+          "description": "Navigate polyp choices",
+          "keys": [
+            "ArrowUp",
+            "ArrowDown",
+            "W",
+            "S"
+          ]
         },
         {
-          "key": "Space/Enter",
-          "action": "Lock in selected polyp"
+          "type": "keyboard",
+          "description": "Lock in selected polyp",
+          "keys": [
+            "Space",
+            "Enter"
+          ]
+        },
+        {
+          "type": "keyboard",
+          "description": "Restart game",
+          "keys": [
+            "R"
+          ]
         }
       ]
     },
@@ -1832,12 +2390,33 @@
       "instructions": "Fly drone to a balloon and hold SPACE to dock with your answer.",
       "controls": [
         {
-          "key": "Arrow Keys / WASD",
-          "action": "Move drone"
+          "type": "keyboard",
+          "description": "Move drone",
+          "keys": [
+            "ArrowUp",
+            "ArrowDown",
+            "ArrowLeft",
+            "ArrowRight",
+            "W",
+            "A",
+            "S",
+            "D"
+          ]
         },
         {
-          "key": "Space / Enter",
-          "action": "Dock with balloon"
+          "type": "keyboard",
+          "description": "Dock with balloon",
+          "keys": [
+            "Space",
+            "Enter"
+          ]
+        },
+        {
+          "type": "keyboard",
+          "description": "Restart game",
+          "keys": [
+            "R"
+          ]
         }
       ]
     },
@@ -1849,8 +2428,19 @@
       "instructions": "Press spacebar to grab the correct metal plate as it passes by.",
       "controls": [
         {
-          "key": "Space/Enter",
-          "action": "Activate grabber"
+          "type": "keyboard",
+          "description": "Activate grabber",
+          "keys": [
+            "Space",
+            "Enter"
+          ]
+        },
+        {
+          "type": "keyboard",
+          "description": "Restart game",
+          "keys": [
+            "R"
+          ]
         }
       ]
     },
@@ -1862,16 +2452,37 @@
       "instructions": "Aim at a basket and launch your disc!",
       "controls": [
         {
-          "key": "Arrow Keys / WASD",
-          "action": "Select target basket"
+          "type": "keyboard",
+          "description": "Select target basket",
+          "keys": [
+            "ArrowUp",
+            "ArrowDown",
+            "ArrowLeft",
+            "ArrowRight",
+            "W",
+            "A",
+            "S",
+            "D"
+          ]
         },
         {
-          "key": "Space / Enter",
-          "action": "Launch disc"
+          "type": "keyboard",
+          "description": "Launch disc",
+          "keys": [
+            "Space",
+            "Enter"
+          ]
         },
         {
-          "key": "click",
-          "action": "Click basket or answer to launch"
+          "type": "mouse",
+          "description": "Click basket or answer to launch"
+        },
+        {
+          "type": "keyboard",
+          "description": "Restart game",
+          "keys": [
+            "R"
+          ]
         }
       ]
     },
@@ -1883,12 +2494,27 @@
       "instructions": "Aim your key-pick and launch the ball into the correct tumbler",
       "controls": [
         {
-          "key": "left/right arrows",
-          "action": "Move key-pick"
+          "type": "keyboard",
+          "description": "Move key-pick",
+          "keys": [
+            "ArrowLeft",
+            "ArrowRight"
+          ]
         },
         {
-          "key": "up arrow / spacebar",
-          "action": "Launch ball"
+          "type": "keyboard",
+          "description": "Launch ball",
+          "keys": [
+            "ArrowUp",
+            "Space"
+          ]
+        },
+        {
+          "type": "keyboard",
+          "description": "Restart game",
+          "keys": [
+            "R"
+          ]
         }
       ]
     },
@@ -1902,17 +2528,27 @@
         {
           "type": "keyboard",
           "description": "Aim signal mirror left/right",
-          "keys": ["ArrowLeft", "ArrowRight", "KeyA", "KeyD"]
+          "keys": [
+            "ArrowLeft",
+            "ArrowRight",
+            "KeyA",
+            "KeyD"
+          ]
         },
         {
           "type": "keyboard",
           "description": "Fire laser beam",
-          "keys": ["Space", "Enter"]
+          "keys": [
+            "Space",
+            "Enter"
+          ]
         },
         {
           "type": "keyboard",
           "description": "Restart game",
-          "keys": ["KeyR"]
+          "keys": [
+            "KeyR"
+          ]
         },
         {
           "type": "mouse",
@@ -1930,17 +2566,31 @@
         {
           "type": "keyboard",
           "description": "Aim arrow trajectory angle",
-          "keys": ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "KeyW", "KeyA", "KeyS", "KeyD"]
+          "keys": [
+            "ArrowLeft",
+            "ArrowRight",
+            "ArrowUp",
+            "ArrowDown",
+            "KeyW",
+            "KeyA",
+            "KeyS",
+            "KeyD"
+          ]
         },
         {
           "type": "keyboard",
           "description": "Shoot arrow",
-          "keys": ["Space", "Enter"]
+          "keys": [
+            "Space",
+            "Enter"
+          ]
         },
         {
           "type": "keyboard",
           "description": "Restart game",
-          "keys": ["KeyR"]
+          "keys": [
+            "KeyR"
+          ]
         },
         {
           "type": "mouse",
@@ -1956,12 +2606,33 @@
       "instructions": "Aim the slingshot and launch the lead block at an answer box",
       "controls": [
         {
-          "key": "Arrow Keys / WASD",
-          "action": "Aim slingshot and adjust power"
+          "type": "keyboard",
+          "description": "Aim slingshot and adjust power",
+          "keys": [
+            "ArrowUp",
+            "ArrowDown",
+            "ArrowLeft",
+            "ArrowRight",
+            "W",
+            "A",
+            "S",
+            "D"
+          ]
         },
         {
-          "key": "Space / Enter",
-          "action": "Launch lead block"
+          "type": "keyboard",
+          "description": "Launch lead block",
+          "keys": [
+            "Space",
+            "Enter"
+          ]
+        },
+        {
+          "type": "keyboard",
+          "description": "Restart game",
+          "keys": [
+            "R"
+          ]
         }
       ]
     },
@@ -1973,12 +2644,33 @@
       "instructions": "Steer probe to the correct portal and engage thrusters",
       "controls": [
         {
-          "key": "Arrow Keys / WASD",
-          "action": "Steer probe"
+          "type": "keyboard",
+          "description": "Steer probe",
+          "keys": [
+            "ArrowUp",
+            "ArrowDown",
+            "ArrowLeft",
+            "ArrowRight",
+            "W",
+            "A",
+            "S",
+            "D"
+          ]
         },
         {
-          "key": "Space / Enter",
-          "action": "Enter portal"
+          "type": "keyboard",
+          "description": "Enter portal",
+          "keys": [
+            "Space",
+            "Enter"
+          ]
+        },
+        {
+          "type": "keyboard",
+          "description": "Restart game",
+          "keys": [
+            "R"
+          ]
         }
       ]
     },
@@ -1990,12 +2682,29 @@
       "instructions": "Aim the pneumatic launcher and fire capsules into pipe valves.",
       "controls": [
         {
-          "key": "←/→ or A/D",
-          "action": "Aim launcher"
+          "type": "keyboard",
+          "description": "Aim launcher",
+          "keys": [
+            "ArrowLeft",
+            "ArrowRight",
+            "A",
+            "D"
+          ]
         },
         {
-          "key": "Space/Enter",
-          "action": "Fire capsule"
+          "type": "keyboard",
+          "description": "Fire capsule",
+          "keys": [
+            "Space",
+            "Enter"
+          ]
+        },
+        {
+          "type": "keyboard",
+          "description": "Restart game",
+          "keys": [
+            "R"
+          ]
         }
       ]
     },
@@ -2007,8 +2716,25 @@
       "instructions": "Navigate your ship through neon paths to the correct answer zone.",
       "controls": [
         {
-          "key": "Arrow Keys / WASD",
-          "action": "Move ship through maze"
+          "type": "keyboard",
+          "description": "Move ship through maze",
+          "keys": [
+            "ArrowUp",
+            "ArrowDown",
+            "ArrowLeft",
+            "ArrowRight",
+            "W",
+            "A",
+            "S",
+            "D"
+          ]
+        },
+        {
+          "type": "keyboard",
+          "description": "Restart game",
+          "keys": [
+            "R"
+          ]
         }
       ]
     },
@@ -2020,12 +2746,23 @@
       "instructions": "Stop the moonlight beam on the correct pearl outcrop.",
       "controls": [
         {
-          "key": "space/enter",
-          "action": "Stop moonlight beam"
+          "type": "keyboard",
+          "description": "Stop moonlight beam",
+          "keys": [
+            "Space",
+            "Enter"
+          ]
         },
         {
-          "key": "click",
-          "action": "Select answer directly"
+          "type": "mouse",
+          "description": "Select answer directly"
+        },
+        {
+          "type": "keyboard",
+          "description": "Restart game",
+          "keys": [
+            "R"
+          ]
         }
       ]
     },
@@ -2037,12 +2774,33 @@
       "instructions": "Move lamp to candles and confirm your choice",
       "controls": [
         {
-          "key": "Arrow Keys / WASD",
-          "action": "Move lamp beam"
+          "type": "keyboard",
+          "description": "Move lamp beam",
+          "keys": [
+            "ArrowUp",
+            "ArrowDown",
+            "ArrowLeft",
+            "ArrowRight",
+            "W",
+            "A",
+            "S",
+            "D"
+          ]
         },
         {
-          "key": "Space / Enter",
-          "action": "Confirm selection"
+          "type": "keyboard",
+          "description": "Confirm selection",
+          "keys": [
+            "Space",
+            "Enter"
+          ]
+        },
+        {
+          "type": "keyboard",
+          "description": "Restart game",
+          "keys": [
+            "R"
+          ]
         }
       ]
     },
@@ -2054,8 +2812,8 @@
       "instructions": "Tap the correct railway switch lever to punch it upright",
       "controls": [
         {
-          "key": "tap",
-          "action": "Strike a switch lever"
+          "type": "tap",
+          "description": "Strike a switch lever"
         }
       ]
     },
