@@ -14,38 +14,13 @@ const choiceSchema = z.object({
   explanation: z.string().describe("Explanation for this choice"),
 });
 
-const questionSchema = z
-  .object({
-    question_type: z
-      .enum(["mcq", "true_false"])
-      .describe("Type of question: 'mcq' for multiple choice (4 options) or 'true_false' for true/false (2 options)"),
-    question: z.string().min(1).describe("The question text"),
-    choices: z.array(choiceSchema).describe("Array of answer choices"),
-  })
-  .refine(
-    (q) => {
-      if (q.question_type === "true_false") {
-        return (
-          q.choices.length === 2 &&
-          q.choices.every((c) => ["true", "false"].includes(c.text.toLowerCase()))
-        );
-      }
-      if (q.question_type === "mcq") {
-        return q.choices.length === 4;
-      }
-      return true;
-    },
-    {
-      message:
-        "true_false questions must have exactly 2 choices with text 'true' or 'false', mcq questions must have exactly 4 choices",
-    }
-  )
-  .refine(
-    (q) => q.choices.filter((c) => c.is_correct).length === 1,
-    {
-      message: "Each question must have exactly one correct answer",
-    }
-  );
+const questionSchema = z.object({
+  question_type: z
+    .enum(["mcq", "true_false"])
+    .describe("Type of question: 'mcq' for multiple choice (4 options) or 'true_false' for true/false (2 options)"),
+  question: z.string().min(1).describe("The question text"),
+  choices: z.array(choiceSchema).min(2).max(6).describe("Array of answer choices"),
+});
 
 export interface QuizServerConfig {
   gameStore: GameStore;
@@ -117,6 +92,26 @@ The quiz renders as interactive mini-games (archery, puzzles, switches, etc.) â€
       },
     },
     async ({ questions, title }) => {
+      // Auto-fix questions: ensure exactly one correct answer per question.
+      // Validation moved here from the Zod schema because hard schema rejections
+      // cause Claude Desktop to hang (MCP App error responses leave the UI in loading state).
+      for (const q of questions as Array<{ choices: Array<{ is_correct: boolean }> }>) {
+        const correctCount = q.choices.filter((c) => c.is_correct).length;
+        if (correctCount === 0) {
+          q.choices[0].is_correct = true;
+          log("Auto-fix: no correct answer, marking first choice as correct");
+        } else if (correctCount > 1) {
+          let seen = false;
+          for (const c of q.choices) {
+            if (c.is_correct) {
+              if (seen) c.is_correct = false;
+              else seen = true;
+            }
+          }
+          log("Auto-fix: multiple correct answers, keeping only the first");
+        }
+      }
+
       const session = gameStore.createGame(questions, title ?? undefined);
 
       // Load templates via injected dependency (Node.js fs or Worker bundle)
