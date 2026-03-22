@@ -4,6 +4,7 @@ import { readFile } from "node:fs/promises";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import express from "express";
+import rateLimit from "express-rate-limit";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { createQuizServer } from "./quiz-server.js";
 import { GameStore } from "./game-store.js";
@@ -25,6 +26,11 @@ const ALLOWED_ORIGINS = [
   "https://chat.openai.com",
 ];
 
+// Allow localhost origins in development
+if (process.env.NODE_ENV !== "production") {
+  ALLOWED_ORIGINS.push("http://localhost:3000", "http://localhost:5173");
+}
+
 const gameStore = new GameStore();
 
 /** Load the bundled single-file HTML widget */
@@ -43,6 +49,7 @@ async function getWidgetHtml(): Promise<string> {
 }
 
 const app = express();
+app.set("trust proxy", 1); // correct client IP behind reverse proxy / LB
 app.use(express.json());
 
 // CORS for MCP clients (Claude.ai, ChatGPT)
@@ -50,14 +57,24 @@ app.use((req, res, next) => {
   const origin = req.headers.origin;
   if (origin && ALLOWED_ORIGINS.includes(origin)) {
     res.header("Access-Control-Allow-Origin", origin);
-  } else {
-    // Allow localhost for development
-    res.header("Access-Control-Allow-Origin", "*");
+    res.header("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
+    res.header("Access-Control-Allow-Headers", "Content-Type, mcp-session-id");
+    res.header("Access-Control-Expose-Headers", "mcp-session-id");
   }
-  res.header("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
-  res.header("Access-Control-Allow-Headers", "Content-Type, mcp-session-id");
-  res.header("Access-Control-Expose-Headers", "mcp-session-id");
+  // No CORS headers for unknown origins — browser will block the request
   next();
+});
+
+const mcpLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    jsonrpc: "2.0",
+    error: { code: -32000, message: "Rate limit exceeded. Try again later." },
+    id: null,
+  },
 });
 
 app.options("/mcp", (_req, res) => {
@@ -83,7 +100,7 @@ app.delete("/mcp", (_req, res) => {
 });
 
 // Stateless Streamable HTTP endpoint
-app.post("/mcp", async (req, res) => {
+app.post("/mcp", mcpLimiter, async (req, res) => {
   try {
     const server = createQuizServer({
       gameStore,

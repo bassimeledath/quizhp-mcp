@@ -75,9 +75,11 @@ const ALLOWED_ORIGINS = [
 
 function corsHeaders(request: Request): HeadersInit {
   const origin = request.headers.get("Origin") ?? "";
-  const allowOrigin = ALLOWED_ORIGINS.includes(origin) ? origin : "*";
+  if (!ALLOWED_ORIGINS.includes(origin)) {
+    return {}; // No CORS headers — browser will block the request
+  }
   return {
-    "Access-Control-Allow-Origin": allowOrigin,
+    "Access-Control-Allow-Origin": origin,
     "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type, mcp-session-id, mcp-protocol-version",
     "Access-Control-Expose-Headers": "mcp-session-id",
@@ -117,6 +119,29 @@ export default {
       }
 
       if (request.method === "POST") {
+        // Enforce body size limit on actual bytes (not just content-length header).
+        // Note: Cloudflare has built-in DDoS protection, but this is per-request
+        // payload defense — not a substitute for per-IP rate limiting. Configure
+        // Cloudflare Rate Limiting Rules in the dashboard for that.
+        const MAX_BODY_BYTES = 102_400; // 100 KB
+        const body = await request.arrayBuffer();
+        if (body.byteLength > MAX_BODY_BYTES) {
+          return Response.json(
+            {
+              jsonrpc: "2.0",
+              error: { code: -32000, message: "Request body too large" },
+              id: null,
+            },
+            { status: 413, headers: corsHeaders(request) }
+          );
+        }
+        // Re-create the request with the consumed body so downstream can read it
+        const checkedRequest = new Request(request.url, {
+          method: request.method,
+          headers: request.headers,
+          body,
+        });
+
         try {
           const server = createQuizServer({
             gameStore,
@@ -132,7 +157,7 @@ export default {
 
           await server.connect(transport);
 
-          const response = await transport.handleRequest(request);
+          const response = await transport.handleRequest(checkedRequest);
           const headers = new Headers(response.headers);
           for (const [k, v] of Object.entries(corsHeaders(request))) {
             headers.set(k, v);
