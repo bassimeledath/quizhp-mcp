@@ -19,6 +19,7 @@ interface QuizContainerProps {
   questions: Question[];
   hostContext?: McpUiHostContext;
   preloadedTemplates?: Template[];
+  preloadedMobileTemplates?: Template[];
 }
 
 export function QuizContainer({
@@ -26,6 +27,7 @@ export function QuizContainer({
   questions: inputQuestions,
   hostContext,
   preloadedTemplates,
+  preloadedMobileTemplates,
 }: QuizContainerProps) {
   const {
     questions,
@@ -98,15 +100,19 @@ export function QuizContainer({
     }
   }, [inputQuestions, setQuestions]);
 
-  // Use templates delivered via structuredContent
+  // Use templates delivered via structuredContent, picking the right platform set
   useEffect(() => {
     if (questions.length === 0) return;
     if (templates.length > 0) return;
 
-    if (preloadedTemplates && preloadedTemplates.length > 0) {
-      setTemplates(preloadedTemplates);
+    const mobileCandidates = preloadedMobileTemplates ?? [];
+    const webCandidates = preloadedTemplates ?? [];
+    const chosen = isMobile && mobileCandidates.length > 0 ? mobileCandidates : webCandidates;
+
+    if (chosen.length > 0) {
+      setTemplates(chosen);
     }
-  }, [questions, templates.length, preloadedTemplates, setTemplates]);
+  }, [questions, templates.length, isMobile, preloadedTemplates, preloadedMobileTemplates, setTemplates]);
 
   // Report score to Claude when quiz completes
   useEffect(() => {

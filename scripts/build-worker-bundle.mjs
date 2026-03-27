@@ -22,17 +22,19 @@ async function main() {
   const viewHtml = await readFile(VIEW_HTML_PATH, "utf-8");
   console.log(`  View HTML: ${(viewHtml.length / 1024).toFixed(1)} KB`);
 
-  // 2. Read templates/index.json and filter to web-only
+  // 2. Read templates/index.json (include both web and mobile)
   console.log("Reading templates/index.json...");
   const indexJson = JSON.parse(await readFile(join(TEMPLATES_DIR, "index.json"), "utf-8"));
-  const webTemplates = indexJson.templates.filter((t) => t.platform === "web");
-  console.log(`  Found ${webTemplates.length} web templates`);
+  const allTemplates = indexJson.templates.filter((t) => t.platform === "web" || t.platform === "mobile");
+  const webCount = allTemplates.filter((t) => t.platform === "web").length;
+  const mobileCount = allTemplates.filter((t) => t.platform === "mobile").length;
+  console.log(`  Found ${webCount} web + ${mobileCount} mobile templates (${allTemplates.length} total)`);
 
   // 3. Read each template's HTML file
   const bundledTemplates = [];
   let totalTemplateSize = 0;
 
-  for (const entry of webTemplates) {
+  for (const entry of allTemplates) {
     const html = await readFile(join(TEMPLATES_DIR, entry.path), "utf-8");
     totalTemplateSize += html.length;
     bundledTemplates.push({

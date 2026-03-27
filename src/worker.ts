@@ -17,23 +17,26 @@ const gameStore = new GameStore();
 
 // ── Worker template lookup ───────────────────────────────────────────
 
-// Group bundled templates by question type for fast lookup
-const templatesByType = new Map<string, typeof WORKER_TEMPLATES>();
+// Group bundled templates by "platform:questionType" key for fast lookup
+const templatesByKey = new Map<string, typeof WORKER_TEMPLATES>();
 for (const t of WORKER_TEMPLATES) {
-  if (!templatesByType.has(t.questionType)) templatesByType.set(t.questionType, []);
-  templatesByType.get(t.questionType)!.push(t);
+  const key = `${t.platform}:${t.questionType}`;
+  if (!templatesByKey.has(key)) templatesByKey.set(key, []);
+  templatesByKey.get(key)!.push(t);
 }
 
-async function getTemplates(types: QuestionType[], _platform?: Platform): Promise<Template[]> {
-  const usedPerType = new Map<string, Set<number>>();
+async function getTemplates(types: QuestionType[], platform?: Platform): Promise<Template[]> {
+  const resolvedPlatform = platform ?? "web";
+  const usedPerKey = new Map<string, Set<number>>();
   const results: Template[] = [];
 
   for (const qType of types) {
-    const candidates = templatesByType.get(qType) ?? [];
+    const key = `${resolvedPlatform}:${qType}`;
+    const candidates = templatesByKey.get(key) ?? [];
     if (candidates.length === 0) continue;
 
-    if (!usedPerType.has(qType)) usedPerType.set(qType, new Set());
-    const used = usedPerType.get(qType)!;
+    if (!usedPerKey.has(key)) usedPerKey.set(key, new Set());
+    const used = usedPerKey.get(key)!;
     if (used.size >= candidates.length) used.clear();
 
     let idx: number;

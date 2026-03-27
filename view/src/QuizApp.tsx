@@ -18,6 +18,7 @@ interface QuizData {
   questions: Question[];
   title?: string;
   templates?: Template[];
+  mobileTemplates?: Template[];
 }
 
 export function QuizApp() {
@@ -48,10 +49,10 @@ export function QuizApp() {
           return;
         }
         const sc = params.structuredContent as {
-          gameId?: string; questions?: Question[]; title?: string; templates?: Template[];
+          gameId?: string; questions?: Question[]; title?: string; templates?: Template[]; mobileTemplates?: Template[];
         } | undefined;
         if (sc?.questions?.length) {
-          setQuizData({ gameId: sc.gameId, questions: sc.questions, title: sc.title, templates: sc.templates });
+          setQuizData({ gameId: sc.gameId, questions: sc.questions, title: sc.title, templates: sc.templates, mobileTemplates: sc.mobileTemplates });
         }
       };
 
@@ -129,6 +130,7 @@ export function QuizApp() {
       app={app!}
       questions={quizData.questions}
       preloadedTemplates={quizData.templates}
+      preloadedMobileTemplates={quizData.mobileTemplates}
       hostContext={hostContext}
     />
   );

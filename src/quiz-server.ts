@@ -84,9 +84,7 @@ Guidelines:
 - For document-based quizzes: ground questions in specific document facts
 - Avoid "all of the above" or "none of the above" answers
 
-The quiz renders as interactive mini-games (archery, puzzles, switches, etc.) — one unique game per question.
-
-IMPORTANT: Always pass the platform parameter. Use "mobile" when the user is on a mobile device (phone or tablet), and "web" when on desktop. This determines which game templates are used — mobile games use touch controls, desktop games use keyboard/mouse.`,
+The quiz renders as interactive mini-games (archery, puzzles, switches, etc.) — one unique game per question.`,
       inputSchema: {
         questions: z
           .array(questionSchema)
@@ -98,10 +96,6 @@ IMPORTANT: Always pass the platform parameter. Use "mobile" when the user is on 
           .max(200)
           .optional()
           .describe("Optional title for the quiz"),
-        platform: z
-          .enum(["mobile", "web"])
-          .optional()
-          .describe("The user's platform: 'mobile' for phone/tablet, 'web' for desktop. Determines touch vs keyboard game templates."),
       },
       annotations: {
         readOnlyHint: true,
@@ -116,7 +110,7 @@ IMPORTANT: Always pass the platform parameter. Use "mobile" when the user is on 
         },
       },
     },
-    async ({ questions, title, platform: inputPlatform }) => {
+    async ({ questions, title }) => {
       // Auto-fix questions: ensure exactly one correct answer per question.
       // Validation moved here from the Zod schema because hard schema rejections
       // cause Claude Desktop to hang (MCP App error responses leave the UI in loading state).
@@ -139,12 +133,16 @@ IMPORTANT: Always pass the platform parameter. Use "mobile" when the user is on 
 
       const session = gameStore.createGame(questions, title ?? undefined);
 
-      // Load templates via injected dependency (Node.js fs or Worker bundle)
-      let templates: unknown[] = [];
+      // Load templates for BOTH platforms so the client can pick the right
+      // set based on hostContext.platform (the server doesn't know the device).
+      let webTemplates: unknown[] = [];
+      let mobileTemplates: unknown[] = [];
       try {
         const types = questions.map((q: { question_type: string }) => q.question_type);
-        const resolvedPlatform: Platform = inputPlatform ?? "web";
-        templates = await config.getTemplates(types as QuestionType[], resolvedPlatform);
+        [webTemplates, mobileTemplates] = await Promise.all([
+          config.getTemplates(types as QuestionType[], "web"),
+          config.getTemplates(types as QuestionType[], "mobile"),
+        ]);
       } catch (err) {
         log("Template load error", { error: err instanceof Error ? err.message : String(err) });
       }
@@ -160,7 +158,8 @@ IMPORTANT: Always pass the platform parameter. Use "mobile" when the user is on 
           gameId: session.gameId,
           questions,
           title: session.title,
-          templates,
+          templates: webTemplates,
+          mobileTemplates,
         } as Record<string, unknown>,
       };
     }
