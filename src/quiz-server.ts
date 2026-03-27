@@ -84,7 +84,9 @@ Guidelines:
 - For document-based quizzes: ground questions in specific document facts
 - Avoid "all of the above" or "none of the above" answers
 
-The quiz renders as interactive mini-games (archery, puzzles, switches, etc.) â€” one unique game per question.`,
+The quiz renders as interactive mini-games (archery, puzzles, switches, etc.) â€” one unique game per question.
+
+IMPORTANT: Always pass the platform parameter. Use "mobile" when the user is on a mobile device (phone or tablet), and "web" when on desktop. This determines which game templates are used â€” mobile games use touch controls, desktop games use keyboard/mouse.`,
       inputSchema: {
         questions: z
           .array(questionSchema)
@@ -96,6 +98,10 @@ The quiz renders as interactive mini-games (archery, puzzles, switches, etc.) â€
           .max(200)
           .optional()
           .describe("Optional title for the quiz"),
+        platform: z
+          .enum(["mobile", "web"])
+          .optional()
+          .describe("The user's platform: 'mobile' for phone/tablet, 'web' for desktop. Determines touch vs keyboard game templates."),
       },
       annotations: {
         readOnlyHint: true,
@@ -110,7 +116,7 @@ The quiz renders as interactive mini-games (archery, puzzles, switches, etc.) â€
         },
       },
     },
-    async ({ questions, title }) => {
+    async ({ questions, title, platform: inputPlatform }) => {
       // Auto-fix questions: ensure exactly one correct answer per question.
       // Validation moved here from the Zod schema because hard schema rejections
       // cause Claude Desktop to hang (MCP App error responses leave the UI in loading state).
@@ -137,7 +143,8 @@ The quiz renders as interactive mini-games (archery, puzzles, switches, etc.) â€
       let templates: unknown[] = [];
       try {
         const types = questions.map((q: { question_type: string }) => q.question_type);
-        templates = await config.getTemplates(types as QuestionType[], "web");
+        const resolvedPlatform: Platform = inputPlatform ?? "web";
+        templates = await config.getTemplates(types as QuestionType[], resolvedPlatform);
       } catch (err) {
         log("Template load error", { error: err instanceof Error ? err.message : String(err) });
       }
