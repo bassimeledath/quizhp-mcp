@@ -40,6 +40,7 @@ export function QuizApp() {
       };
 
       app.ontoolresult = (params) => {
+        toolResultReceived.current = true;
         if (params.isError) {
           const text = params.content
             ?.filter((c): c is { type: "text"; text: string } => c.type === "text")
@@ -98,9 +99,16 @@ export function QuizApp() {
     return () => mq.removeEventListener("change", onChange);
   }, [hostContext?.theme]);
 
-  // Fallback: fetch templates from server if not delivered via structuredContent
+  // Fallback: fetch templates from server if not delivered via structuredContent.
+  // Only fires if ontoolresult didn't provide templates (e.g. host doesn't forward structuredContent).
+  // Waits for toolResultReceived to avoid racing with ontoolresult.
+  const toolResultReceived = useRef(false);
   useEffect(() => {
-    if (!app || !quizData?.questions?.length || quizData.templates?.length || templateFetchAttempted.current) return;
+    if (!app || !quizData?.questions?.length || templateFetchAttempted.current) return;
+    // If we already have templates from structuredContent, no fallback needed
+    if (quizData.templates?.length || quizData.mobileTemplates?.length) return;
+    // Wait a tick for ontoolresult to arrive before falling back
+    if (!toolResultReceived.current) return;
     templateFetchAttempted.current = true;
 
     const types = quizData.questions.map((q) => q.question_type).join(".");
