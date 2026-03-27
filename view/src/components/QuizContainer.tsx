@@ -1,4 +1,4 @@
-import { useEffect, useCallback, useState, useMemo } from "react";
+import { useEffect, useCallback, useState, useMemo, useRef } from "react";
 import type { App } from "@modelcontextprotocol/ext-apps";
 import type { McpUiHostContext } from "@modelcontextprotocol/ext-apps";
 import type { Question, Template } from "../types";
@@ -100,16 +100,21 @@ export function QuizContainer({
     }
   }, [inputQuestions, setQuestions]);
 
-  // Use templates delivered via structuredContent, picking the right platform set
+  // Use templates delivered via structuredContent, picking the right platform set.
+  // Re-runs when isMobile changes (e.g. hostContext arrives after initial load).
+  const lastPlatformRef = useRef<boolean | null>(null);
   useEffect(() => {
     if (questions.length === 0) return;
-    if (templates.length > 0) return;
 
     const mobileCandidates = preloadedMobileTemplates ?? [];
     const webCandidates = preloadedTemplates ?? [];
     const chosen = isMobile && mobileCandidates.length > 0 ? mobileCandidates : webCandidates;
 
+    // Skip if templates already set AND platform hasn't changed
+    if (templates.length > 0 && lastPlatformRef.current === isMobile) return;
+
     if (chosen.length > 0) {
+      lastPlatformRef.current = isMobile;
       setTemplates(chosen);
     }
   }, [questions, templates.length, isMobile, preloadedTemplates, preloadedMobileTemplates, setTemplates]);

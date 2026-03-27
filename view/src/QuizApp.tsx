@@ -40,7 +40,6 @@ export function QuizApp() {
       };
 
       app.ontoolresult = (params) => {
-        toolResultReceived.current = true;
         if (params.isError) {
           const text = params.content
             ?.filter((c): c is { type: "text"; text: string } => c.type === "text")
@@ -100,15 +99,17 @@ export function QuizApp() {
   }, [hostContext?.theme]);
 
   // Fallback: fetch templates from server if not delivered via structuredContent.
-  // Only fires if ontoolresult didn't provide templates (e.g. host doesn't forward structuredContent).
-  // Waits for toolResultReceived to avoid racing with ontoolresult.
-  const toolResultReceived = useRef(false);
+  // Waits up to 2s for ontoolresult before falling back via readServerResource.
+  const [fallbackReady, setFallbackReady] = useState(false);
   useEffect(() => {
-    if (!app || !quizData?.questions?.length || templateFetchAttempted.current) return;
-    // If we already have templates from structuredContent, no fallback needed
+    if (!quizData?.questions?.length || quizData.templates?.length || quizData.mobileTemplates?.length) return;
+    const timer = setTimeout(() => setFallbackReady(true), 2000);
+    return () => clearTimeout(timer);
+  }, [quizData]);
+
+  useEffect(() => {
+    if (!app || !fallbackReady || !quizData?.questions?.length || templateFetchAttempted.current) return;
     if (quizData.templates?.length || quizData.mobileTemplates?.length) return;
-    // Wait a tick for ontoolresult to arrive before falling back
-    if (!toolResultReceived.current) return;
     templateFetchAttempted.current = true;
 
     const types = quizData.questions.map((q) => q.question_type).join(".");
@@ -126,7 +127,7 @@ export function QuizApp() {
       .catch(() => {
         // Resource fetch failed — host may not support serverResources
       });
-  }, [app, quizData]);
+  }, [app, fallbackReady, quizData]);
 
   if (error) return <div style={{ padding: 24, color: "red" }}>{error.message}</div>;
   if (errorMessage) return <div style={{ padding: 24, color: "red" }}>{errorMessage}</div>;
