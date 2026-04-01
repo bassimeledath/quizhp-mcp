@@ -1,0 +1,898 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Lighthouse Beacon Flip</title>
+  <link href="https://fonts.googleapis.com/css2?family=Belanosima:wght@400;600;700&family=Nunito+Sans:wght@400;500;600;700&family=Nunito:wght@400;500;600&display=swap" rel="stylesheet">
+  <!--
+  +==============================================================================+
+  |  GAME FACTORY TEMPLATE                                                        |
+  |  This template enforces critical invariants. Follow the section markers.      |
+  +==============================================================================+
+  -->
+  <style>
+    /* =========================================================================
+       BASE STYLES - Can be extended, not removed
+       ========================================================================= */
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+    }
+    body {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      background: #1a1a2e;
+      font-family: 'Nunito Sans', system-ui, -apple-system, sans-serif;
+    }
+    #gameCanvas {
+      background: #16213e;
+      border-radius: 8px;
+      display: block;
+    }
+  </style>
+</head>
+<body>
+  <!-- =========================================================================
+       CANVAS - Sized dynamically to fill available space
+       ========================================================================= -->
+  <canvas id="gameCanvas"></canvas>
+
+  <script>
+  // +========================================================================+
+  // |  SECTION 1: QUESTION PLACEHOLDER - DO NOT MODIFY FORMAT                |
+  // |  Platform replaces this at runtime. Use these exact 60-char answers.   |
+  // +========================================================================+
+  const QUESTION = {
+    type: "mcq",
+    prompt: "Sample question text",
+    choices: [
+      { text: "This is sample answer A which is long enough to test text overflow", is_correct: true, explanation: "Why A is correct" },
+      { text: "This is sample answer B which is long enough to test text overflow", is_correct: false, explanation: "Why B is wrong" },
+      { text: "This is sample answer C which is long enough to test text overflow", is_correct: false, explanation: "Why C is wrong" },
+      { text: "This is sample answer D which is long enough to test text overflow", is_correct: false, explanation: "Why D is wrong" }
+    ],
+    isLastQuestion: false
+  };
+
+  // +========================================================================+
+  // |  SECTION 2: ENGINE CORE - DO NOT MODIFY                                |
+  // |  Standard engine interface and end screen. This is sacred.             |
+  // +========================================================================+
+  const canvas = document.getElementById('gameCanvas');
+  const ctx = canvas.getContext('2d');
+
+  // Logical dimensions (game code works in this coordinate space)
+  const W = 720, H = 540;
+
+  // Scaling state (computed on resize)
+  let scale = 1;
+  let dpr = 1;
+
+  let gameState = 'playing'; // 'playing' | 'ended'
+  let gameResult = null;     // true (correct) | false (wrong)
+  let gameExplanation = '';
+  let endScreenTime = 0;
+  let confettiParticles = [];
+
+  // End screen button bounds (logical coordinates)
+  const restartButton = { x: W / 2 - 170, y: H / 2 + 60, w: 150, h: 48 };
+  const nextButton = { x: W / 2 + 20, y: H / 2 + 60, w: 150, h: 48 };
+
+  /** Check if point is inside rectangle */
+  function pointInRect(px, py, rect) {
+    return px >= rect.x && px <= rect.x + rect.w &&
+           py >= rect.y && py <= rect.y + rect.h;
+  }
+
+  /** Draw a styled button */
+  function drawButton(rect, label, color, pulse) {
+    const p = pulse ? 1 + Math.sin(endScreenTime * 4) * 0.03 : 1;
+    ctx.save();
+    ctx.translate(rect.x + rect.w / 2, rect.y + rect.h / 2);
+    ctx.scale(p, p);
+    ctx.translate(-(rect.x + rect.w / 2), -(rect.y + rect.h / 2));
+
+    // Button background
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.roundRect(rect.x, rect.y, rect.w, rect.h, 12);
+    ctx.fill();
+
+    // Button text
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = "bold 18px 'Nunito Sans', system-ui, sans-serif";
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, rect.x + rect.w / 2, rect.y + rect.h / 2);
+
+    ctx.restore();
+  }
+
+  /**
+   * Resize canvas to fill available space with proper DPR scaling.
+   * Maintains logical coordinate system (720x540).
+   */
+  function resizeCanvas() {
+    dpr = window.devicePixelRatio || 1;
+
+    // Get available space
+    const availW = window.innerWidth;
+    const availH = window.innerHeight;
+
+    // Calculate scale to fit logical space (720x540) in available space
+    const scaleX = availW / W;
+    const scaleY = availH / H;
+    scale = Math.min(scaleX, scaleY);
+
+    // Physical canvas buffer (DPR-scaled for crisp rendering)
+    canvas.width = W * scale * dpr;
+    canvas.height = H * scale * dpr;
+
+    // CSS display size
+    canvas.style.width = (W * scale) + 'px';
+    canvas.style.height = (H * scale) + 'px';
+  }
+
+  /**
+   * Convert screen coordinates to logical coordinates.
+   * Use this for mouse/click events to get positions in 720x540 space.
+   */
+  function screenToLogical(screenX, screenY) {
+    const rect = canvas.getBoundingClientRect();
+    return {
+      x: (screenX - rect.left) * (W / rect.width),
+      y: (screenY - rect.top) * (H / rect.height)
+    };
+  }
+
+  const engine = {
+    /** Call this to end the game. DO NOT draw your own end screen. */
+    end(isCorrect, explanation) {
+      if (gameState === 'ended') return;
+      gameState = 'ended';
+      gameResult = isCorrect;
+      gameExplanation = explanation || '';
+      endScreenTime = 0;
+
+      // Spawn confetti for correct answers
+      if (isCorrect) {
+        for (let i = 0; i < 50; i++) {
+          confettiParticles.push({
+            x: W / 2,
+            y: H / 2,
+            vx: (Math.random() - 0.5) * 600,
+            vy: -Math.random() * 400 - 100,
+            size: 4 + Math.random() * 6,
+            color: ['#FFD700', '#FF6B6B', '#4ECDC4', '#95E1D3', '#F38181'][Math.floor(Math.random() * 5)],
+            rotation: Math.random() * Math.PI * 2,
+            rotationSpeed: (Math.random() - 0.5) * 10
+          });
+        }
+      }
+
+      // Notify parent frame
+      if (window.parent && window.parent !== window) {
+        window.parent.postMessage({
+          type: 'quiz-end',
+          isCorrect: isCorrect,
+          explanation: explanation || ''
+        }, '*');
+      }
+    }
+  };
+
+  /** STANDARD END SCREEN - DO NOT MODIFY */
+  function drawEndScreen(dt) {
+    endScreenTime += dt;
+
+    // Update confetti
+    confettiParticles = confettiParticles.filter(p => {
+      p.vy += 800 * dt; // gravity
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.rotation += p.rotationSpeed * dt;
+      p.vx *= 0.99;
+      return p.y < H + 50;
+    });
+
+    // Dark overlay
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
+    ctx.fillRect(0, 0, W, H);
+
+    // Draw confetti
+    confettiParticles.forEach(p => {
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rotation);
+      ctx.fillStyle = p.color;
+      ctx.fillRect(-p.size / 2, -p.size / 4, p.size, p.size / 2);
+      ctx.restore();
+    });
+
+    // Result emoji
+    ctx.font = '72px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(gameResult ? '🎉' : '😢', W / 2, H / 2 - 50);
+
+    // Result text
+    ctx.fillStyle = gameResult ? '#4ADE80' : '#F87171';
+    ctx.font = "bold 36px 'Nunito Sans', system-ui, sans-serif";
+    ctx.fillText(gameResult ? 'Correct!' : 'Wrong!', W / 2, H / 2 + 20);
+
+    // Buttons
+    if (gameResult) {
+      // Correct: show both Restart and Next/Finish
+      drawButton(restartButton, 'Restart', '#E87A3E', true);
+      const nextLabel = QUESTION.isLastQuestion ? 'Finish' : 'Next';
+      drawButton(nextButton, nextLabel, '#4ECDC4', true);
+    } else {
+      // Wrong: show only centered Restart button
+      const centeredRestart = { x: W / 2 - 75, y: H / 2 + 60, w: 150, h: 48 };
+      drawButton(centeredRestart, 'Restart', '#E87A3E', true);
+    }
+  }
+
+  // +========================================================================+
+  // |  SECTION 3: YOUR GAME CODE - IMPLEMENT THESE FUNCTIONS                 |
+  // |  This is where your game logic goes. See requirements below.           |
+  // +========================================================================+
+
+  // === COLORS ===
+  const COLORS = {
+    bgPrimary: '#FAFAF7',
+    bgSurface: '#FFFFFF',
+    textPrimary: '#2B2B28',
+    textSecondary: '#5A5A54',
+    orange: '#E87A3E',
+    orangeHover: '#D66B31',
+    amber: '#F5A742',
+    cyan: '#4ECDC4',
+    success: '#6BBF59',
+    error: '#E85D4A',
+    borderSubtle: '#E6E6E0',
+    borderStrong: '#D4D4CC'
+  };
+
+  // === AUDIO ===
+  const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+  function playSound(type) {
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+
+    if (type === 'click') {
+      osc.frequency.setValueAtTime(600, audioCtx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(800, audioCtx.currentTime + 0.05);
+      gain.gain.setValueAtTime(0.15, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.1);
+      osc.start(); osc.stop(audioCtx.currentTime + 0.1);
+    } else if (type === 'correct') {
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(523, audioCtx.currentTime);
+      osc.frequency.setValueAtTime(659, audioCtx.currentTime + 0.1);
+      osc.frequency.setValueAtTime(784, audioCtx.currentTime + 0.2);
+      gain.gain.setValueAtTime(0.2, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.4);
+      osc.start(); osc.stop(audioCtx.currentTime + 0.4);
+    } else if (type === 'wrong') {
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(200, audioCtx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(100, audioCtx.currentTime + 0.3);
+      gain.gain.setValueAtTime(0.15, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.3);
+      osc.start(); osc.stop(audioCtx.currentTime + 0.3);
+    } else if (type === 'beam') {
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(440, audioCtx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(880, audioCtx.currentTime + 0.15);
+      gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.2);
+      osc.start(); osc.stop(audioCtx.currentTime + 0.2);
+    }
+  }
+
+  // === GAME STATE ===
+  let lensZones = [];       // The two Fresnel lens clickable zones
+  let beamAngles = [0, 0];  // Rotating beam angles for each lens
+  let beamSweepSpeed = [0.6, -0.5]; // Beam rotation speeds
+  let stars = [];            // Background stars
+  let waves = [];            // Ocean wave data
+  let hoveredZone = -1;      // Currently hovered lens zone
+  let selectedZone = -1;     // Clicked zone (-1 = none)
+  let selectionTime = 0;     // Time since selection for animation
+  let entranceProgress = 0;  // For entrance animation
+  let lighthouseGlow = 0;    // Pulsing glow timer
+  let gameParticles = [];    // In-game particles (sparkles)
+
+  // Lighthouse geometry
+  const LH_BASE_X = W / 2;
+  const LH_BASE_Y = H - 30;
+  const LH_TOP_Y = 100;
+  const LH_BASE_W = 80;
+  const LH_TOP_W = 50;
+
+  // Lens zone geometry
+  const LENS_Y = LH_TOP_Y + 10;
+  const LENS_H = 80;
+  const LENS_W = 240;
+  const LENS_GAP = 16;
+
+  function initGame() {
+    selectedZone = -1;
+    hoveredZone = -1;
+    selectionTime = 0;
+    entranceProgress = 0;
+    lighthouseGlow = 0;
+    gameParticles = [];
+
+    // Create stars
+    stars = [];
+    for (let i = 0; i < 60; i++) {
+      stars.push({
+        x: Math.random() * W,
+        y: Math.random() * (H * 0.55),
+        size: Math.random() * 2.5 + 0.5,
+        twinkle: Math.random() * Math.PI * 2,
+        twinkleSpeed: 1.5 + Math.random() * 2
+      });
+    }
+
+    // Create wave data
+    waves = [];
+    for (let i = 0; i < 5; i++) {
+      waves.push({
+        offset: Math.random() * Math.PI * 2,
+        speed: 0.3 + Math.random() * 0.4,
+        amplitude: 3 + Math.random() * 5,
+        y: H * 0.7 + i * 18
+      });
+    }
+
+    // Two Fresnel lens zones (left = True/choice[0], right = False/choice[1])
+    const leftChoice = QUESTION.choices[0];
+    const rightChoice = QUESTION.choices[1];
+
+    const totalW = LENS_W * 2 + LENS_GAP;
+    const startX = (W - totalW) / 2;
+
+    lensZones = [
+      {
+        x: startX,
+        y: LENS_Y,
+        w: LENS_W,
+        h: LENS_H,
+        choice: leftChoice,
+        scale: 0,
+        alpha: 0,
+        offsetY: 30,
+        glowIntensity: 0,
+        beamColor: COLORS.amber
+      },
+      {
+        x: startX + LENS_W + LENS_GAP,
+        y: LENS_Y,
+        w: LENS_W,
+        h: LENS_H,
+        choice: rightChoice,
+        scale: 0,
+        alpha: 0,
+        offsetY: 30,
+        glowIntensity: 0,
+        beamColor: COLORS.cyan
+      }
+    ];
+
+    beamAngles = [Math.PI * 0.15, -Math.PI * 0.15];
+  }
+
+  function updateGame(dt) {
+    if (gameState !== 'playing') return;
+
+    // Entrance animation
+    if (entranceProgress < 1) {
+      entranceProgress = Math.min(1, entranceProgress + dt * 1.8);
+      const t = entranceProgress;
+      lensZones.forEach((zone, i) => {
+        const delayed = Math.max(0, (t - i * 0.15) / (1 - i * 0.15));
+        const spring = 1 + Math.sin(delayed * Math.PI * 2) * 0.15 * (1 - delayed);
+        zone.scale = Math.min(1, delayed) * spring;
+        zone.alpha = Math.min(1, delayed * 1.5);
+        zone.offsetY = 30 * (1 - Math.min(1, delayed));
+      });
+    }
+
+    // Update lighthouse glow
+    lighthouseGlow += dt;
+
+    // Sweep beam angles
+    beamAngles[0] += beamSweepSpeed[0] * dt;
+    beamAngles[1] += beamSweepSpeed[1] * dt;
+
+    // Bounce beams
+    for (let i = 0; i < 2; i++) {
+      if (beamAngles[i] > Math.PI * 0.4) beamSweepSpeed[i] = -Math.abs(beamSweepSpeed[i]);
+      if (beamAngles[i] < -Math.PI * 0.4) beamSweepSpeed[i] = Math.abs(beamSweepSpeed[i]);
+    }
+
+    // Update hover glow
+    lensZones.forEach((zone, i) => {
+      const targetGlow = (hoveredZone === i) ? 1 : 0.3;
+      zone.glowIntensity += (targetGlow - zone.glowIntensity) * dt * 6;
+    });
+
+    // Update stars
+    stars.forEach(s => {
+      s.twinkle += s.twinkleSpeed * dt;
+    });
+
+    // Handle selection animation
+    if (selectedZone >= 0) {
+      selectionTime += dt;
+      if (selectionTime > 0.6) {
+        const zone = lensZones[selectedZone];
+        const choice = zone.choice;
+        if (choice.is_correct) {
+          playSound('correct');
+        } else {
+          playSound('wrong');
+        }
+        engine.end(choice.is_correct, choice.explanation);
+      }
+    }
+
+    // Update game particles
+    gameParticles = gameParticles.filter(p => {
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.vy += 80 * dt;
+      p.alpha -= dt * 1.5;
+      p.rotation += p.rotationSpeed * dt;
+      return p.alpha > 0;
+    });
+  }
+
+  function wrapText(text, maxWidth, font) {
+    ctx.font = font;
+    const words = text.split(' ');
+    const lines = [];
+    let currentLine = '';
+
+    for (const word of words) {
+      const testLine = currentLine ? currentLine + ' ' + word : word;
+      if (ctx.measureText(testLine).width > maxWidth && currentLine) {
+        lines.push(currentLine);
+        currentLine = word;
+      } else {
+        currentLine = testLine;
+      }
+    }
+    if (currentLine) lines.push(currentLine);
+    return lines;
+  }
+
+  function drawGame() {
+    // === DARK NIGHT SKY ===
+    const skyGrad = ctx.createLinearGradient(0, 0, 0, H);
+    skyGrad.addColorStop(0, '#0a0a1a');
+    skyGrad.addColorStop(0.45, '#0f1529');
+    skyGrad.addColorStop(0.65, '#1a2540');
+    skyGrad.addColorStop(1, '#0d1a2d');
+    ctx.fillStyle = skyGrad;
+    ctx.fillRect(0, 0, W, H);
+
+    // === STARS ===
+    stars.forEach(s => {
+      const alpha = 0.3 + 0.7 * (0.5 + 0.5 * Math.sin(s.twinkle));
+      ctx.fillStyle = `rgba(255, 255, 240, ${alpha})`;
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, s.size, 0, Math.PI * 2);
+      ctx.fill();
+    });
+
+    // === OCEAN ===
+    const oceanGrad = ctx.createLinearGradient(0, H * 0.65, 0, H);
+    oceanGrad.addColorStop(0, '#0a1628');
+    oceanGrad.addColorStop(0.5, '#0d1f35');
+    oceanGrad.addColorStop(1, '#081420');
+    ctx.fillStyle = oceanGrad;
+    ctx.fillRect(0, H * 0.65, W, H * 0.35);
+
+    // Wave reflections
+    waves.forEach(wave => {
+      ctx.strokeStyle = 'rgba(78, 205, 196, 0.08)';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      for (let x = 0; x < W; x += 4) {
+        const y = wave.y + Math.sin(x * 0.015 + wave.offset + lighthouseGlow * wave.speed) * wave.amplitude;
+        if (x === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+    });
+
+    // === LIGHTHOUSE TOWER ===
+    // Tower shadow/glow
+    const towerGlowAlpha = 0.1 + 0.05 * Math.sin(lighthouseGlow * 2);
+    ctx.fillStyle = `rgba(232, 122, 62, ${towerGlowAlpha})`;
+    ctx.beginPath();
+    ctx.ellipse(LH_BASE_X, LH_BASE_Y, 100, 20, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Tower body - gradient
+    const towerGrad = ctx.createLinearGradient(LH_BASE_X - LH_BASE_W / 2, 0, LH_BASE_X + LH_BASE_W / 2, 0);
+    towerGrad.addColorStop(0, '#8B8B80');
+    towerGrad.addColorStop(0.3, '#F5F5F0');
+    towerGrad.addColorStop(0.6, '#E6E6E0');
+    towerGrad.addColorStop(1, '#9B9B90');
+    ctx.fillStyle = towerGrad;
+    ctx.beginPath();
+    ctx.moveTo(LH_BASE_X - LH_BASE_W / 2, LH_BASE_Y);
+    ctx.lineTo(LH_BASE_X - LH_TOP_W / 2, LH_TOP_Y + LENS_H + 10);
+    ctx.lineTo(LH_BASE_X + LH_TOP_W / 2, LH_TOP_Y + LENS_H + 10);
+    ctx.lineTo(LH_BASE_X + LH_BASE_W / 2, LH_BASE_Y);
+    ctx.closePath();
+    ctx.fill();
+
+    // Red stripes
+    const stripeCount = 4;
+    for (let i = 0; i < stripeCount; i++) {
+      const stripeY = LH_TOP_Y + LENS_H + 20 + i * 80;
+      const stripeH = 30;
+      if (stripeY + stripeH > LH_BASE_Y) continue;
+      const fraction = (stripeY - LH_TOP_Y) / (LH_BASE_Y - LH_TOP_Y);
+      const wAtY = LH_TOP_W + (LH_BASE_W - LH_TOP_W) * fraction;
+      const wAtYb = LH_TOP_W + (LH_BASE_W - LH_TOP_W) * ((stripeY + stripeH - LH_TOP_Y) / (LH_BASE_Y - LH_TOP_Y));
+      ctx.fillStyle = '#E85D4A';
+      ctx.beginPath();
+      ctx.moveTo(LH_BASE_X - wAtY / 2, stripeY);
+      ctx.lineTo(LH_BASE_X + wAtY / 2, stripeY);
+      ctx.lineTo(LH_BASE_X + wAtYb / 2, stripeY + stripeH);
+      ctx.lineTo(LH_BASE_X - wAtYb / 2, stripeY + stripeH);
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    // === LANTERN ROOM (top of lighthouse) ===
+    const lanternY = LH_TOP_Y - 10;
+    const lanternW = 70;
+    const lanternH = LENS_H + 20;
+
+    // Lantern room frame
+    ctx.fillStyle = '#3A3A35';
+    ctx.beginPath();
+    ctx.roundRect(LH_BASE_X - lanternW / 2, lanternY, lanternW, lanternH, 6);
+    ctx.fill();
+
+    // Glass panes
+    ctx.fillStyle = 'rgba(245, 167, 66, 0.25)';
+    ctx.fillRect(LH_BASE_X - lanternW / 2 + 4, lanternY + 4, lanternW - 8, lanternH - 8);
+
+    // Dome top
+    ctx.fillStyle = '#3A3A35';
+    ctx.beginPath();
+    ctx.arc(LH_BASE_X, lanternY, lanternW / 2, Math.PI, 0);
+    ctx.fill();
+
+    // Spire
+    ctx.strokeStyle = '#5A5A54';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(LH_BASE_X, lanternY - 25);
+    ctx.lineTo(LH_BASE_X, lanternY - 5);
+    ctx.stroke();
+
+    // Inner light glow
+    const glowPulse = 0.6 + 0.4 * Math.sin(lighthouseGlow * 3);
+    const lightGrad = ctx.createRadialGradient(LH_BASE_X, lanternY + lanternH / 2, 5, LH_BASE_X, lanternY + lanternH / 2, 50);
+    lightGrad.addColorStop(0, `rgba(245, 167, 66, ${0.8 * glowPulse})`);
+    lightGrad.addColorStop(0.5, `rgba(232, 122, 62, ${0.3 * glowPulse})`);
+    lightGrad.addColorStop(1, 'rgba(232, 122, 62, 0)');
+    ctx.fillStyle = lightGrad;
+    ctx.fillRect(LH_BASE_X - 50, lanternY, 100, lanternH);
+
+    // === LIGHT BEAMS ===
+    lensZones.forEach((zone, i) => {
+      const beamOriginX = LH_BASE_X;
+      const beamOriginY = lanternY + lanternH / 2;
+      const beamAngle = beamAngles[i];
+      const beamLength = 500;
+      const beamWidth = 0.12;
+
+      const intensity = (selectedZone === i) ? 1 : zone.glowIntensity;
+      const color = zone.beamColor;
+
+      // Extract RGB from hex
+      const r = parseInt(color.slice(1, 3), 16);
+      const g = parseInt(color.slice(3, 5), 16);
+      const b = parseInt(color.slice(5, 7), 16);
+
+      // Direction: left beam goes left-ish, right beam goes right-ish
+      const dir = (i === 0) ? -1 : 1;
+      const baseAngle = dir * Math.PI * 0.25 + beamAngle * 0.3;
+
+      const endX = beamOriginX + Math.cos(baseAngle - Math.PI / 2) * beamLength;
+      const endY = beamOriginY + Math.sin(baseAngle - Math.PI / 2) * beamLength * 0.4 + beamLength * 0.3;
+
+      // Draw beam cone
+      const perpX = Math.cos(baseAngle);
+      const perpY = Math.sin(baseAngle) * 0.3;
+
+      ctx.save();
+      ctx.globalAlpha = intensity * 0.35;
+      const beamGrad = ctx.createLinearGradient(beamOriginX, beamOriginY, endX, endY);
+      beamGrad.addColorStop(0, `rgba(${r}, ${g}, ${b}, 0.8)`);
+      beamGrad.addColorStop(0.5, `rgba(${r}, ${g}, ${b}, 0.3)`);
+      beamGrad.addColorStop(1, `rgba(${r}, ${g}, ${b}, 0)`);
+      ctx.fillStyle = beamGrad;
+
+      ctx.beginPath();
+      ctx.moveTo(beamOriginX, beamOriginY);
+      ctx.lineTo(endX + perpX * beamLength * beamWidth, endY + perpY * beamLength * beamWidth);
+      ctx.lineTo(endX - perpX * beamLength * beamWidth, endY - perpY * beamLength * beamWidth);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+    });
+
+    // === FRESNEL LENS ZONES (answer buttons) ===
+    lensZones.forEach((zone, i) => {
+      if (zone.alpha <= 0) return;
+
+      ctx.save();
+      const cx = zone.x + zone.w / 2;
+      const cy = zone.y + zone.h / 2 + zone.offsetY;
+
+      ctx.globalAlpha = zone.alpha;
+      ctx.translate(cx, cy);
+      ctx.scale(zone.scale, zone.scale);
+      ctx.translate(-cx, -cy);
+
+      const drawY = zone.y + zone.offsetY;
+
+      // Outer glow
+      if (zone.glowIntensity > 0.3 || selectedZone === i) {
+        const glowColor = selectedZone === i ? 'rgba(232, 122, 62, 0.4)' : `rgba(78, 205, 196, ${zone.glowIntensity * 0.3})`;
+        ctx.shadowColor = glowColor;
+        ctx.shadowBlur = 20 * zone.glowIntensity;
+      }
+
+      // Lens background - Fresnel lens look
+      const isSelected = selectedZone === i;
+      const isHovered = hoveredZone === i;
+      let bgColor, borderColor;
+
+      if (isSelected) {
+        bgColor = 'rgba(232, 122, 62, 0.25)';
+        borderColor = COLORS.orange;
+      } else if (isHovered) {
+        bgColor = 'rgba(78, 205, 196, 0.15)';
+        borderColor = COLORS.cyan;
+      } else {
+        bgColor = 'rgba(255, 255, 255, 0.08)';
+        borderColor = 'rgba(255, 255, 255, 0.25)';
+      }
+
+      // Main lens shape
+      ctx.fillStyle = bgColor;
+      ctx.strokeStyle = borderColor;
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      ctx.roundRect(zone.x, drawY, zone.w, zone.h, 12);
+      ctx.fill();
+      ctx.stroke();
+
+      // Fresnel rings (concentric arcs for lens look)
+      ctx.strokeStyle = `rgba(255, 255, 255, ${isHovered ? 0.2 : 0.08})`;
+      ctx.lineWidth = 1;
+      for (let r = 15; r < zone.h; r += 12) {
+        ctx.beginPath();
+        ctx.arc(cx, cy + zone.offsetY, r, -Math.PI * 0.3, Math.PI * 0.3);
+        ctx.stroke();
+      }
+
+      // Lens inner glow
+      const innerGrad = ctx.createRadialGradient(cx, cy + zone.offsetY, 0, cx, cy + zone.offsetY, zone.w / 2);
+      const glowAlpha = isSelected ? 0.2 : (isHovered ? 0.1 : 0.03);
+      innerGrad.addColorStop(0, `rgba(255, 255, 200, ${glowAlpha})`);
+      innerGrad.addColorStop(1, 'rgba(255, 255, 200, 0)');
+      ctx.fillStyle = innerGrad;
+      ctx.fillRect(zone.x, drawY, zone.w, zone.h);
+
+      ctx.shadowColor = 'transparent';
+      ctx.shadowBlur = 0;
+
+      // Answer text
+      const textFont = "500 16px 'Nunito', sans-serif";
+      const maxTextWidth = zone.w - 32;
+      const lines = wrapText(zone.choice.text, maxTextWidth, textFont);
+
+      ctx.font = textFont;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = isSelected ? '#FFFFFF' : (isHovered ? '#F5F5F0' : '#E6E6E0');
+
+      const lineHeight = 20;
+      const totalTextH = lines.length * lineHeight;
+      const textStartY = cy + zone.offsetY - totalTextH / 2 + lineHeight / 2;
+
+      lines.forEach((line, li) => {
+        ctx.fillText(line, cx, textStartY + li * lineHeight);
+      });
+
+      ctx.restore();
+    });
+
+    // === GAME PARTICLES ===
+    gameParticles.forEach(p => {
+      ctx.save();
+      ctx.globalAlpha = p.alpha;
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rotation);
+      ctx.fillStyle = p.color;
+      ctx.fillRect(-p.size / 2, -p.size / 2, p.size, p.size);
+      ctx.restore();
+    });
+
+    // === SELECTION FLASH EFFECT ===
+    if (selectedZone >= 0 && selectionTime < 0.4) {
+      const flashAlpha = Math.max(0, 0.3 * (1 - selectionTime / 0.4));
+      const zone = lensZones[selectedZone];
+      ctx.fillStyle = `rgba(232, 122, 62, ${flashAlpha})`;
+      ctx.fillRect(0, 0, W, H);
+    }
+  }
+
+  function handleInput(e) {
+    if (gameState !== 'playing') return;
+    if (selectedZone >= 0) return; // Already selected
+
+    if (e.type === 'mousemove') {
+      const { x, y } = screenToLogical(e.clientX, e.clientY);
+      hoveredZone = -1;
+      lensZones.forEach((zone, i) => {
+        const drawY = zone.y + zone.offsetY;
+        if (x >= zone.x && x <= zone.x + zone.w && y >= drawY && y <= drawY + zone.h) {
+          hoveredZone = i;
+        }
+      });
+      canvas.style.cursor = hoveredZone >= 0 ? 'pointer' : 'default';
+    }
+
+    if (e.type === 'click') {
+      const { x, y } = screenToLogical(e.clientX, e.clientY);
+      lensZones.forEach((zone, i) => {
+        const drawY = zone.y + zone.offsetY;
+        if (x >= zone.x && x <= zone.x + zone.w && y >= drawY && y <= drawY + zone.h) {
+          selectedZone = i;
+          selectionTime = 0;
+          playSound('beam');
+
+          // Spawn sparkle particles
+          const cx = zone.x + zone.w / 2;
+          const cy = drawY + zone.h / 2;
+          const sparkleColors = [COLORS.orange, COLORS.amber, COLORS.cyan, '#FFFFFF'];
+          for (let p = 0; p < 20; p++) {
+            gameParticles.push({
+              x: cx + (Math.random() - 0.5) * zone.w,
+              y: cy + (Math.random() - 0.5) * zone.h,
+              vx: (Math.random() - 0.5) * 200,
+              vy: -Math.random() * 150 - 50,
+              size: 3 + Math.random() * 5,
+              color: sparkleColors[Math.floor(Math.random() * sparkleColors.length)],
+              alpha: 1,
+              rotation: Math.random() * Math.PI * 2,
+              rotationSpeed: (Math.random() - 0.5) * 8
+            });
+          }
+        }
+      });
+    }
+  }
+
+  // Register mouse events for hover + click
+  canvas.addEventListener('mousemove', handleInput);
+  canvas.addEventListener('click', (e) => {
+    if (gameState === 'playing') {
+      handleInput(e);
+    }
+  });
+
+  // +========================================================================+
+  // |  SECTION 4: GAME LOOP - DO NOT MODIFY                                  |
+  // |  Standard loop with responsive scaling and DPR support.                |
+  // +========================================================================+
+  let lastTime = performance.now();
+
+  function gameLoop(now) {
+    const dt = Math.min((now - lastTime) / 1000, 0.05); // Cap at 50ms
+    lastTime = now;
+
+    // Apply transform for logical coordinate system
+    ctx.setTransform(scale * dpr, 0, 0, scale * dpr, 0, 0);
+
+    if (gameState === 'playing') {
+      updateGame(dt);
+      drawGame();
+    } else {
+      drawGame(); // Draw game state behind overlay
+      drawEndScreen(dt);
+    }
+
+    // Reset transform for next frame
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+    requestAnimationFrame(gameLoop);
+  }
+
+  // Input handlers
+  document.addEventListener('keydown', (e) => {
+    if (gameState === 'ended' && (e.code === 'KeyR')) {
+      // Restart game
+      gameState = 'playing';
+      gameResult = null;
+      gameExplanation = '';
+      confettiParticles = [];
+      initGame();
+      return;
+    }
+    handleInput(e);
+  });
+
+  document.addEventListener('keyup', (e) => {
+    // Optional: handle key release in your handleInput
+  });
+
+  // Canvas click handler for end screen buttons
+  canvas.addEventListener('click', (e) => {
+    if (gameState !== 'ended') return;
+
+    const { x, y } = screenToLogical(e.clientX, e.clientY);
+
+    if (gameResult) {
+      // Correct answer: check both buttons
+      if (pointInRect(x, y, restartButton)) {
+        gameState = 'playing';
+        gameResult = null;
+        gameExplanation = '';
+        confettiParticles = [];
+        initGame();
+        return;
+      }
+      if (pointInRect(x, y, nextButton)) {
+        // Notify parent to go to next question
+        if (window.parent && window.parent !== window) {
+          window.parent.postMessage({ type: 'quiz-next' }, '*');
+        }
+        return;
+      }
+    } else {
+      // Wrong answer: check centered restart button
+      const centeredRestart = { x: W / 2 - 75, y: H / 2 + 60, w: 150, h: 48 };
+      if (pointInRect(x, y, centeredRestart)) {
+        gameState = 'playing';
+        gameResult = null;
+        gameExplanation = '';
+        confettiParticles = [];
+        initGame();
+        return;
+      }
+    }
+  });
+
+  // Handle resize
+  window.addEventListener('resize', resizeCanvas);
+
+  // Initialize
+  resizeCanvas();
+  initGame();
+  requestAnimationFrame(gameLoop);
+  </script>
+</body>
+</html>

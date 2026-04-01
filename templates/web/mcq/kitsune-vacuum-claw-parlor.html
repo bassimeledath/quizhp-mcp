@@ -1,0 +1,1104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Kitsune Vacuum Claw Parlor</title>
+  <link href="https://fonts.googleapis.com/css2?family=Belanosima:wght@400;600;700&family=Nunito+Sans:wght@400;500;600;700&family=Nunito:wght@400;500;600&display=swap" rel="stylesheet">
+  <!--
+  ╔══════════════════════════════════════════════════════════════════════════════╗
+  ║  GAME FACTORY TEMPLATE                                                        ║
+  ║  This template enforces critical invariants. Follow the section markers.      ║
+  ╚══════════════════════════════════════════════════════════════════════════════╝
+  -->
+  <style>
+    /* ═══════════════════════════════════════════════════════════════════════════
+       BASE STYLES - Can be extended, not removed
+       ═══════════════════════════════════════════════════════════════════════════ */
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+    }
+    body {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      background: #1a1a2e;
+      font-family: system-ui, -apple-system, sans-serif;
+    }
+    #gameCanvas {
+      background: #16213e;
+      border-radius: 8px;
+      display: block;
+    }
+  </style>
+</head>
+<body>
+  <!-- ═══════════════════════════════════════════════════════════════════════════
+       CANVAS - Sized dynamically to fill available space
+       ═══════════════════════════════════════════════════════════════════════════ -->
+  <canvas id="gameCanvas"></canvas>
+
+  <script>
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 1: QUESTION PLACEHOLDER - DO NOT MODIFY FORMAT                    ║
+  // ║  Platform replaces this at runtime. Use these exact 60-char answers.       ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  const QUESTION = {
+    type: "mcq",
+    prompt: "Sample question text",
+    choices: [
+      { text: "This is sample answer A which is long enough to test text overflow", is_correct: true, explanation: "Why A is correct" },
+      { text: "This is sample answer B which is long enough to test text overflow", is_correct: false, explanation: "Why B is wrong" },
+      { text: "This is sample answer C which is long enough to test text overflow", is_correct: false, explanation: "Why C is wrong" },
+      { text: "This is sample answer D which is long enough to test text overflow", is_correct: false, explanation: "Why D is wrong" }
+    ],
+    isLastQuestion: false
+  };
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 2: ENGINE CORE - DO NOT MODIFY                                    ║
+  // ║  Standard engine interface and end screen. This is sacred.                 ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  const canvas = document.getElementById('gameCanvas');
+  const ctx = canvas.getContext('2d');
+
+  // Logical dimensions (game code works in this coordinate space)
+  const W = 720, H = 540;
+
+  // Scaling state (computed on resize)
+  let scale = 1;
+  let dpr = 1;
+
+  let gameState = 'playing'; // 'playing' | 'ended'
+  let gameResult = null;     // true (correct) | false (wrong)
+  let gameExplanation = '';
+  let endScreenTime = 0;
+  let confettiParticles = [];
+
+  // End screen button bounds (logical coordinates)
+  const restartButton = { x: W / 2 - 170, y: H / 2 + 60, w: 150, h: 48 };
+  const nextButton = { x: W / 2 + 20, y: H / 2 + 60, w: 150, h: 48 };
+
+  /** Check if point is inside rectangle */
+  function pointInRect(px, py, rect) {
+    return px >= rect.x && px <= rect.x + rect.w &&
+           py >= rect.y && py <= rect.y + rect.h;
+  }
+
+  /** Draw a styled button */
+  function drawButton(rect, label, color, pulse) {
+    const p = pulse ? 1 + Math.sin(endScreenTime * 4) * 0.03 : 1;
+    ctx.save();
+    ctx.translate(rect.x + rect.w / 2, rect.y + rect.h / 2);
+    ctx.scale(p, p);
+    ctx.translate(-(rect.x + rect.w / 2), -(rect.y + rect.h / 2));
+
+    // Button background
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.roundRect(rect.x, rect.y, rect.w, rect.h, 12);
+    ctx.fill();
+
+    // Button text
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = 'bold 18px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, rect.x + rect.w / 2, rect.y + rect.h / 2);
+
+    ctx.restore();
+  }
+
+  /**
+   * Resize canvas to fill available space with proper DPR scaling.
+   * Maintains logical coordinate system (720×540).
+   */
+  function resizeCanvas() {
+    dpr = window.devicePixelRatio || 1;
+
+    // Get available space
+    const availW = window.innerWidth;
+    const availH = window.innerHeight;
+
+    // Calculate scale to fit logical space (720×540) in available space
+    const scaleX = availW / W;
+    const scaleY = availH / H;
+    scale = Math.min(scaleX, scaleY);
+
+    // Physical canvas buffer (DPR-scaled for crisp rendering)
+    canvas.width = W * scale * dpr;
+    canvas.height = H * scale * dpr;
+
+    // CSS display size
+    canvas.style.width = (W * scale) + 'px';
+    canvas.style.height = (H * scale) + 'px';
+  }
+
+  /**
+   * Convert screen coordinates to logical coordinates.
+   * Use this for mouse/click events to get positions in 720×540 space.
+   */
+  function screenToLogical(screenX, screenY) {
+    const rect = canvas.getBoundingClientRect();
+    return {
+      x: (screenX - rect.left) * (W / rect.width),
+      y: (screenY - rect.top) * (H / rect.height)
+    };
+  }
+
+  const engine = {
+    /** Call this to end the game. DO NOT draw your own end screen. */
+    end(isCorrect, explanation) {
+      if (gameState === 'ended') return;
+      gameState = 'ended';
+      gameResult = isCorrect;
+      gameExplanation = explanation || '';
+      endScreenTime = 0;
+
+      // Spawn confetti for correct answers
+      if (isCorrect) {
+        for (let i = 0; i < 50; i++) {
+          confettiParticles.push({
+            x: W / 2,
+            y: H / 2,
+            vx: (Math.random() - 0.5) * 600,
+            vy: -Math.random() * 400 - 100,
+            size: 4 + Math.random() * 6,
+            color: ['#FFD700', '#FF6B6B', '#4ECDC4', '#95E1D3', '#F38181'][Math.floor(Math.random() * 5)],
+            rotation: Math.random() * Math.PI * 2,
+            rotationSpeed: (Math.random() - 0.5) * 10
+          });
+        }
+      }
+
+      // Notify parent frame
+      if (window.parent && window.parent !== window) {
+        window.parent.postMessage({
+          type: 'quiz-end',
+          isCorrect: isCorrect,
+          explanation: explanation || ''
+        }, '*');
+      }
+    }
+  };
+
+  /** STANDARD END SCREEN - DO NOT MODIFY */
+  function drawEndScreen(dt) {
+    endScreenTime += dt;
+
+    // Update confetti
+    confettiParticles = confettiParticles.filter(p => {
+      p.vy += 800 * dt; // gravity
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.rotation += p.rotationSpeed * dt;
+      p.vx *= 0.99;
+      return p.y < H + 50;
+    });
+
+    // Dark overlay
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
+    ctx.fillRect(0, 0, W, H);
+
+    // Draw confetti
+    confettiParticles.forEach(p => {
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rotation);
+      ctx.fillStyle = p.color;
+      ctx.fillRect(-p.size / 2, -p.size / 4, p.size, p.size / 2);
+      ctx.restore();
+    });
+
+    // Result emoji
+    ctx.font = '72px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(gameResult ? '🎉' : '😢', W / 2, H / 2 - 50);
+
+    // Result text
+    ctx.fillStyle = gameResult ? '#4ADE80' : '#F87171';
+    ctx.font = 'bold 36px system-ui, sans-serif';
+    ctx.fillText(gameResult ? 'Correct!' : 'Wrong!', W / 2, H / 2 + 20);
+
+    // Buttons
+    if (gameResult) {
+      // Correct: show both Restart and Next/Finish
+      drawButton(restartButton, 'Restart', '#E87A3E', true);
+      const nextLabel = QUESTION.isLastQuestion ? 'Finish' : 'Next';
+      drawButton(nextButton, nextLabel, '#4ECDC4', true);
+    } else {
+      // Wrong: show only centered Restart button
+      const centeredRestart = { x: W / 2 - 75, y: H / 2 + 60, w: 150, h: 48 };
+      drawButton(centeredRestart, 'Restart', '#E87A3E', true);
+    }
+  }
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 3: YOUR GAME CODE - IMPLEMENT THESE FUNCTIONS                     ║
+  // ║  This is where your game logic goes. See requirements below.               ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+
+  // === QUIZHP COLORS ===
+  const COLORS = {
+    orange: '#E87A3E',
+    orangeHover: '#D66B31',
+    amber: '#F5A742',
+    cyan: '#4ECDC4',
+    success: '#6BBF59',
+    error: '#E85D4A',
+    textPrimary: '#2B2B28',
+    textSecondary: '#5A5A54',
+    bgPrimary: '#FAFAF7'
+  };
+
+  // === SOUND EFFECTS ===
+  const AudioCtx = window.AudioContext || window.webkitAudioContext;
+  let audioCtx = null;
+
+  function initAudio() {
+    if (!audioCtx) {
+      audioCtx = new AudioCtx();
+    }
+  }
+
+  function playSound(type) {
+    if (!audioCtx) return;
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+
+    const now = audioCtx.currentTime;
+
+    if (type === 'grab') {
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(400, now);
+      osc.frequency.exponentialRampToValueAtTime(600, now + 0.1);
+      gain.gain.setValueAtTime(0.3, now);
+      gain.gain.exponentialRampToValueAtTime(0.01, now + 0.15);
+      osc.start(now);
+      osc.stop(now + 0.15);
+    } else if (type === 'correct') {
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(523, now);
+      osc.frequency.setValueAtTime(659, now + 0.1);
+      osc.frequency.setValueAtTime(784, now + 0.2);
+      gain.gain.setValueAtTime(0.3, now);
+      gain.gain.exponentialRampToValueAtTime(0.01, now + 0.4);
+      osc.start(now);
+      osc.stop(now + 0.4);
+    } else if (type === 'wrong') {
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(200, now);
+      osc.frequency.exponentialRampToValueAtTime(100, now + 0.3);
+      gain.gain.setValueAtTime(0.2, now);
+      gain.gain.exponentialRampToValueAtTime(0.01, now + 0.3);
+      osc.start(now);
+      osc.stop(now + 0.3);
+    } else if (type === 'move') {
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(300, now);
+      osc.frequency.exponentialRampToValueAtTime(350, now + 0.05);
+      gain.gain.setValueAtTime(0.1, now);
+      gain.gain.exponentialRampToValueAtTime(0.01, now + 0.05);
+      osc.start(now);
+      osc.stop(now + 0.05);
+    } else if (type === 'drop') {
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(500, now);
+      osc.frequency.exponentialRampToValueAtTime(200, now + 0.2);
+      gain.gain.setValueAtTime(0.25, now);
+      gain.gain.exponentialRampToValueAtTime(0.01, now + 0.2);
+      osc.start(now);
+      osc.stop(now + 0.2);
+    }
+  }
+
+  // === GAME STATE ===
+  let claw = {
+    x: W / 2,
+    targetX: W / 2,
+    y: 60,
+    state: 'idle', // 'idle', 'dropping', 'grabbing', 'returning'
+    dropY: 60,
+    speed: 300,
+    dropSpeed: 350,
+    grabbedCapsule: null
+  };
+
+  let capsules = [];
+  let kitsunes = [];
+  let vacuumTubes = [];
+  let sparks = [];
+  let scorchMarks = [];
+  let paperScreens = [];
+  let floorReflections = [];
+  let gameTime = 0;
+  let selectedAnswer = null;
+  let entranceAnimTime = 0;
+  let celebrationParticles = [];
+
+  // Capsule positions (shrine pedestals)
+  const capsulePositions = [
+    { x: 90, y: 420 },
+    { x: 270, y: 420 },
+    { x: 450, y: 420 },
+    { x: 630, y: 420 }
+  ];
+
+  function initGame() {
+    initAudio();
+    gameTime = 0;
+    selectedAnswer = null;
+    entranceAnimTime = 0;
+    celebrationParticles = [];
+
+    // Reset claw
+    claw = {
+      x: W / 2,
+      targetX: W / 2,
+      y: 60,
+      state: 'idle',
+      dropY: 60,
+      dropSpeed: 350,
+      speed: 300,
+      grabbedCapsule: null
+    };
+
+    // Initialize capsules with answers
+    capsules = QUESTION.choices.map((choice, i) => ({
+      x: capsulePositions[i].x,
+      y: capsulePositions[i].y,
+      baseY: capsulePositions[i].y,
+      width: 140,
+      height: 70,
+      choice: choice,
+      index: i,
+      grabbed: false,
+      glowPhase: Math.random() * Math.PI * 2,
+      bobPhase: Math.random() * Math.PI * 2
+    }));
+
+    // Initialize kitsunes (fox spirits)
+    kitsunes = [];
+    for (let i = 0; i < 3; i++) {
+      kitsunes.push({
+        x: 100 + i * 250,
+        y: 320,
+        tails: 1,
+        maskPhase: Math.random() * Math.PI * 2,
+        shedding: false,
+        sheddingTime: 0
+      });
+    }
+
+    // Vacuum tubes (background ambiance)
+    vacuumTubes = [];
+    for (let i = 0; i < 8; i++) {
+      vacuumTubes.push({
+        x: 50 + i * 90,
+        y: 100 + (i % 2) * 30,
+        flickerPhase: Math.random() * Math.PI * 2,
+        height: 60 + Math.random() * 40
+      });
+    }
+
+    // Paper screens
+    paperScreens = [];
+    for (let i = 0; i < 5; i++) {
+      paperScreens.push({
+        x: 30 + i * 150,
+        y: 140,
+        width: 100,
+        height: 120
+      });
+    }
+
+    sparks = [];
+    scorchMarks = [];
+  }
+
+  function updateGame(dt) {
+    if (gameState !== 'playing') return;
+
+    gameTime += dt;
+    entranceAnimTime += dt;
+
+    // Update celebration particles
+    celebrationParticles = celebrationParticles.filter(p => {
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.vy += 400 * dt;
+      p.rotation += p.rotationSpeed * dt;
+      p.life -= dt * 0.8;
+      return p.life > 0;
+    });
+
+    // Update claw movement
+    if (claw.state === 'idle') {
+      // Smooth horizontal movement
+      const diff = claw.targetX - claw.x;
+      claw.x += diff * 8 * dt;
+    } else if (claw.state === 'dropping') {
+      claw.y += claw.dropSpeed * dt;
+
+      // Check for capsule collision
+      for (let capsule of capsules) {
+        if (!capsule.grabbed &&
+            Math.abs(claw.x - capsule.x) < 50 &&
+            claw.y >= capsule.y - 30) {
+          claw.state = 'grabbing';
+          claw.grabbedCapsule = capsule;
+          capsule.grabbed = true;
+          selectedAnswer = capsule;
+          playSound('grab');
+          break;
+        }
+      }
+
+      // Bottom limit
+      if (claw.y >= 400) {
+        claw.state = 'returning';
+      }
+    } else if (claw.state === 'grabbing') {
+      // Brief pause then return
+      claw.state = 'returning';
+    } else if (claw.state === 'returning') {
+      claw.y -= claw.dropSpeed * dt;
+
+      if (claw.grabbedCapsule) {
+        claw.grabbedCapsule.y = claw.y + 30;
+        claw.grabbedCapsule.x = claw.x;
+      }
+
+      if (claw.y <= 60) {
+        claw.y = 60;
+        claw.state = 'idle';
+
+        if (claw.grabbedCapsule) {
+          const choice = claw.grabbedCapsule.choice;
+
+          if (!choice.is_correct) {
+            // Wrong answer - kitsune sheds disguise
+            playSound('wrong');
+            const nearestKitsune = kitsunes.reduce((a, b) =>
+              Math.abs(a.x - claw.x) < Math.abs(b.x - claw.x) ? a : b
+            );
+            nearestKitsune.shedding = true;
+            nearestKitsune.sheddingTime = 0;
+
+            // Create sparks
+            for (let i = 0; i < 30; i++) {
+              sparks.push({
+                x: nearestKitsune.x,
+                y: nearestKitsune.y,
+                vx: (Math.random() - 0.5) * 400,
+                vy: -Math.random() * 300 - 100,
+                life: 1,
+                color: Math.random() > 0.5 ? COLORS.amber : COLORS.orange
+              });
+            }
+
+            // Create scorch mark
+            scorchMarks.push({
+              x: nearestKitsune.x + (Math.random() - 0.5) * 100,
+              y: 480 + Math.random() * 30,
+              width: 30 + Math.random() * 40,
+              alpha: 0.6
+            });
+          } else {
+            // Correct answer - spawn celebration particles
+            playSound('correct');
+            const celebColors = [COLORS.orange, COLORS.amber, COLORS.cyan, COLORS.success];
+            for (let i = 0; i < 40; i++) {
+              celebrationParticles.push({
+                x: claw.x,
+                y: claw.y + 30,
+                vx: (Math.random() - 0.5) * 500,
+                vy: -Math.random() * 400 - 100,
+                color: celebColors[Math.floor(Math.random() * celebColors.length)],
+                size: 4 + Math.random() * 6,
+                rotation: Math.random() * Math.PI * 2,
+                rotationSpeed: (Math.random() - 0.5) * 12,
+                life: 1
+              });
+            }
+          }
+
+          // End game after brief delay
+          setTimeout(() => {
+            engine.end(choice.is_correct, choice.explanation);
+          }, choice.is_correct ? 100 : 500);
+        }
+      }
+    }
+
+    // Update capsule bobbing
+    for (let capsule of capsules) {
+      if (!capsule.grabbed) {
+        capsule.bobPhase += dt * 2;
+        capsule.y = capsule.baseY + Math.sin(capsule.bobPhase) * 3;
+      }
+      capsule.glowPhase += dt * 3;
+    }
+
+    // Update vacuum tube flickering
+    for (let tube of vacuumTubes) {
+      tube.flickerPhase += dt * 5;
+    }
+
+    // Update kitsunes
+    for (let kitsune of kitsunes) {
+      kitsune.maskPhase += dt * 0.5;
+      if (kitsune.shedding) {
+        kitsune.sheddingTime += dt;
+      }
+    }
+
+    // Update sparks
+    sparks = sparks.filter(spark => {
+      spark.x += spark.vx * dt;
+      spark.y += spark.vy * dt;
+      spark.vy += 500 * dt;
+      spark.life -= dt * 1.5;
+      return spark.life > 0;
+    });
+
+    // Update scorch marks
+    for (let mark of scorchMarks) {
+      mark.alpha = Math.max(0.3, mark.alpha - dt * 0.1);
+    }
+  }
+
+  function drawGame() {
+    // Background - dark parlor with lacquered floor
+    const bgGrad = ctx.createLinearGradient(0, 0, 0, H);
+    bgGrad.addColorStop(0, '#1a0a1a');
+    bgGrad.addColorStop(0.7, '#2B1525');
+    bgGrad.addColorStop(1, '#1a0a1a');
+    ctx.fillStyle = bgGrad;
+    ctx.fillRect(0, 0, W, H);
+
+    // Draw lacquered floor with reflection
+    ctx.fillStyle = '#0a0508';
+    ctx.fillRect(0, 460, W, 80);
+
+    // Floor reflection gradient
+    const floorGrad = ctx.createLinearGradient(0, 460, 0, 540);
+    floorGrad.addColorStop(0, 'rgba(200, 150, 100, 0.15)');
+    floorGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+    ctx.fillStyle = floorGrad;
+    ctx.fillRect(0, 460, W, 80);
+
+    // Draw scorch marks on floor
+    for (let mark of scorchMarks) {
+      ctx.fillStyle = `rgba(30, 15, 10, ${mark.alpha})`;
+      ctx.beginPath();
+      ctx.ellipse(mark.x, mark.y, mark.width, 8, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Draw paper screens with fox silhouettes
+    for (let i = 0; i < paperScreens.length; i++) {
+      const screen = paperScreens[i];
+
+      // Screen frame
+      ctx.fillStyle = '#3a2a20';
+      ctx.fillRect(screen.x - 5, screen.y - 5, screen.width + 10, screen.height + 10);
+
+      // Paper
+      ctx.fillStyle = '#f5e6d3';
+      ctx.globalAlpha = 0.7;
+      ctx.fillRect(screen.x, screen.y, screen.width, screen.height);
+      ctx.globalAlpha = 1;
+
+      // Fox silhouette behind screen
+      ctx.fillStyle = 'rgba(40, 20, 15, 0.5)';
+      const foxX = screen.x + screen.width / 2;
+      const foxY = screen.y + screen.height / 2 + 20;
+
+      // Fox body
+      ctx.beginPath();
+      ctx.ellipse(foxX, foxY, 25, 15, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Fox head
+      ctx.beginPath();
+      ctx.arc(foxX + 15, foxY - 10, 12, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Fox ears
+      ctx.beginPath();
+      ctx.moveTo(foxX + 10, foxY - 20);
+      ctx.lineTo(foxX + 15, foxY - 35);
+      ctx.lineTo(foxX + 22, foxY - 18);
+      ctx.fill();
+
+      ctx.beginPath();
+      ctx.moveTo(foxX + 18, foxY - 20);
+      ctx.lineTo(foxX + 28, foxY - 32);
+      ctx.lineTo(foxX + 30, foxY - 15);
+      ctx.fill();
+
+      // Tails (silhouette shows extra tails based on game progress)
+      const numTails = Math.min(1 + Math.floor(gameTime / 5), 9);
+      for (let t = 0; t < numTails; t++) {
+        const tailAngle = (t - (numTails - 1) / 2) * 0.3;
+        ctx.beginPath();
+        ctx.moveTo(foxX - 20, foxY);
+        ctx.quadraticCurveTo(
+          foxX - 35 + Math.sin(tailAngle) * 10, foxY - 15,
+          foxX - 40 + tailAngle * 20, foxY - 30 + Math.sin(gameTime * 2 + t) * 5
+        );
+        ctx.lineWidth = 6;
+        ctx.strokeStyle = 'rgba(40, 20, 15, 0.5)';
+        ctx.stroke();
+      }
+    }
+
+    // Draw vacuum tubes (amber valves)
+    for (let tube of vacuumTubes) {
+      const flicker = 0.6 + Math.sin(tube.flickerPhase) * 0.4;
+
+      // Tube outer
+      ctx.fillStyle = '#2a1a15';
+      ctx.beginPath();
+      ctx.roundRect(tube.x - 15, tube.y, 30, tube.height, 5);
+      ctx.fill();
+
+      // Amber glow
+      const glowGrad = ctx.createRadialGradient(
+        tube.x, tube.y + tube.height / 2, 0,
+        tube.x, tube.y + tube.height / 2, 40
+      );
+      glowGrad.addColorStop(0, `rgba(245, 167, 66, ${0.5 * flicker})`);
+      glowGrad.addColorStop(1, 'rgba(245, 167, 66, 0)');
+      ctx.fillStyle = glowGrad;
+      ctx.fillRect(tube.x - 40, tube.y - 20, 80, tube.height + 40);
+
+      // Inner filament glow
+      ctx.fillStyle = `rgba(255, 200, 100, ${flicker})`;
+      ctx.beginPath();
+      ctx.roundRect(tube.x - 8, tube.y + 10, 16, tube.height - 20, 3);
+      ctx.fill();
+    }
+
+    // Draw ceiling rail
+    ctx.fillStyle = '#4a3a30';
+    ctx.fillRect(0, 30, W, 15);
+
+    // Rail shine
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.2)';
+    ctx.fillRect(0, 32, W, 3);
+
+    // Draw kitsunes
+    for (let kitsune of kitsunes) {
+      ctx.save();
+      ctx.translate(kitsune.x, kitsune.y);
+
+      if (kitsune.shedding) {
+        // Shake during shedding
+        const shake = Math.sin(kitsune.sheddingTime * 50) * 5;
+        ctx.translate(shake, 0);
+        ctx.globalAlpha = Math.max(0.3, 1 - kitsune.sheddingTime * 0.5);
+      }
+
+      // Fox body
+      const bodyGrad = ctx.createRadialGradient(0, 0, 0, 0, 0, 40);
+      bodyGrad.addColorStop(0, COLORS.orange);
+      bodyGrad.addColorStop(1, COLORS.orangeHover);
+      ctx.fillStyle = bodyGrad;
+      ctx.beginPath();
+      ctx.ellipse(0, 10, 35, 25, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Fox head
+      ctx.beginPath();
+      ctx.arc(25, -10, 20, 0, Math.PI * 2);
+      ctx.fill();
+
+      // White chest
+      ctx.fillStyle = '#f5e6d3';
+      ctx.beginPath();
+      ctx.ellipse(5, 20, 15, 12, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Ears
+      ctx.fillStyle = COLORS.orange;
+      ctx.beginPath();
+      ctx.moveTo(15, -25);
+      ctx.lineTo(22, -45);
+      ctx.lineTo(32, -22);
+      ctx.closePath();
+      ctx.fill();
+
+      ctx.beginPath();
+      ctx.moveTo(28, -25);
+      ctx.lineTo(40, -42);
+      ctx.lineTo(42, -18);
+      ctx.closePath();
+      ctx.fill();
+
+      // Inner ears
+      ctx.fillStyle = '#f5a5a5';
+      ctx.beginPath();
+      ctx.moveTo(20, -28);
+      ctx.lineTo(24, -40);
+      ctx.lineTo(30, -24);
+      ctx.closePath();
+      ctx.fill();
+
+      // Mask (shifts with maskPhase)
+      const maskOffset = Math.sin(kitsune.maskPhase) * 3;
+      ctx.fillStyle = '#fff';
+      ctx.beginPath();
+      ctx.ellipse(25 + maskOffset, -12, 15, 10, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Mask markings
+      ctx.strokeStyle = COLORS.orangeHover;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(15 + maskOffset, -15);
+      ctx.lineTo(10 + maskOffset, -10);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(35 + maskOffset, -15);
+      ctx.lineTo(40 + maskOffset, -10);
+      ctx.stroke();
+
+      // Eyes on mask
+      ctx.fillStyle = COLORS.textPrimary;
+      ctx.beginPath();
+      ctx.ellipse(20 + maskOffset, -12, 3, 4, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.ellipse(30 + maskOffset, -12, 3, 4, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Tails
+      for (let t = 0; t < kitsune.tails; t++) {
+        const tailAngle = (t - (kitsune.tails - 1) / 2) * 0.4;
+        const sway = Math.sin(gameTime * 2 + t) * 10;
+
+        ctx.strokeStyle = COLORS.orange;
+        ctx.lineWidth = 8;
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.moveTo(-30, 5);
+        ctx.quadraticCurveTo(
+          -50 + tailAngle * 15, -10 + sway,
+          -60 + tailAngle * 25, -30 + sway
+        );
+        ctx.stroke();
+
+        // White tail tip
+        ctx.strokeStyle = '#f5e6d3';
+        ctx.lineWidth = 6;
+        ctx.beginPath();
+        ctx.moveTo(-55 + tailAngle * 20, -20 + sway);
+        ctx.lineTo(-60 + tailAngle * 25, -30 + sway);
+        ctx.stroke();
+      }
+
+      ctx.restore();
+    }
+
+    // Draw shrine pedestals and capsules
+    for (let i = 0; i < capsules.length; i++) {
+      const capsule = capsules[i];
+
+      // Entrance animation - staggered bounce in
+      const entranceDelay = i * 0.1;
+      const entranceProgress = Math.min(1, Math.max(0, (entranceAnimTime - entranceDelay) / 0.4));
+      const spring = entranceProgress < 1 ?
+        entranceProgress * (1 + Math.sin(entranceProgress * Math.PI * 2) * 0.2 * (1 - entranceProgress)) : 1;
+
+      ctx.save();
+      ctx.translate(capsule.x, capsule.y);
+      ctx.scale(spring, spring);
+      ctx.translate(-capsule.x, -capsule.y);
+
+      // Shrine pedestal
+      ctx.fillStyle = '#3a2520';
+      ctx.beginPath();
+      ctx.moveTo(capsule.x - 50, 500);
+      ctx.lineTo(capsule.x - 40, 440);
+      ctx.lineTo(capsule.x + 40, 440);
+      ctx.lineTo(capsule.x + 50, 500);
+      ctx.closePath();
+      ctx.fill();
+
+      // Pedestal detail
+      ctx.fillStyle = '#5a4540';
+      ctx.fillRect(capsule.x - 35, 445, 70, 5);
+
+      if (!capsule.grabbed || claw.grabbedCapsule === capsule) {
+        // Capsule glow
+        const glowIntensity = 0.3 + Math.sin(capsule.glowPhase) * 0.2;
+        const capsuleGlow = ctx.createRadialGradient(
+          capsule.x, capsule.y, 0,
+          capsule.x, capsule.y, 80
+        );
+        capsuleGlow.addColorStop(0, `rgba(78, 205, 196, ${glowIntensity})`);
+        capsuleGlow.addColorStop(1, 'rgba(78, 205, 196, 0)');
+        ctx.fillStyle = capsuleGlow;
+        ctx.fillRect(capsule.x - 80, capsule.y - 60, 160, 120);
+
+        // Capsule body
+        const capsuleGrad = ctx.createLinearGradient(
+          capsule.x - 50, capsule.y - 25,
+          capsule.x + 50, capsule.y + 25
+        );
+        capsuleGrad.addColorStop(0, COLORS.cyan);
+        capsuleGrad.addColorStop(0.5, '#7EEEE6');
+        capsuleGrad.addColorStop(1, COLORS.cyan);
+        ctx.fillStyle = capsuleGrad;
+        ctx.beginPath();
+        ctx.roundRect(capsule.x - capsule.width/2, capsule.y - capsule.height/2,
+                      capsule.width, capsule.height, 35);
+        ctx.fill();
+
+        // Capsule shine
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+        ctx.beginPath();
+        ctx.ellipse(capsule.x - 20, capsule.y - 15, 30, 8, -0.3, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Answer text on capsule
+        ctx.fillStyle = COLORS.textPrimary;
+        ctx.font = "500 14px 'Nunito', sans-serif";
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+
+        // Word wrap text
+        const words = capsule.choice.text.split(' ');
+        let lines = [];
+        let currentLine = '';
+        const maxWidth = capsule.width - 16;
+
+        for (let word of words) {
+          const testLine = currentLine + (currentLine ? ' ' : '') + word;
+          const metrics = ctx.measureText(testLine);
+          if (metrics.width > maxWidth && currentLine) {
+            lines.push(currentLine);
+            currentLine = word;
+          } else {
+            currentLine = testLine;
+          }
+        }
+        lines.push(currentLine);
+
+        // Draw lines (max 3)
+        const displayLines = lines.slice(0, 3);
+        const lineHeight = 14;
+        const startY = capsule.y - ((displayLines.length - 1) * lineHeight) / 2;
+
+        for (let j = 0; j < displayLines.length; j++) {
+          ctx.fillText(displayLines[j], capsule.x, startY + j * lineHeight);
+        }
+      }
+
+      ctx.restore();
+    }
+
+    // Draw claw carriage
+    ctx.fillStyle = '#6a5a50';
+    ctx.fillRect(claw.x - 30, 35, 60, 20);
+
+    // Claw cable
+    ctx.strokeStyle = '#3a3530';
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.moveTo(claw.x, 55);
+    ctx.lineTo(claw.x, claw.y - 10);
+    ctx.stroke();
+
+    // Claw mechanism
+    ctx.fillStyle = '#8a7a70';
+    ctx.beginPath();
+    ctx.arc(claw.x, claw.y - 5, 12, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Claw arms
+    const clawOpen = claw.state === 'idle' || claw.state === 'dropping' ? 0.4 : 0;
+    ctx.strokeStyle = '#6a5a50';
+    ctx.lineWidth = 6;
+    ctx.lineCap = 'round';
+
+    // Left claw arm
+    ctx.beginPath();
+    ctx.moveTo(claw.x - 8, claw.y);
+    ctx.lineTo(claw.x - 20 - clawOpen * 15, claw.y + 25);
+    ctx.stroke();
+
+    // Right claw arm
+    ctx.beginPath();
+    ctx.moveTo(claw.x + 8, claw.y);
+    ctx.lineTo(claw.x + 20 + clawOpen * 15, claw.y + 25);
+    ctx.stroke();
+
+    // Claw tips
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.moveTo(claw.x - 20 - clawOpen * 15, claw.y + 25);
+    ctx.lineTo(claw.x - 15 - clawOpen * 10, claw.y + 35);
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.moveTo(claw.x + 20 + clawOpen * 15, claw.y + 25);
+    ctx.lineTo(claw.x + 15 + clawOpen * 10, claw.y + 35);
+    ctx.stroke();
+
+    // Draw sparks
+    for (let spark of sparks) {
+      ctx.fillStyle = spark.color;
+      ctx.globalAlpha = spark.life;
+      ctx.beginPath();
+      ctx.arc(spark.x, spark.y, 3, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+
+    // Draw floor reflections of capsules
+    ctx.globalAlpha = 0.15;
+    for (let capsule of capsules) {
+      if (!capsule.grabbed) {
+        ctx.fillStyle = COLORS.cyan;
+        ctx.beginPath();
+        const reflectY = 520 - (capsule.y - 420) * 0.3;
+        ctx.ellipse(capsule.x, reflectY, capsule.width * 0.4, 10, 0, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+    ctx.globalAlpha = 1;
+
+    // Draw celebration particles
+    for (let p of celebrationParticles) {
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rotation);
+      ctx.globalAlpha = p.life;
+      ctx.fillStyle = p.color;
+      ctx.fillRect(-p.size / 2, -p.size / 4, p.size, p.size / 2);
+      ctx.restore();
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  function handleInput(e) {
+    if (gameState !== 'playing') return;
+
+    if (claw.state === 'idle') {
+      // Move claw
+      if (e.code === 'ArrowLeft' || e.code === 'KeyA') {
+        claw.targetX = Math.max(60, claw.targetX - 180);
+        playSound('move');
+      } else if (e.code === 'ArrowRight' || e.code === 'KeyD') {
+        claw.targetX = Math.min(W - 60, claw.targetX + 180);
+        playSound('move');
+      } else if (e.code === 'Space' || e.code === 'Enter') {
+        // Drop claw
+        claw.state = 'dropping';
+        playSound('drop');
+        e.preventDefault();
+      }
+    }
+  }
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 4: GAME LOOP - DO NOT MODIFY                                      ║
+  // ║  Standard loop with responsive scaling and DPR support.                    ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  let lastTime = performance.now();
+
+  function gameLoop(now) {
+    const dt = Math.min((now - lastTime) / 1000, 0.05); // Cap at 50ms
+    lastTime = now;
+
+    // Apply transform for logical coordinate system
+    ctx.setTransform(scale * dpr, 0, 0, scale * dpr, 0, 0);
+
+    if (gameState === 'playing') {
+      updateGame(dt);
+      drawGame();
+    } else {
+      drawGame(); // Draw game state behind overlay
+      drawEndScreen(dt);
+    }
+
+    // Reset transform for next frame
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+    requestAnimationFrame(gameLoop);
+  }
+
+  // Input handlers
+  document.addEventListener('keydown', (e) => {
+    if (gameState === 'ended' && (e.code === 'KeyR')) {
+      // Restart game
+      gameState = 'playing';
+      gameResult = null;
+      gameExplanation = '';
+      confettiParticles = [];
+      initGame();
+      return;
+    }
+    handleInput(e);
+  });
+
+  document.addEventListener('keyup', (e) => {
+    // Optional: handle key release in your handleInput
+  });
+
+  // Canvas click handler for end screen buttons
+  canvas.addEventListener('click', (e) => {
+    if (gameState !== 'ended') return;
+
+    const { x, y } = screenToLogical(e.clientX, e.clientY);
+
+    if (gameResult) {
+      // Correct answer: check both buttons
+      if (pointInRect(x, y, restartButton)) {
+        gameState = 'playing';
+        gameResult = null;
+        gameExplanation = '';
+        confettiParticles = [];
+        initGame();
+        return;
+      }
+      if (pointInRect(x, y, nextButton)) {
+        // Notify parent to go to next question
+        if (window.parent && window.parent !== window) {
+          window.parent.postMessage({ type: 'quiz-next' }, '*');
+        }
+        return;
+      }
+    } else {
+      // Wrong answer: check centered restart button
+      const centeredRestart = { x: W / 2 - 75, y: H / 2 + 60, w: 150, h: 48 };
+      if (pointInRect(x, y, centeredRestart)) {
+        gameState = 'playing';
+        gameResult = null;
+        gameExplanation = '';
+        confettiParticles = [];
+        initGame();
+        return;
+      }
+    }
+  });
+
+  // Handle resize
+  window.addEventListener('resize', resizeCanvas);
+
+  // Initialize
+  resizeCanvas();
+  initGame();
+  requestAnimationFrame(gameLoop);
+  </script>
+</body>
+</html>

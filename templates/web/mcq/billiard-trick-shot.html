@@ -1,0 +1,991 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Billiard Trick Shot</title>
+  <!--
+  ╔══════════════════════════════════════════════════════════════════════════════╗
+  ║  GAME FACTORY TEMPLATE                                                        ║
+  ║  This template enforces critical invariants. Follow the section markers.      ║
+  ╚══════════════════════════════════════════════════════════════════════════════╝
+  -->
+  <link href="https://fonts.googleapis.com/css2?family=Belanosima:wght@400;600;700&family=Nunito+Sans:wght@400;500;600;700&family=Nunito:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    /* ═══════════════════════════════════════════════════════════════════════════
+       BASE STYLES - Can be extended, not removed
+       ═══════════════════════════════════════════════════════════════════════════ */
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+    }
+    body {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      background: #1a1a2e;
+      font-family: 'Nunito Sans', system-ui, -apple-system, sans-serif;
+    }
+    #gameCanvas {
+      background: #16213e;
+      border-radius: 8px;
+      display: block;
+    }
+  </style>
+</head>
+<body>
+  <!-- ═══════════════════════════════════════════════════════════════════════════
+       CANVAS - Sized dynamically to fill available space
+       ═══════════════════════════════════════════════════════════════════════════ -->
+  <canvas id="gameCanvas"></canvas>
+
+  <script>
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 1: QUESTION PLACEHOLDER - DO NOT MODIFY FORMAT                    ║
+  // ║  Platform replaces this at runtime. Use these exact 60-char answers.       ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  const QUESTION = {
+    type: "mcq",
+    prompt: "Sample question text",
+    choices: [
+      { text: "This is sample answer A which is long enough to test text overflow", is_correct: true, explanation: "Why A is correct" },
+      { text: "This is sample answer B which is long enough to test text overflow", is_correct: false, explanation: "Why B is wrong" },
+      { text: "This is sample answer C which is long enough to test text overflow", is_correct: false, explanation: "Why C is wrong" },
+      { text: "This is sample answer D which is long enough to test text overflow", is_correct: false, explanation: "Why D is wrong" }
+    ],
+    isLastQuestion: false
+  };
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 2: ENGINE CORE - DO NOT MODIFY                                    ║
+  // ║  Standard engine interface and end screen. This is sacred.                 ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  const canvas = document.getElementById('gameCanvas');
+  const ctx = canvas.getContext('2d');
+
+  // Logical dimensions (game code works in this coordinate space)
+  const W = 720, H = 540;
+
+  // Scaling state (computed on resize)
+  let scale = 1;
+  let dpr = 1;
+
+  let gameState = 'playing'; // 'playing' | 'ended'
+  let gameResult = null;     // true (correct) | false (wrong)
+  let gameExplanation = '';
+  let endScreenTime = 0;
+  let confettiParticles = [];
+
+  // End screen button bounds (logical coordinates)
+  const restartButton = { x: W / 2 - 170, y: H / 2 + 60, w: 150, h: 48 };
+  const nextButton = { x: W / 2 + 20, y: H / 2 + 60, w: 150, h: 48 };
+
+  /** Check if point is inside rectangle */
+  function pointInRect(px, py, rect) {
+    return px >= rect.x && px <= rect.x + rect.w &&
+           py >= rect.y && py <= rect.y + rect.h;
+  }
+
+  /** Draw a styled button */
+  function drawButton(rect, label, color, pulse) {
+    const p = pulse ? 1 + Math.sin(endScreenTime * 4) * 0.03 : 1;
+    ctx.save();
+    ctx.translate(rect.x + rect.w / 2, rect.y + rect.h / 2);
+    ctx.scale(p, p);
+    ctx.translate(-(rect.x + rect.w / 2), -(rect.y + rect.h / 2));
+
+    // Button background
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.roundRect(rect.x, rect.y, rect.w, rect.h, 12);
+    ctx.fill();
+
+    // Button text
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = 'bold 18px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, rect.x + rect.w / 2, rect.y + rect.h / 2);
+
+    ctx.restore();
+  }
+
+  /**
+   * Resize canvas to fill available space with proper DPR scaling.
+   * Maintains logical coordinate system (720×540).
+   */
+  function resizeCanvas() {
+    dpr = window.devicePixelRatio || 1;
+
+    // Get available space
+    const availW = window.innerWidth;
+    const availH = window.innerHeight;
+
+    // Calculate scale to fit logical space (720×540) in available space
+    const scaleX = availW / W;
+    const scaleY = availH / H;
+    scale = Math.min(scaleX, scaleY);
+
+    // Physical canvas buffer (DPR-scaled for crisp rendering)
+    canvas.width = W * scale * dpr;
+    canvas.height = H * scale * dpr;
+
+    // CSS display size
+    canvas.style.width = (W * scale) + 'px';
+    canvas.style.height = (H * scale) + 'px';
+  }
+
+  /**
+   * Convert screen coordinates to logical coordinates.
+   * Use this for mouse/click events to get positions in 720×540 space.
+   */
+  function screenToLogical(screenX, screenY) {
+    const rect = canvas.getBoundingClientRect();
+    return {
+      x: (screenX - rect.left) * (W / rect.width),
+      y: (screenY - rect.top) * (H / rect.height)
+    };
+  }
+
+  const engine = {
+    /** Call this to end the game. DO NOT draw your own end screen. */
+    end(isCorrect, explanation) {
+      if (gameState === 'ended') return;
+      gameState = 'ended';
+      gameResult = isCorrect;
+      gameExplanation = explanation || '';
+      endScreenTime = 0;
+
+      // Spawn confetti for correct answers
+      if (isCorrect) {
+        for (let i = 0; i < 50; i++) {
+          confettiParticles.push({
+            x: W / 2,
+            y: H / 2,
+            vx: (Math.random() - 0.5) * 600,
+            vy: -Math.random() * 400 - 100,
+            size: 4 + Math.random() * 6,
+            color: ['#FFD700', '#FF6B6B', '#4ECDC4', '#95E1D3', '#F38181'][Math.floor(Math.random() * 5)],
+            rotation: Math.random() * Math.PI * 2,
+            rotationSpeed: (Math.random() - 0.5) * 10
+          });
+        }
+      }
+
+      // Notify parent frame
+      if (window.parent && window.parent !== window) {
+        window.parent.postMessage({
+          type: 'quiz-end',
+          isCorrect: isCorrect,
+          explanation: explanation || ''
+        }, '*');
+      }
+    }
+  };
+
+  /** STANDARD END SCREEN - DO NOT MODIFY */
+  function drawEndScreen(dt) {
+    endScreenTime += dt;
+
+    // Update confetti
+    confettiParticles = confettiParticles.filter(p => {
+      p.vy += 800 * dt; // gravity
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.rotation += p.rotationSpeed * dt;
+      p.vx *= 0.99;
+      return p.y < H + 50;
+    });
+
+    // Dark overlay
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
+    ctx.fillRect(0, 0, W, H);
+
+    // Draw confetti
+    confettiParticles.forEach(p => {
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rotation);
+      ctx.fillStyle = p.color;
+      ctx.fillRect(-p.size / 2, -p.size / 4, p.size, p.size / 2);
+      ctx.restore();
+    });
+
+    // Result emoji
+    ctx.font = '72px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(gameResult ? '🎉' : '😢', W / 2, H / 2 - 50);
+
+    // Result text
+    ctx.fillStyle = gameResult ? '#4ADE80' : '#F87171';
+    ctx.font = 'bold 36px system-ui, sans-serif';
+    ctx.fillText(gameResult ? 'Correct!' : 'Wrong!', W / 2, H / 2 + 20);
+
+    // Buttons
+    if (gameResult) {
+      // Correct: show both Restart and Next/Finish
+      drawButton(restartButton, 'Restart', '#E87A3E', true);
+      const nextLabel = QUESTION.isLastQuestion ? 'Finish' : 'Next';
+      drawButton(nextButton, nextLabel, '#4ECDC4', true);
+    } else {
+      // Wrong: show only centered Restart button
+      const centeredRestart = { x: W / 2 - 75, y: H / 2 + 60, w: 150, h: 48 };
+      drawButton(centeredRestart, 'Restart', '#E87A3E', true);
+    }
+  }
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 3: YOUR GAME CODE - IMPLEMENT THESE FUNCTIONS                     ║
+  // ║  This is where your game logic goes. See requirements below.               ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+
+  // Colors
+  const COLORS = {
+    tableGreen: '#1B5E20',
+    tableBorder: '#5D4037',
+    cushion: '#2E7D32',
+    cueBall: '#FAFAF7',
+    cueStick: '#8D6E63',
+    pocket: '#1a1a2e',
+    red: '#E85D4A',
+    blue: '#4ECDC4',
+    green: '#6BBF59',
+    yellow: '#F5A742',
+    text: '#2B2B28',
+    textLight: '#FAFAF7'
+  };
+
+  // Table dimensions - smaller to leave room for answer panel
+  const TABLE = {
+    x: 60,
+    y: 20,
+    width: 600,
+    height: 320,
+    cushionWidth: 18,
+    pocketRadius: 16
+  };
+
+  // Ball properties
+  const BALL_RADIUS = 14;
+  const FRICTION = 0.985;
+  const MIN_VELOCITY = 5;
+  const MAX_POWER = 800;
+
+  // Game state
+  let cueBall = { x: 0, y: 0, vx: 0, vy: 0 };
+  let targetBalls = [];
+  let cueStick = { angle: 0, power: 0, visible: true };
+  let isDragging = false;
+  let dragStart = { x: 0, y: 0 };
+  let isPullingBack = false;
+  let pullbackStart = { x: 0, y: 0 };
+  let shotFired = false;
+  let animationTime = 0;
+  let ballParticles = [];
+  let hitBall = null;
+  let hitAnimTime = 0;
+
+  // Answer labels
+  const answerLabels = ['A', 'B', 'C', 'D'];
+  const ballColors = [COLORS.red, COLORS.blue, COLORS.green, COLORS.yellow];
+
+  function initGame() {
+    animationTime = 0;
+    shotFired = false;
+    hitBall = null;
+    hitAnimTime = 0;
+    ballParticles = [];
+
+    // Position cue ball in bottom left area
+    cueBall = {
+      x: TABLE.x + TABLE.cushionWidth + 80,
+      y: TABLE.y + TABLE.height - TABLE.cushionWidth - 60,
+      vx: 0,
+      vy: 0
+    };
+
+    // Position target balls strategically around the table
+    const positions = [
+      { x: TABLE.x + TABLE.width - TABLE.cushionWidth - 60, y: TABLE.y + TABLE.cushionWidth + 50 },  // Top right
+      { x: TABLE.x + TABLE.cushionWidth + 60, y: TABLE.y + TABLE.cushionWidth + 50 },               // Top left
+      { x: TABLE.x + TABLE.width / 2 + 60, y: TABLE.y + TABLE.height / 2 - 20 },                    // Center-right
+      { x: TABLE.x + TABLE.width - TABLE.cushionWidth - 80, y: TABLE.y + TABLE.height - TABLE.cushionWidth - 60 } // Bottom right
+    ];
+
+    targetBalls = QUESTION.choices.map((choice, i) => ({
+      x: positions[i].x,
+      y: positions[i].y,
+      vx: 0,
+      vy: 0,
+      color: ballColors[i],
+      label: answerLabels[i],
+      choice: choice,
+      hit: false,
+      entranceDelay: i * 0.1
+    }));
+
+    cueStick = { angle: -Math.PI / 4, power: 0, visible: true };
+    isDragging = false;
+    isPullingBack = false;
+  }
+
+  function updateGame(dt) {
+    if (gameState !== 'playing') return;
+
+    animationTime += dt;
+
+    // Update hit animation
+    if (hitBall) {
+      hitAnimTime += dt;
+      if (hitAnimTime > 0.5) {
+        // End game after hit animation
+        engine.end(hitBall.choice.is_correct, hitBall.choice.explanation);
+        return;
+      }
+    }
+
+    // Update particles
+    ballParticles = ballParticles.filter(p => {
+      p.life -= dt;
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.vy += 200 * dt;
+      return p.life > 0;
+    });
+
+    if (!shotFired) return;
+
+    // Update cue ball physics
+    cueBall.x += cueBall.vx * dt;
+    cueBall.y += cueBall.vy * dt;
+    cueBall.vx *= FRICTION;
+    cueBall.vy *= FRICTION;
+
+    // Update target balls physics
+    targetBalls.forEach(ball => {
+      ball.x += ball.vx * dt;
+      ball.y += ball.vy * dt;
+      ball.vx *= FRICTION;
+      ball.vy *= FRICTION;
+    });
+
+    // Cushion collisions for cue ball
+    const playLeft = TABLE.x + TABLE.cushionWidth + BALL_RADIUS;
+    const playRight = TABLE.x + TABLE.width - TABLE.cushionWidth - BALL_RADIUS;
+    const playTop = TABLE.y + TABLE.cushionWidth + BALL_RADIUS;
+    const playBottom = TABLE.y + TABLE.height - TABLE.cushionWidth - BALL_RADIUS;
+
+    if (cueBall.x < playLeft) {
+      cueBall.x = playLeft;
+      cueBall.vx = -cueBall.vx * 0.85;
+      spawnCushionParticles(playLeft, cueBall.y);
+      playSound('cushion');
+    }
+    if (cueBall.x > playRight) {
+      cueBall.x = playRight;
+      cueBall.vx = -cueBall.vx * 0.85;
+      spawnCushionParticles(playRight, cueBall.y);
+      playSound('cushion');
+    }
+    if (cueBall.y < playTop) {
+      cueBall.y = playTop;
+      cueBall.vy = -cueBall.vy * 0.85;
+      spawnCushionParticles(cueBall.x, playTop);
+      playSound('cushion');
+    }
+    if (cueBall.y > playBottom) {
+      cueBall.y = playBottom;
+      cueBall.vy = -cueBall.vy * 0.85;
+      spawnCushionParticles(cueBall.x, playBottom);
+      playSound('cushion');
+    }
+
+    // Cushion collisions for target balls
+    targetBalls.forEach(ball => {
+      if (ball.x < playLeft) {
+        ball.x = playLeft;
+        ball.vx = -ball.vx * 0.85;
+      }
+      if (ball.x > playRight) {
+        ball.x = playRight;
+        ball.vx = -ball.vx * 0.85;
+      }
+      if (ball.y < playTop) {
+        ball.y = playTop;
+        ball.vy = -ball.vy * 0.85;
+      }
+      if (ball.y > playBottom) {
+        ball.y = playBottom;
+        ball.vy = -ball.vy * 0.85;
+      }
+    });
+
+    // Ball-to-ball collisions
+    if (!hitBall) {
+      targetBalls.forEach(ball => {
+        if (ball.hit) return;
+
+        const dx = ball.x - cueBall.x;
+        const dy = ball.y - cueBall.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+
+        if (dist < BALL_RADIUS * 2) {
+          // Collision detected!
+          ball.hit = true;
+          hitBall = ball;
+          hitAnimTime = 0;
+          playSound('hit');
+
+          // Spawn hit particles
+          for (let i = 0; i < 15; i++) {
+            ballParticles.push({
+              x: ball.x,
+              y: ball.y,
+              vx: (Math.random() - 0.5) * 200,
+              vy: (Math.random() - 0.5) * 200,
+              color: ball.color,
+              size: 3 + Math.random() * 4,
+              life: 0.5 + Math.random() * 0.3
+            });
+          }
+
+          // Physics response
+          const nx = dx / dist;
+          const ny = dy / dist;
+          const dvx = cueBall.vx - ball.vx;
+          const dvy = cueBall.vy - ball.vy;
+          const dvn = dvx * nx + dvy * ny;
+
+          cueBall.vx -= dvn * nx;
+          cueBall.vy -= dvn * ny;
+          ball.vx += dvn * nx;
+          ball.vy += dvn * ny;
+
+          // Separate balls
+          const overlap = BALL_RADIUS * 2 - dist;
+          cueBall.x -= overlap * nx / 2;
+          cueBall.y -= overlap * ny / 2;
+          ball.x += overlap * nx / 2;
+          ball.y += overlap * ny / 2;
+        }
+      });
+    }
+
+    // Check if balls stopped moving (reset shot if no hit)
+    const cueSpeed = Math.sqrt(cueBall.vx * cueBall.vx + cueBall.vy * cueBall.vy);
+    if (cueSpeed < MIN_VELOCITY && !hitBall) {
+      cueBall.vx = 0;
+      cueBall.vy = 0;
+      shotFired = false;
+      cueStick.visible = true;
+    }
+  }
+
+  function spawnCushionParticles(x, y) {
+    for (let i = 0; i < 5; i++) {
+      ballParticles.push({
+        x: x,
+        y: y,
+        vx: (Math.random() - 0.5) * 100,
+        vy: (Math.random() - 0.5) * 100,
+        color: COLORS.cushion,
+        size: 2 + Math.random() * 3,
+        life: 0.3 + Math.random() * 0.2
+      });
+    }
+  }
+
+  function drawGame() {
+    // Background
+    ctx.fillStyle = '#1a1a2e';
+    ctx.fillRect(0, 0, W, H);
+
+    // Table outer border (wood frame)
+    ctx.fillStyle = COLORS.tableBorder;
+    ctx.beginPath();
+    ctx.roundRect(TABLE.x - 10, TABLE.y - 10, TABLE.width + 20, TABLE.height + 20, 8);
+    ctx.fill();
+
+    // Table felt
+    ctx.fillStyle = COLORS.tableGreen;
+    ctx.fillRect(TABLE.x, TABLE.y, TABLE.width, TABLE.height);
+
+    // Cushions
+    ctx.fillStyle = COLORS.cushion;
+    // Top cushion
+    ctx.fillRect(TABLE.x + TABLE.pocketRadius + 5, TABLE.y, TABLE.width / 2 - TABLE.pocketRadius * 2 - 5, TABLE.cushionWidth);
+    ctx.fillRect(TABLE.x + TABLE.width / 2 + TABLE.pocketRadius, TABLE.y, TABLE.width / 2 - TABLE.pocketRadius * 2 - 5, TABLE.cushionWidth);
+    // Bottom cushion
+    ctx.fillRect(TABLE.x + TABLE.pocketRadius + 5, TABLE.y + TABLE.height - TABLE.cushionWidth, TABLE.width / 2 - TABLE.pocketRadius * 2 - 5, TABLE.cushionWidth);
+    ctx.fillRect(TABLE.x + TABLE.width / 2 + TABLE.pocketRadius, TABLE.y + TABLE.height - TABLE.cushionWidth, TABLE.width / 2 - TABLE.pocketRadius * 2 - 5, TABLE.cushionWidth);
+    // Left cushion
+    ctx.fillRect(TABLE.x, TABLE.y + TABLE.pocketRadius + 5, TABLE.cushionWidth, TABLE.height - TABLE.pocketRadius * 2 - 10);
+    // Right cushion
+    ctx.fillRect(TABLE.x + TABLE.width - TABLE.cushionWidth, TABLE.y + TABLE.pocketRadius + 5, TABLE.cushionWidth, TABLE.height - TABLE.pocketRadius * 2 - 10);
+
+    // Pockets
+    const pockets = [
+      { x: TABLE.x, y: TABLE.y },
+      { x: TABLE.x + TABLE.width / 2, y: TABLE.y },
+      { x: TABLE.x + TABLE.width, y: TABLE.y },
+      { x: TABLE.x, y: TABLE.y + TABLE.height },
+      { x: TABLE.x + TABLE.width / 2, y: TABLE.y + TABLE.height },
+      { x: TABLE.x + TABLE.width, y: TABLE.y + TABLE.height }
+    ];
+
+    ctx.fillStyle = COLORS.pocket;
+    pockets.forEach(pocket => {
+      ctx.beginPath();
+      ctx.arc(pocket.x, pocket.y, TABLE.pocketRadius, 0, Math.PI * 2);
+      ctx.fill();
+    });
+
+    // Draw particles
+    ballParticles.forEach(p => {
+      ctx.globalAlpha = p.life * 2;
+      ctx.fillStyle = p.color;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+      ctx.fill();
+    });
+    ctx.globalAlpha = 1;
+
+    // Draw target balls with entrance animation and answer text
+    targetBalls.forEach((ball, index) => {
+      const entranceProgress = Math.min(1, Math.max(0, (animationTime - ball.entranceDelay) / 0.3));
+      const bounceScale = entranceProgress < 1 ?
+        1 + Math.sin(entranceProgress * Math.PI) * 0.3 : 1;
+
+      // Hit animation
+      let hitScale = 1;
+      if (hitBall === ball) {
+        hitScale = 1 + Math.sin(hitAnimTime * 20) * 0.2 * Math.max(0, 1 - hitAnimTime * 2);
+      }
+
+      const finalScale = bounceScale * hitScale * entranceProgress;
+
+      if (entranceProgress > 0) {
+        ctx.save();
+        ctx.translate(ball.x, ball.y);
+        ctx.scale(finalScale, finalScale);
+
+        // Ball shadow
+        ctx.fillStyle = 'rgba(0,0,0,0.3)';
+        ctx.beginPath();
+        ctx.ellipse(3, 3, BALL_RADIUS, BALL_RADIUS * 0.6, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Ball body with gradient
+        const gradient = ctx.createRadialGradient(-4, -4, 0, 0, 0, BALL_RADIUS);
+        gradient.addColorStop(0, lightenColor(ball.color, 40));
+        gradient.addColorStop(0.7, ball.color);
+        gradient.addColorStop(1, darkenColor(ball.color, 30));
+        ctx.fillStyle = gradient;
+        ctx.beginPath();
+        ctx.arc(0, 0, BALL_RADIUS, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Shine
+        ctx.fillStyle = 'rgba(255,255,255,0.4)';
+        ctx.beginPath();
+        ctx.ellipse(-4, -5, 4, 3, -Math.PI / 4, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Ball label
+        ctx.fillStyle = COLORS.textLight;
+        ctx.font = "bold 14px 'Nunito Sans', sans-serif";
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(ball.label, 0, 1);
+
+        ctx.restore();
+      }
+    });
+
+    // Draw cue ball
+    ctx.save();
+    ctx.translate(cueBall.x, cueBall.y);
+
+    // Shadow
+    ctx.fillStyle = 'rgba(0,0,0,0.3)';
+    ctx.beginPath();
+    ctx.ellipse(3, 3, BALL_RADIUS, BALL_RADIUS * 0.6, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Ball with gradient
+    const cueGradient = ctx.createRadialGradient(-4, -4, 0, 0, 0, BALL_RADIUS);
+    cueGradient.addColorStop(0, '#FFFFFF');
+    cueGradient.addColorStop(0.7, COLORS.cueBall);
+    cueGradient.addColorStop(1, '#E0E0E0');
+    ctx.fillStyle = cueGradient;
+    ctx.beginPath();
+    ctx.arc(0, 0, BALL_RADIUS, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Shine
+    ctx.fillStyle = 'rgba(255,255,255,0.6)';
+    ctx.beginPath();
+    ctx.ellipse(-4, -5, 4, 3, -Math.PI / 4, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.restore();
+
+    // Draw cue stick when not shot
+    if (cueStick.visible && !shotFired) {
+      const stickLength = 200;
+      const pullback = isPullingBack ? cueStick.power / MAX_POWER * 80 : 0;
+      const startX = cueBall.x - Math.cos(cueStick.angle) * (BALL_RADIUS + 5 + pullback);
+      const startY = cueBall.y - Math.sin(cueStick.angle) * (BALL_RADIUS + 5 + pullback);
+      const endX = startX - Math.cos(cueStick.angle) * stickLength;
+      const endY = startY - Math.sin(cueStick.angle) * stickLength;
+
+      // Cue stick shadow
+      ctx.strokeStyle = 'rgba(0,0,0,0.3)';
+      ctx.lineWidth = 10;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(startX + 3, startY + 3);
+      ctx.lineTo(endX + 3, endY + 3);
+      ctx.stroke();
+
+      // Cue stick body
+      const stickGradient = ctx.createLinearGradient(startX, startY, endX, endY);
+      stickGradient.addColorStop(0, '#D7B899');
+      stickGradient.addColorStop(0.1, '#F5E6D3');
+      stickGradient.addColorStop(0.2, COLORS.cueStick);
+      stickGradient.addColorStop(1, '#5D4037');
+
+      ctx.strokeStyle = stickGradient;
+      ctx.lineWidth = 8;
+      ctx.beginPath();
+      ctx.moveTo(startX, startY);
+      ctx.lineTo(endX, endY);
+      ctx.stroke();
+
+      // Aiming line (dotted)
+      if (!isPullingBack) {
+        ctx.setLineDash([5, 5]);
+        ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(cueBall.x, cueBall.y);
+        ctx.lineTo(cueBall.x + Math.cos(cueStick.angle) * 150, cueBall.y + Math.sin(cueStick.angle) * 150);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
+
+      // Power indicator when pulling back
+      if (isPullingBack) {
+        const powerPercent = cueStick.power / MAX_POWER;
+        const barWidth = 100;
+        const barHeight = 10;
+        const barX = cueBall.x - barWidth / 2;
+        const barY = cueBall.y + 40;
+
+        // Background
+        ctx.fillStyle = 'rgba(0,0,0,0.5)';
+        ctx.beginPath();
+        ctx.roundRect(barX - 2, barY - 2, barWidth + 4, barHeight + 4, 4);
+        ctx.fill();
+
+        // Power fill
+        const powerGradient = ctx.createLinearGradient(barX, barY, barX + barWidth, barY);
+        powerGradient.addColorStop(0, COLORS.green);
+        powerGradient.addColorStop(0.5, COLORS.yellow);
+        powerGradient.addColorStop(1, COLORS.red);
+        ctx.fillStyle = powerGradient;
+        ctx.beginPath();
+        ctx.roundRect(barX, barY, barWidth * powerPercent, barHeight, 3);
+        ctx.fill();
+      }
+    }
+
+    // Draw answer labels below table - 2x2 grid layout
+    const panelTop = TABLE.y + TABLE.height + 25;
+    const panelWidth = 330;
+    const panelHeight = 85;
+    const panelGap = 10;
+    const panelStartX = (W - panelWidth * 2 - panelGap) / 2;
+
+    targetBalls.forEach((ball, index) => {
+      const col = index % 2;
+      const row = Math.floor(index / 2);
+      const panelX = panelStartX + col * (panelWidth + panelGap);
+      const panelY = panelTop + row * (panelHeight + panelGap);
+      const isHit = hitBall === ball;
+
+      // Background for label
+      ctx.fillStyle = isHit ? ball.color : 'rgba(255,255,255,0.1)';
+      ctx.beginPath();
+      ctx.roundRect(panelX, panelY, panelWidth, panelHeight, 8);
+      ctx.fill();
+
+      // Ball color indicator
+      ctx.fillStyle = ball.color;
+      ctx.beginPath();
+      ctx.arc(panelX + 22, panelY + panelHeight / 2, 14, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Label letter
+      ctx.fillStyle = COLORS.textLight;
+      ctx.font = "bold 16px 'Nunito Sans', sans-serif";
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(ball.label, panelX + 22, panelY + panelHeight / 2);
+
+      // Answer text - wrap to fit
+      ctx.fillStyle = isHit ? COLORS.textLight : 'rgba(255,255,255,0.9)';
+      ctx.font = "14px 'Nunito', sans-serif";
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'top';
+
+      const textX = panelX + 50;
+      const textY = panelY + 10;
+      const maxWidth = panelWidth - 60;
+      wrapText(ctx, ball.choice.text, textX, textY, maxWidth, 18);
+    });
+  }
+
+  function wrapText(ctx, text, x, y, maxWidth, lineHeight) {
+    const words = text.split(' ');
+    let line = '';
+    let lineCount = 0;
+    const maxLines = 4;
+
+    for (let i = 0; i < words.length; i++) {
+      const testLine = line + words[i] + ' ';
+      const metrics = ctx.measureText(testLine);
+
+      if (metrics.width > maxWidth && i > 0) {
+        ctx.fillText(line.trim(), x, y + lineCount * lineHeight);
+        line = words[i] + ' ';
+        lineCount++;
+
+        if (lineCount >= maxLines) {
+          return; // Stop drawing after max lines
+        }
+      } else {
+        line = testLine;
+      }
+    }
+    if (lineCount < maxLines) {
+      ctx.fillText(line.trim(), x, y + lineCount * lineHeight);
+    }
+  }
+
+  function lightenColor(color, percent) {
+    const num = parseInt(color.replace('#', ''), 16);
+    const amt = Math.round(2.55 * percent);
+    const R = Math.min(255, (num >> 16) + amt);
+    const G = Math.min(255, ((num >> 8) & 0x00FF) + amt);
+    const B = Math.min(255, (num & 0x0000FF) + amt);
+    return '#' + (0x1000000 + R * 0x10000 + G * 0x100 + B).toString(16).slice(1);
+  }
+
+  function darkenColor(color, percent) {
+    const num = parseInt(color.replace('#', ''), 16);
+    const amt = Math.round(2.55 * percent);
+    const R = Math.max(0, (num >> 16) - amt);
+    const G = Math.max(0, ((num >> 8) & 0x00FF) - amt);
+    const B = Math.max(0, (num & 0x0000FF) - amt);
+    return '#' + (0x1000000 + R * 0x10000 + G * 0x100 + B).toString(16).slice(1);
+  }
+
+  function handleInput(e) {
+    if (gameState !== 'playing') return;
+    // Keyboard input not used - this game uses mouse/drag
+  }
+
+  // Mouse event handlers
+  canvas.addEventListener('mousedown', (e) => {
+    if (gameState !== 'playing' || shotFired) return;
+
+    const pos = screenToLogical(e.clientX, e.clientY);
+    const dx = pos.x - cueBall.x;
+    const dy = pos.y - cueBall.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+
+    if (dist < 100) {
+      // Start aiming/pulling back
+      isPullingBack = true;
+      pullbackStart = { x: pos.x, y: pos.y };
+      cueStick.power = 0;
+    } else {
+      // Adjust aim angle
+      isDragging = true;
+      dragStart = { x: pos.x, y: pos.y };
+      cueStick.angle = Math.atan2(dy, dx);
+    }
+  });
+
+  canvas.addEventListener('mousemove', (e) => {
+    if (gameState !== 'playing') return;
+
+    const pos = screenToLogical(e.clientX, e.clientY);
+
+    if (isDragging) {
+      const dx = pos.x - cueBall.x;
+      const dy = pos.y - cueBall.y;
+      cueStick.angle = Math.atan2(dy, dx);
+    } else if (isPullingBack) {
+      const dx = pullbackStart.x - pos.x;
+      const dy = pullbackStart.y - pos.y;
+      // Calculate pullback in the direction opposite to aim
+      const pullDist = Math.sqrt(dx * dx + dy * dy);
+      cueStick.power = Math.min(MAX_POWER, pullDist * 5);
+    }
+  });
+
+  canvas.addEventListener('mouseup', (e) => {
+    if (gameState !== 'playing') return;
+
+    if (isPullingBack && cueStick.power > 50) {
+      // Fire the shot!
+      cueBall.vx = Math.cos(cueStick.angle) * cueStick.power;
+      cueBall.vy = Math.sin(cueStick.angle) * cueStick.power;
+      shotFired = true;
+      cueStick.visible = false;
+
+      // Play shot sound
+      playSound('click');
+    }
+
+    isDragging = false;
+    isPullingBack = false;
+    cueStick.power = 0;
+  });
+
+  // Sound effects
+  const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+  function playSound(type) {
+    const oscillator = audioCtx.createOscillator();
+    const gainNode = audioCtx.createGain();
+    oscillator.connect(gainNode);
+    gainNode.connect(audioCtx.destination);
+
+    if (type === 'click') {
+      // Shot sound - low thump
+      oscillator.type = 'sine';
+      oscillator.frequency.setValueAtTime(200, audioCtx.currentTime);
+      oscillator.frequency.exponentialRampToValueAtTime(100, audioCtx.currentTime + 0.1);
+      gainNode.gain.setValueAtTime(0.3, audioCtx.currentTime);
+      gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.1);
+      oscillator.start(audioCtx.currentTime);
+      oscillator.stop(audioCtx.currentTime + 0.1);
+    } else if (type === 'hit') {
+      // Ball hit sound - sharp click
+      oscillator.type = 'sine';
+      oscillator.frequency.setValueAtTime(800, audioCtx.currentTime);
+      oscillator.frequency.exponentialRampToValueAtTime(400, audioCtx.currentTime + 0.05);
+      gainNode.gain.setValueAtTime(0.4, audioCtx.currentTime);
+      gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.08);
+      oscillator.start(audioCtx.currentTime);
+      oscillator.stop(audioCtx.currentTime + 0.08);
+    } else if (type === 'cushion') {
+      // Cushion bounce - soft thud
+      oscillator.type = 'sine';
+      oscillator.frequency.setValueAtTime(150, audioCtx.currentTime);
+      oscillator.frequency.exponentialRampToValueAtTime(80, audioCtx.currentTime + 0.05);
+      gainNode.gain.setValueAtTime(0.15, audioCtx.currentTime);
+      gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.05);
+      oscillator.start(audioCtx.currentTime);
+      oscillator.stop(audioCtx.currentTime + 0.05);
+    }
+  }
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 4: GAME LOOP - DO NOT MODIFY                                      ║
+  // ║  Standard loop with responsive scaling and DPR support.                    ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  let lastTime = performance.now();
+
+  function gameLoop(now) {
+    const dt = Math.min((now - lastTime) / 1000, 0.05); // Cap at 50ms
+    lastTime = now;
+
+    // Apply transform for logical coordinate system
+    ctx.setTransform(scale * dpr, 0, 0, scale * dpr, 0, 0);
+
+    if (gameState === 'playing') {
+      updateGame(dt);
+      drawGame();
+    } else {
+      drawGame(); // Draw game state behind overlay
+      drawEndScreen(dt);
+    }
+
+    // Reset transform for next frame
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+    requestAnimationFrame(gameLoop);
+  }
+
+  // Input handlers
+  document.addEventListener('keydown', (e) => {
+    if (gameState === 'ended' && (e.code === 'KeyR')) {
+      // Restart game
+      gameState = 'playing';
+      gameResult = null;
+      gameExplanation = '';
+      confettiParticles = [];
+      initGame();
+      return;
+    }
+    handleInput(e);
+  });
+
+  document.addEventListener('keyup', (e) => {
+    // Optional: handle key release in your handleInput
+  });
+
+  // Canvas click handler for end screen buttons
+  canvas.addEventListener('click', (e) => {
+    if (gameState !== 'ended') return;
+
+    const { x, y } = screenToLogical(e.clientX, e.clientY);
+
+    if (gameResult) {
+      // Correct answer: check both buttons
+      if (pointInRect(x, y, restartButton)) {
+        gameState = 'playing';
+        gameResult = null;
+        gameExplanation = '';
+        confettiParticles = [];
+        initGame();
+        return;
+      }
+      if (pointInRect(x, y, nextButton)) {
+        // Notify parent to go to next question
+        if (window.parent && window.parent !== window) {
+          window.parent.postMessage({ type: 'quiz-next' }, '*');
+        }
+        return;
+      }
+    } else {
+      // Wrong answer: check centered restart button
+      const centeredRestart = { x: W / 2 - 75, y: H / 2 + 60, w: 150, h: 48 };
+      if (pointInRect(x, y, centeredRestart)) {
+        gameState = 'playing';
+        gameResult = null;
+        gameExplanation = '';
+        confettiParticles = [];
+        initGame();
+        return;
+      }
+    }
+  });
+
+  // Handle resize
+  window.addEventListener('resize', resizeCanvas);
+
+  // Initialize
+  resizeCanvas();
+  initGame();
+  requestAnimationFrame(gameLoop);
+  </script>
+</body>
+</html>

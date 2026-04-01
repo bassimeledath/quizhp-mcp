@@ -1,0 +1,1072 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Lantern Eel Reel</title>
+  <!--
+  ╔══════════════════════════════════════════════════════════════════════════════╗
+  ║  GAME FACTORY TEMPLATE                                                        ║
+  ║  This template enforces critical invariants. Follow the section markers.      ║
+  ╚══════════════════════════════════════════════════════════════════════════════╝
+  -->
+  <link href="https://fonts.googleapis.com/css2?family=Belanosima:wght@400;600;700&family=Nunito+Sans:wght@400;500;600;700&family=Nunito:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    /* ═══════════════════════════════════════════════════════════════════════════
+       BASE STYLES - Can be extended, not removed
+       ═══════════════════════════════════════════════════════════════════════════ */
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+    }
+    body {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      background: #1a1a2e;
+      font-family: 'Nunito Sans', system-ui, -apple-system, sans-serif;
+    }
+    #gameCanvas {
+      background: #0a1520;
+      border-radius: 8px;
+      display: block;
+    }
+  </style>
+</head>
+<body>
+  <!-- ═══════════════════════════════════════════════════════════════════════════
+       CANVAS - Sized dynamically to fill available space
+       ═══════════════════════════════════════════════════════════════════════════ -->
+  <canvas id="gameCanvas"></canvas>
+
+  <script>
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 1: QUESTION PLACEHOLDER - DO NOT MODIFY FORMAT                    ║
+  // ║  Platform replaces this at runtime. Use these exact 60-char answers.       ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  const QUESTION = {
+    type: "mcq",
+    prompt: "Sample question text",
+    choices: [
+      { text: "This is sample answer A which is long enough to test text overflow", is_correct: true, explanation: "Why A is correct" },
+      { text: "This is sample answer B which is long enough to test text overflow", is_correct: false, explanation: "Why B is wrong" },
+      { text: "This is sample answer C which is long enough to test text overflow", is_correct: false, explanation: "Why C is wrong" },
+      { text: "This is sample answer D which is long enough to test text overflow", is_correct: false, explanation: "Why D is wrong" }
+    ],
+    isLastQuestion: false
+  };
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 2: ENGINE CORE - DO NOT MODIFY                                    ║
+  // ║  Standard engine interface and end screen. This is sacred.                 ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  const canvas = document.getElementById('gameCanvas');
+  const ctx = canvas.getContext('2d');
+
+  // Logical dimensions (game code works in this coordinate space)
+  const W = 720, H = 540;
+
+  // Scaling state (computed on resize)
+  let scale = 1;
+  let dpr = 1;
+
+  let gameState = 'playing'; // 'playing' | 'ended'
+  let gameResult = null;     // true (correct) | false (wrong)
+  let gameExplanation = '';
+  let endScreenTime = 0;
+  let confettiParticles = [];
+
+  // End screen button bounds (logical coordinates)
+  const restartButton = { x: W / 2 - 170, y: H / 2 + 60, w: 150, h: 48 };
+  const nextButton = { x: W / 2 + 20, y: H / 2 + 60, w: 150, h: 48 };
+
+  /** Check if point is inside rectangle */
+  function pointInRect(px, py, rect) {
+    return px >= rect.x && px <= rect.x + rect.w &&
+           py >= rect.y && py <= rect.y + rect.h;
+  }
+
+  /** Draw a styled button */
+  function drawButton(rect, label, color, pulse) {
+    const p = pulse ? 1 + Math.sin(endScreenTime * 4) * 0.03 : 1;
+    ctx.save();
+    ctx.translate(rect.x + rect.w / 2, rect.y + rect.h / 2);
+    ctx.scale(p, p);
+    ctx.translate(-(rect.x + rect.w / 2), -(rect.y + rect.h / 2));
+
+    // Button background
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.roundRect(rect.x, rect.y, rect.w, rect.h, 12);
+    ctx.fill();
+
+    // Button text
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = 'bold 18px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, rect.x + rect.w / 2, rect.y + rect.h / 2);
+
+    ctx.restore();
+  }
+
+  /**
+   * Resize canvas to fill available space with proper DPR scaling.
+   * Maintains logical coordinate system (720×540).
+   */
+  function resizeCanvas() {
+    dpr = window.devicePixelRatio || 1;
+
+    // Get available space
+    const availW = window.innerWidth;
+    const availH = window.innerHeight;
+
+    // Calculate scale to fit logical space (720×540) in available space
+    const scaleX = availW / W;
+    const scaleY = availH / H;
+    scale = Math.min(scaleX, scaleY);
+
+    // Physical canvas buffer (DPR-scaled for crisp rendering)
+    canvas.width = W * scale * dpr;
+    canvas.height = H * scale * dpr;
+
+    // CSS display size
+    canvas.style.width = (W * scale) + 'px';
+    canvas.style.height = (H * scale) + 'px';
+  }
+
+  /**
+   * Convert screen coordinates to logical coordinates.
+   * Use this for mouse/click events to get positions in 720×540 space.
+   */
+  function screenToLogical(screenX, screenY) {
+    const rect = canvas.getBoundingClientRect();
+    return {
+      x: (screenX - rect.left) * (W / rect.width),
+      y: (screenY - rect.top) * (H / rect.height)
+    };
+  }
+
+  const engine = {
+    /** Call this to end the game. DO NOT draw your own end screen. */
+    end(isCorrect, explanation) {
+      if (gameState === 'ended') return;
+      gameState = 'ended';
+      gameResult = isCorrect;
+      gameExplanation = explanation || '';
+      endScreenTime = 0;
+
+      // Spawn confetti for correct answers
+      if (isCorrect) {
+        for (let i = 0; i < 50; i++) {
+          confettiParticles.push({
+            x: W / 2,
+            y: H / 2,
+            vx: (Math.random() - 0.5) * 600,
+            vy: -Math.random() * 400 - 100,
+            size: 4 + Math.random() * 6,
+            color: ['#FFD700', '#FF6B6B', '#4ECDC4', '#95E1D3', '#F38181'][Math.floor(Math.random() * 5)],
+            rotation: Math.random() * Math.PI * 2,
+            rotationSpeed: (Math.random() - 0.5) * 10
+          });
+        }
+      }
+
+      // Notify parent frame
+      if (window.parent && window.parent !== window) {
+        window.parent.postMessage({
+          type: 'quiz-end',
+          isCorrect: isCorrect,
+          explanation: explanation || ''
+        }, '*');
+      }
+    }
+  };
+
+  /** STANDARD END SCREEN - DO NOT MODIFY */
+  function drawEndScreen(dt) {
+    endScreenTime += dt;
+
+    // Update confetti
+    confettiParticles = confettiParticles.filter(p => {
+      p.vy += 800 * dt; // gravity
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.rotation += p.rotationSpeed * dt;
+      p.vx *= 0.99;
+      return p.y < H + 50;
+    });
+
+    // Dark overlay
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
+    ctx.fillRect(0, 0, W, H);
+
+    // Draw confetti
+    confettiParticles.forEach(p => {
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rotation);
+      ctx.fillStyle = p.color;
+      ctx.fillRect(-p.size / 2, -p.size / 4, p.size, p.size / 2);
+      ctx.restore();
+    });
+
+    // Result emoji
+    ctx.font = '72px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(gameResult ? '🎉' : '😢', W / 2, H / 2 - 50);
+
+    // Result text
+    ctx.fillStyle = gameResult ? '#4ADE80' : '#F87171';
+    ctx.font = 'bold 36px system-ui, sans-serif';
+    ctx.fillText(gameResult ? 'Correct!' : 'Wrong!', W / 2, H / 2 + 20);
+
+    // Buttons
+    if (gameResult) {
+      // Correct: show both Restart and Next/Finish
+      drawButton(restartButton, 'Restart', '#E87A3E', true);
+      const nextLabel = QUESTION.isLastQuestion ? 'Finish' : 'Next';
+      drawButton(nextButton, nextLabel, '#4ECDC4', true);
+    } else {
+      // Wrong: show only centered Restart button
+      const centeredRestart = { x: W / 2 - 75, y: H / 2 + 60, w: 150, h: 48 };
+      drawButton(centeredRestart, 'Restart', '#E87A3E', true);
+    }
+  }
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 3: YOUR GAME CODE - IMPLEMENT THESE FUNCTIONS                     ║
+  // ║  This is where your game logic goes. See requirements below.               ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+
+  // === GAME STATE ===
+  let fishingLine = { x: 360, targetX: 360, casting: false, depth: 0, maxDepth: 280, reeling: false };
+  let eels = [];
+  let lilyPads = [];
+  let reeds = [];
+  let spores = [];
+  let jars = [];
+  let tonicCloud = null;
+  let frogs = [];
+  let gameTime = 0;
+  let caughtEel = null;
+  let entranceAnim = 0;
+
+  // Audio context for sounds
+  let audioCtx = null;
+
+  function playSound(type) {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+
+    if (type === 'cast') {
+      osc.frequency.setValueAtTime(200, audioCtx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(100, audioCtx.currentTime + 0.2);
+      gain.gain.setValueAtTime(0.15, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.2);
+      osc.start();
+      osc.stop(audioCtx.currentTime + 0.2);
+    } else if (type === 'catch') {
+      osc.frequency.setValueAtTime(300, audioCtx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(600, audioCtx.currentTime + 0.15);
+      gain.gain.setValueAtTime(0.2, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.15);
+      osc.start();
+      osc.stop(audioCtx.currentTime + 0.15);
+    } else if (type === 'correct') {
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(523, audioCtx.currentTime);
+      osc.frequency.setValueAtTime(659, audioCtx.currentTime + 0.1);
+      osc.frequency.setValueAtTime(784, audioCtx.currentTime + 0.2);
+      gain.gain.setValueAtTime(0.2, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.4);
+      osc.start();
+      osc.stop(audioCtx.currentTime + 0.4);
+    } else if (type === 'wrong') {
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(200, audioCtx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(100, audioCtx.currentTime + 0.3);
+      gain.gain.setValueAtTime(0.15, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.3);
+      osc.start();
+      osc.stop(audioCtx.currentTime + 0.3);
+    } else if (type === 'splash') {
+      const noise = audioCtx.createBufferSource();
+      const buffer = audioCtx.createBuffer(1, audioCtx.sampleRate * 0.15, audioCtx.sampleRate);
+      const data = buffer.getChannelData(0);
+      for (let i = 0; i < data.length; i++) {
+        data[i] = (Math.random() * 2 - 1) * (1 - i / data.length);
+      }
+      noise.buffer = buffer;
+      const filter = audioCtx.createBiquadFilter();
+      filter.type = 'lowpass';
+      filter.frequency.value = 800;
+      noise.connect(filter);
+      filter.connect(gain);
+      gain.gain.setValueAtTime(0.2, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.15);
+      noise.start();
+    }
+  }
+
+  function initGame() {
+    fishingLine = { x: 360, targetX: 360, casting: false, depth: 0, maxDepth: 280, reeling: false };
+    gameTime = 0;
+    caughtEel = null;
+    tonicCloud = null;
+    entranceAnim = 0;
+
+    // Create lily pad clusters - 4 zones for 4 eels
+    lilyPads = [];
+    const zones = [
+      { cx: 120, cy: 340 },
+      { cx: 280, cy: 380 },
+      { cx: 440, cy: 360 },
+      { cx: 600, cy: 350 }
+    ];
+
+    zones.forEach((zone, zi) => {
+      for (let i = 0; i < 3; i++) {
+        lilyPads.push({
+          x: zone.cx + (Math.random() - 0.5) * 60,
+          y: zone.cy + (Math.random() - 0.5) * 40,
+          size: 20 + Math.random() * 15,
+          rotation: Math.random() * Math.PI * 2,
+          zone: zi
+        });
+      }
+    });
+
+    // Create eels - each circling a lily cluster
+    eels = QUESTION.choices.map((choice, i) => {
+      const zone = zones[i];
+      return {
+        choice: choice,
+        index: i,
+        cx: zone.cx,
+        cy: zone.cy,
+        angle: (i / 4) * Math.PI * 2,
+        radius: 50 + Math.random() * 20,
+        speed: 0.5 + Math.random() * 0.3,
+        length: 60,
+        segments: [],
+        glowIntensity: 0.5 + Math.random() * 0.5,
+        glowPhase: Math.random() * Math.PI * 2,
+        hue: [180, 140, 200, 160][i] // Different glow colors
+      };
+    });
+
+    // Initialize eel segments
+    eels.forEach(eel => {
+      const startX = eel.cx + Math.cos(eel.angle) * eel.radius;
+      const startY = eel.cy + Math.sin(eel.angle) * eel.radius;
+      for (let i = 0; i < 12; i++) {
+        eel.segments.push({ x: startX, y: startY });
+      }
+    });
+
+    // Create reeds on the edges
+    reeds = [];
+    for (let i = 0; i < 15; i++) {
+      const side = i < 8 ? 0 : 1;
+      reeds.push({
+        x: side === 0 ? 10 + Math.random() * 40 : 670 + Math.random() * 40,
+        y: 250 + Math.random() * 250,
+        height: 60 + Math.random() * 80,
+        sway: Math.random() * Math.PI * 2
+      });
+    }
+
+    // Create floating spores
+    spores = [];
+    for (let i = 0; i < 30; i++) {
+      spores.push({
+        x: Math.random() * W,
+        y: 200 + Math.random() * 300,
+        size: 1 + Math.random() * 2,
+        speed: 10 + Math.random() * 20,
+        drift: Math.random() * Math.PI * 2
+      });
+    }
+
+    // Create flickering jars on the apothecary
+    jars = [];
+    for (let i = 0; i < 6; i++) {
+      jars.push({
+        x: 280 + i * 30,
+        y: 90 + Math.sin(i * 0.8) * 10,
+        hue: [40, 180, 320, 60, 200, 280][i],
+        flicker: Math.random() * Math.PI * 2
+      });
+    }
+
+    // Create frogs (hidden, appear on wrong answer)
+    frogs = [];
+  }
+
+  function updateGame(dt) {
+    if (gameState !== 'playing') return;
+
+    gameTime += dt;
+    entranceAnim = Math.min(1, entranceAnim + dt * 2);
+
+    // Smooth fishing line movement
+    const lineDiff = fishingLine.targetX - fishingLine.x;
+    fishingLine.x += lineDiff * dt * 8;
+
+    // Handle casting
+    if (fishingLine.casting && !fishingLine.reeling) {
+      fishingLine.depth += dt * 300;
+
+      // Check for eel collision while descending
+      const hookX = fishingLine.x;
+      const hookY = 160 + fishingLine.depth;
+
+      for (let eel of eels) {
+        const headX = eel.segments[0].x;
+        const headY = eel.segments[0].y;
+        const dist = Math.hypot(hookX - headX, hookY - headY);
+
+        if (dist < 35) {
+          caughtEel = eel;
+          fishingLine.reeling = true;
+          playSound('catch');
+          break;
+        }
+      }
+
+      if (fishingLine.depth >= fishingLine.maxDepth && !caughtEel) {
+        fishingLine.depth = fishingLine.maxDepth;
+        fishingLine.reeling = true;
+      }
+    }
+
+    // Handle reeling
+    if (fishingLine.reeling) {
+      fishingLine.depth -= dt * 400;
+
+      if (caughtEel) {
+        // Move caught eel with the hook
+        caughtEel.segments[0].x = fishingLine.x;
+        caughtEel.segments[0].y = 160 + fishingLine.depth;
+      }
+
+      if (fishingLine.depth <= 0) {
+        fishingLine.depth = 0;
+        fishingLine.casting = false;
+        fishingLine.reeling = false;
+
+        if (caughtEel) {
+          // Process the caught eel
+          const choice = caughtEel.choice;
+
+          if (choice.is_correct) {
+            playSound('correct');
+          } else {
+            playSound('wrong');
+            // Create tonic cloud
+            tonicCloud = {
+              x: fishingLine.x,
+              y: 250,
+              radius: 0,
+              maxRadius: 100,
+              alpha: 0.8,
+              hue: caughtEel.hue
+            };
+            // Spawn startled frogs
+            for (let i = 0; i < 3; i++) {
+              const nearestReed = reeds[Math.floor(Math.random() * reeds.length)];
+              frogs.push({
+                x: nearestReed.x,
+                y: nearestReed.y,
+                vx: (Math.random() - 0.5) * 200,
+                vy: -200 - Math.random() * 100,
+                life: 1.5
+              });
+            }
+          }
+
+          setTimeout(() => {
+            engine.end(choice.is_correct, choice.explanation);
+          }, choice.is_correct ? 100 : 800);
+        }
+        caughtEel = null;
+      }
+    }
+
+    // Update eels (swimming in circles around lily clusters)
+    eels.forEach(eel => {
+      if (eel === caughtEel) return;
+
+      eel.angle += eel.speed * dt;
+      const headX = eel.cx + Math.cos(eel.angle) * eel.radius;
+      const headY = eel.cy + Math.sin(eel.angle) * eel.radius;
+
+      // Update segments (follow the leader)
+      eel.segments[0].x = headX;
+      eel.segments[0].y = headY;
+
+      for (let i = 1; i < eel.segments.length; i++) {
+        const prev = eel.segments[i - 1];
+        const curr = eel.segments[i];
+        const dx = prev.x - curr.x;
+        const dy = prev.y - curr.y;
+        const dist = Math.hypot(dx, dy);
+        const spacing = 5;
+        if (dist > spacing) {
+          curr.x += (dx / dist) * (dist - spacing);
+          curr.y += (dy / dist) * (dist - spacing);
+        }
+      }
+
+      // Pulsing glow
+      eel.glowIntensity = 0.5 + Math.sin(gameTime * 2 + eel.glowPhase) * 0.3;
+    });
+
+    // Update spores
+    spores.forEach(spore => {
+      spore.drift += dt * 0.5;
+      spore.x += Math.sin(spore.drift) * spore.speed * dt;
+      spore.y -= dt * 5;
+      if (spore.y < 200) spore.y = 500;
+      if (spore.x < 0) spore.x = W;
+      if (spore.x > W) spore.x = 0;
+    });
+
+    // Update tonic cloud
+    if (tonicCloud) {
+      tonicCloud.radius += dt * 150;
+      tonicCloud.alpha -= dt * 0.5;
+      if (tonicCloud.alpha <= 0) tonicCloud = null;
+    }
+
+    // Update frogs
+    frogs.forEach(frog => {
+      frog.vy += 400 * dt;
+      frog.x += frog.vx * dt;
+      frog.y += frog.vy * dt;
+      frog.life -= dt;
+    });
+    frogs = frogs.filter(f => f.life > 0 && f.y < H + 50);
+  }
+
+  function drawGame() {
+    // Night sky gradient
+    const skyGrad = ctx.createLinearGradient(0, 0, 0, H);
+    skyGrad.addColorStop(0, '#0a0f18');
+    skyGrad.addColorStop(0.4, '#0f1a2a');
+    skyGrad.addColorStop(1, '#0a1520');
+    ctx.fillStyle = skyGrad;
+    ctx.fillRect(0, 0, W, H);
+
+    // Stars
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
+    for (let i = 0; i < 30; i++) {
+      const sx = (i * 97) % W;
+      const sy = (i * 43) % 150;
+      ctx.beginPath();
+      ctx.arc(sx, sy, 0.5 + (i % 3) * 0.5, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Apothecary building on stilts
+    drawApothecary();
+
+    // Water
+    const waterGrad = ctx.createLinearGradient(0, 200, 0, H);
+    waterGrad.addColorStop(0, 'rgba(5, 20, 35, 0.9)');
+    waterGrad.addColorStop(1, '#030810');
+    ctx.fillStyle = waterGrad;
+    ctx.fillRect(0, 200, W, H - 200);
+
+    // Water reflections
+    ctx.save();
+    ctx.globalAlpha = 0.15;
+    for (let i = 0; i < 8; i++) {
+      const wy = 220 + i * 40;
+      ctx.strokeStyle = `hsl(200, 60%, ${20 + i * 3}%)`;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      for (let x = 0; x < W; x += 5) {
+        const yOff = Math.sin(x * 0.02 + gameTime * 2 + i) * 3;
+        if (x === 0) ctx.moveTo(x, wy + yOff);
+        else ctx.lineTo(x, wy + yOff);
+      }
+      ctx.stroke();
+    }
+    ctx.restore();
+
+    // Draw reeds (back layer)
+    reeds.forEach(reed => {
+      const sway = Math.sin(gameTime * 1.5 + reed.sway) * 5;
+      ctx.strokeStyle = '#1a3020';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(reed.x, reed.y + 20);
+      ctx.quadraticCurveTo(reed.x + sway, reed.y - reed.height * 0.5, reed.x + sway * 1.5, reed.y - reed.height);
+      ctx.stroke();
+
+      // Reed tip
+      ctx.fillStyle = '#2a4030';
+      ctx.beginPath();
+      ctx.ellipse(reed.x + sway * 1.5, reed.y - reed.height - 5, 3, 8, 0, 0, Math.PI * 2);
+      ctx.fill();
+    });
+
+    // Draw lily pads
+    lilyPads.forEach(pad => {
+      ctx.save();
+      ctx.translate(pad.x, pad.y);
+      ctx.rotate(pad.rotation);
+
+      // Pad shadow
+      ctx.fillStyle = 'rgba(0, 20, 10, 0.5)';
+      ctx.beginPath();
+      ctx.ellipse(3, 3, pad.size, pad.size * 0.6, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Pad
+      ctx.fillStyle = '#1a4030';
+      ctx.beginPath();
+      ctx.ellipse(0, 0, pad.size, pad.size * 0.6, 0, 0.2, Math.PI * 1.8);
+      ctx.fill();
+
+      // Pad highlight
+      ctx.strokeStyle = '#2a6040';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.arc(0, 0, pad.size * 0.7, 0.5, 1.5);
+      ctx.stroke();
+
+      ctx.restore();
+    });
+
+    // Draw tonic cloud if active
+    if (tonicCloud) {
+      const grad = ctx.createRadialGradient(
+        tonicCloud.x, tonicCloud.y, 0,
+        tonicCloud.x, tonicCloud.y, tonicCloud.radius
+      );
+      grad.addColorStop(0, `hsla(${tonicCloud.hue}, 80%, 60%, ${tonicCloud.alpha})`);
+      grad.addColorStop(0.5, `hsla(${tonicCloud.hue}, 70%, 50%, ${tonicCloud.alpha * 0.5})`);
+      grad.addColorStop(1, `hsla(${tonicCloud.hue}, 60%, 40%, 0)`);
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.arc(tonicCloud.x, tonicCloud.y, tonicCloud.radius, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Draw eels with bioluminescent glow
+    eels.forEach(eel => {
+      if (eel === caughtEel) return;
+      drawEel(eel);
+    });
+
+    // Draw caught eel on top
+    if (caughtEel) {
+      drawEel(caughtEel);
+    }
+
+    // Draw frogs
+    frogs.forEach(frog => {
+      ctx.fillStyle = '#3a5a30';
+      ctx.beginPath();
+      ctx.ellipse(frog.x, frog.y, 8, 6, 0, 0, Math.PI * 2);
+      ctx.fill();
+      // Eyes
+      ctx.fillStyle = '#90c060';
+      ctx.beginPath();
+      ctx.arc(frog.x - 4, frog.y - 3, 3, 0, Math.PI * 2);
+      ctx.arc(frog.x + 4, frog.y - 3, 3, 0, Math.PI * 2);
+      ctx.fill();
+    });
+
+    // Draw spores
+    spores.forEach(spore => {
+      ctx.fillStyle = `rgba(200, 255, 200, ${0.3 + Math.sin(gameTime * 3 + spore.drift) * 0.2})`;
+      ctx.beginPath();
+      ctx.arc(spore.x, spore.y, spore.size, 0, Math.PI * 2);
+      ctx.fill();
+    });
+
+    // Draw dock
+    ctx.fillStyle = '#2a1810';
+    ctx.fillRect(320, 140, 80, 25);
+    // Dock planks
+    ctx.strokeStyle = '#1a0f08';
+    ctx.lineWidth = 1;
+    for (let i = 0; i < 4; i++) {
+      ctx.beginPath();
+      ctx.moveTo(320 + i * 20, 140);
+      ctx.lineTo(320 + i * 20, 165);
+      ctx.stroke();
+    }
+    // Dock supports
+    ctx.fillStyle = '#1f1510';
+    ctx.fillRect(330, 165, 8, 50);
+    ctx.fillRect(382, 165, 8, 50);
+
+    // Draw fishing line
+    if (fishingLine.casting || fishingLine.depth > 0) {
+      ctx.strokeStyle = '#888';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(fishingLine.x, 155);
+      ctx.lineTo(fishingLine.x, 160 + fishingLine.depth);
+      ctx.stroke();
+
+      // Hook
+      ctx.strokeStyle = '#aaa';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(fishingLine.x, 165 + fishingLine.depth, 5, 0, Math.PI);
+      ctx.stroke();
+    }
+
+    // Draw fishing rod
+    ctx.strokeStyle = '#4a3020';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(fishingLine.x, 155);
+    ctx.quadraticCurveTo(fishingLine.x - 20, 130, fishingLine.x - 5, 100);
+    ctx.stroke();
+
+    // Rod handle
+    ctx.fillStyle = '#3a2515';
+    ctx.fillRect(fishingLine.x - 8, 145, 6, 15);
+
+    // Position indicator
+    ctx.fillStyle = '#E87A3E';
+    ctx.beginPath();
+    ctx.moveTo(fishingLine.x, 135);
+    ctx.lineTo(fishingLine.x - 8, 125);
+    ctx.lineTo(fishingLine.x + 8, 125);
+    ctx.closePath();
+    ctx.fill();
+
+    // Draw answer labels on eels (using boxes above each eel's area)
+    drawAnswerLabels();
+  }
+
+  function drawApothecary() {
+    // Stilts
+    ctx.fillStyle = '#2a1f15';
+    ctx.fillRect(240, 100, 8, 120);
+    ctx.fillRect(320, 100, 8, 120);
+    ctx.fillRect(400, 100, 8, 120);
+    ctx.fillRect(480, 100, 8, 120);
+
+    // Main building
+    ctx.fillStyle = '#1a1512';
+    ctx.fillRect(235, 40, 250, 65);
+
+    // Roof
+    ctx.fillStyle = '#0f0a08';
+    ctx.beginPath();
+    ctx.moveTo(220, 40);
+    ctx.lineTo(360, 10);
+    ctx.lineTo(500, 40);
+    ctx.closePath();
+    ctx.fill();
+
+    // Window glow
+    ctx.fillStyle = 'rgba(255, 200, 100, 0.3)';
+    ctx.fillRect(260, 55, 25, 20);
+    ctx.fillRect(430, 55, 25, 20);
+
+    // Jars with bioluminescent glow
+    jars.forEach(jar => {
+      const flicker = 0.6 + Math.sin(gameTime * 5 + jar.flicker) * 0.3;
+
+      // Glow
+      const glow = ctx.createRadialGradient(jar.x, jar.y, 0, jar.x, jar.y, 20);
+      glow.addColorStop(0, `hsla(${jar.hue}, 80%, 60%, ${flicker * 0.5})`);
+      glow.addColorStop(1, 'transparent');
+      ctx.fillStyle = glow;
+      ctx.beginPath();
+      ctx.arc(jar.x, jar.y, 20, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Jar
+      ctx.fillStyle = `hsla(${jar.hue}, 70%, 50%, ${flicker})`;
+      ctx.beginPath();
+      ctx.roundRect(jar.x - 6, jar.y - 10, 12, 18, 3);
+      ctx.fill();
+
+      // Jar rim
+      ctx.fillStyle = '#555';
+      ctx.fillRect(jar.x - 5, jar.y - 12, 10, 3);
+    });
+  }
+
+  function drawEel(eel) {
+    const segments = eel.segments;
+    const glow = eel.glowIntensity;
+
+    // Glow effect
+    ctx.save();
+    ctx.shadowColor = `hsla(${eel.hue}, 80%, 60%, ${glow})`;
+    ctx.shadowBlur = 20;
+
+    // Eel body
+    ctx.strokeStyle = `hsla(${eel.hue}, 60%, 40%, 1)`;
+    ctx.lineWidth = 8;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(segments[0].x, segments[0].y);
+    for (let i = 1; i < segments.length; i++) {
+      ctx.lineTo(segments[i].x, segments[i].y);
+    }
+    ctx.stroke();
+
+    // Brighter center line
+    ctx.strokeStyle = `hsla(${eel.hue}, 80%, 60%, ${glow})`;
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.moveTo(segments[0].x, segments[0].y);
+    for (let i = 1; i < segments.length; i++) {
+      ctx.lineTo(segments[i].x, segments[i].y);
+    }
+    ctx.stroke();
+
+    // Head
+    ctx.fillStyle = `hsla(${eel.hue}, 70%, 50%, 1)`;
+    ctx.beginPath();
+    ctx.arc(segments[0].x, segments[0].y, 6, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Eyes
+    ctx.fillStyle = '#fff';
+    const headAngle = Math.atan2(
+      segments[0].y - segments[1].y,
+      segments[0].x - segments[1].x
+    );
+    const eyeX = segments[0].x + Math.cos(headAngle) * 3;
+    const eyeY = segments[0].y + Math.sin(headAngle) * 3;
+    ctx.beginPath();
+    ctx.arc(eyeX + Math.cos(headAngle + 1.2) * 3, eyeY + Math.sin(headAngle + 1.2) * 3, 2, 0, Math.PI * 2);
+    ctx.arc(eyeX + Math.cos(headAngle - 1.2) * 3, eyeY + Math.sin(headAngle - 1.2) * 3, 2, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Jar on back (filled with glowing tonic)
+    const midIdx = Math.floor(segments.length / 2);
+    const jarX = segments[midIdx].x;
+    const jarY = segments[midIdx].y - 12;
+
+    // Jar glow
+    const jarGlow = ctx.createRadialGradient(jarX, jarY, 0, jarX, jarY, 15);
+    jarGlow.addColorStop(0, `hsla(${eel.hue}, 80%, 60%, ${glow * 0.6})`);
+    jarGlow.addColorStop(1, 'transparent');
+    ctx.fillStyle = jarGlow;
+    ctx.beginPath();
+    ctx.arc(jarX, jarY, 15, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Jar container
+    ctx.fillStyle = `hsla(${eel.hue}, 70%, 55%, ${glow})`;
+    ctx.beginPath();
+    ctx.roundRect(jarX - 5, jarY - 8, 10, 14, 2);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    ctx.restore();
+  }
+
+  function drawAnswerLabels() {
+    const zones = [
+      { cx: 120, cy: 280 },
+      { cx: 280, cy: 280 },
+      { cx: 440, cy: 280 },
+      { cx: 600, cy: 280 }
+    ];
+
+    ctx.font = '14px Nunito, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
+
+    QUESTION.choices.forEach((choice, i) => {
+      const zone = zones[i];
+      const eel = eels[i];
+      const boxWidth = 160;
+      const boxX = zone.cx - boxWidth / 2;
+      const boxY = 440;
+
+      // Answer box with glow matching eel
+      const glowIntensity = eel ? eel.glowIntensity : 0.5;
+      ctx.save();
+      ctx.shadowColor = `hsla(${eel ? eel.hue : 180}, 60%, 50%, ${glowIntensity * 0.5})`;
+      ctx.shadowBlur = 10;
+
+      // Background
+      ctx.fillStyle = 'rgba(10, 25, 35, 0.9)';
+      ctx.beginPath();
+      ctx.roundRect(boxX, boxY, boxWidth, 80, 8);
+      ctx.fill();
+
+      // Border with eel color
+      ctx.strokeStyle = `hsla(${eel ? eel.hue : 180}, 60%, 50%, ${glowIntensity})`;
+      ctx.lineWidth = 2;
+      ctx.stroke();
+
+      ctx.restore();
+
+      // Letter label
+      ctx.fillStyle = `hsla(${eel ? eel.hue : 180}, 70%, 60%, 1)`;
+      ctx.font = 'bold 16px Nunito Sans, sans-serif';
+      ctx.fillText(['A', 'B', 'C', 'D'][i], zone.cx, boxY + 5);
+
+      // Answer text - wrap to fit
+      ctx.fillStyle = '#FAFAF7';
+      ctx.font = '14px Nunito, sans-serif';
+      wrapText(choice.text, zone.cx, boxY + 25, boxWidth - 10, 16);
+    });
+  }
+
+  function wrapText(text, x, y, maxWidth, lineHeight) {
+    const words = text.split(' ');
+    let line = '';
+    let testLine = '';
+    let lineCount = 0;
+    const maxLines = 3;
+
+    for (let n = 0; n < words.length; n++) {
+      testLine = line + words[n] + ' ';
+      const metrics = ctx.measureText(testLine);
+
+      if (metrics.width > maxWidth && n > 0) {
+        ctx.fillText(line.trim(), x, y + lineCount * lineHeight);
+        line = words[n] + ' ';
+        lineCount++;
+        if (lineCount >= maxLines) {
+          break;
+        }
+      } else {
+        line = testLine;
+      }
+    }
+
+    if (lineCount < maxLines) {
+      ctx.fillText(line.trim(), x, y + lineCount * lineHeight);
+    }
+  }
+
+  function handleInput(e) {
+    if (gameState !== 'playing') return;
+
+    // Left/right movement
+    if (e.code === 'ArrowLeft' || e.code === 'KeyA') {
+      fishingLine.targetX = Math.max(100, fishingLine.targetX - 30);
+    } else if (e.code === 'ArrowRight' || e.code === 'KeyD') {
+      fishingLine.targetX = Math.min(620, fishingLine.targetX + 30);
+    }
+
+    // Cast/reel
+    if ((e.code === 'Space' || e.code === 'Enter') && !fishingLine.casting) {
+      fishingLine.casting = true;
+      fishingLine.depth = 0;
+      fishingLine.reeling = false;
+      playSound('cast');
+      playSound('splash');
+    }
+  }
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 4: GAME LOOP - DO NOT MODIFY                                      ║
+  // ║  Standard loop with responsive scaling and DPR support.                    ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  let lastTime = performance.now();
+
+  function gameLoop(now) {
+    const dt = Math.min((now - lastTime) / 1000, 0.05); // Cap at 50ms
+    lastTime = now;
+
+    // Apply transform for logical coordinate system
+    ctx.setTransform(scale * dpr, 0, 0, scale * dpr, 0, 0);
+
+    if (gameState === 'playing') {
+      updateGame(dt);
+      drawGame();
+    } else {
+      drawGame(); // Draw game state behind overlay
+      drawEndScreen(dt);
+    }
+
+    // Reset transform for next frame
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+    requestAnimationFrame(gameLoop);
+  }
+
+  // Input handlers
+  document.addEventListener('keydown', (e) => {
+    if (gameState === 'ended' && (e.code === 'KeyR')) {
+      // Restart game
+      gameState = 'playing';
+      gameResult = null;
+      gameExplanation = '';
+      confettiParticles = [];
+      initGame();
+      return;
+    }
+    handleInput(e);
+  });
+
+  document.addEventListener('keyup', (e) => {
+    // Optional: handle key release in your handleInput
+  });
+
+  // Canvas click handler for end screen buttons
+  canvas.addEventListener('click', (e) => {
+    if (gameState !== 'ended') return;
+
+    const { x, y } = screenToLogical(e.clientX, e.clientY);
+
+    if (gameResult) {
+      // Correct answer: check both buttons
+      if (pointInRect(x, y, restartButton)) {
+        gameState = 'playing';
+        gameResult = null;
+        gameExplanation = '';
+        confettiParticles = [];
+        initGame();
+        return;
+      }
+      if (pointInRect(x, y, nextButton)) {
+        // Notify parent to go to next question
+        if (window.parent && window.parent !== window) {
+          window.parent.postMessage({ type: 'quiz-next' }, '*');
+        }
+        return;
+      }
+    } else {
+      // Wrong answer: check centered restart button
+      const centeredRestart = { x: W / 2 - 75, y: H / 2 + 60, w: 150, h: 48 };
+      if (pointInRect(x, y, centeredRestart)) {
+        gameState = 'playing';
+        gameResult = null;
+        gameExplanation = '';
+        confettiParticles = [];
+        initGame();
+        return;
+      }
+    }
+  });
+
+  // Handle resize
+  window.addEventListener('resize', resizeCanvas);
+
+  // Initialize
+  resizeCanvas();
+  initGame();
+  requestAnimationFrame(gameLoop);
+  </script>
+</body>
+</html>

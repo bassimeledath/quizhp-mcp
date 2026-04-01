@@ -1,0 +1,1017 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Flocking Leader</title>
+  <link href="https://fonts.googleapis.com/css2?family=Belanosima:wght@400;600;700&family=Nunito+Sans:wght@400;500;600;700&family=Nunito:wght@400;500;600&display=swap" rel="stylesheet">
+  <!--
+  ╔══════════════════════════════════════════════════════════════════════════════╗
+  ║  GAME FACTORY TEMPLATE                                                        ║
+  ║  This template enforces critical invariants. Follow the section markers.      ║
+  ╚══════════════════════════════════════════════════════════════════════════════╝
+  -->
+  <style>
+    /* ═══════════════════════════════════════════════════════════════════════════
+       BASE STYLES - Can be extended, not removed
+       ═══════════════════════════════════════════════════════════════════════════ */
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+    }
+    body {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      background: #1a1a2e;
+      font-family: 'Nunito Sans', system-ui, -apple-system, sans-serif;
+    }
+    #gameCanvas {
+      background: #FAFAF7;
+      border-radius: 12px;
+      display: block;
+    }
+  </style>
+</head>
+<body>
+  <!-- ═══════════════════════════════════════════════════════════════════════════
+       CANVAS - Sized dynamically to fill available space
+       ═══════════════════════════════════════════════════════════════════════════ -->
+  <canvas id="gameCanvas"></canvas>
+
+  <script>
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 1: QUESTION PLACEHOLDER - DO NOT MODIFY FORMAT                    ║
+  // ║  Platform replaces this at runtime. Use these exact 60-char answers.       ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  const QUESTION = {
+    type: "true_false",
+    prompt: "Sample question text",
+    choices: [
+      { text: "This is sample answer A which is long enough to test text overflow", is_correct: true, explanation: "Why A is correct" },
+      { text: "This is sample answer B which is long enough to test text overflow", is_correct: false, explanation: "Why B is wrong" }
+    ],
+    isLastQuestion: false
+  };
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 2: ENGINE CORE - DO NOT MODIFY                                    ║
+  // ║  Standard engine interface and end screen. This is sacred.                 ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  const canvas = document.getElementById('gameCanvas');
+  const ctx = canvas.getContext('2d');
+
+  // Logical dimensions (game code works in this coordinate space)
+  const W = 720, H = 540;
+
+  // Scaling state (computed on resize)
+  let scale = 1;
+  let dpr = 1;
+
+  let gameState = 'playing'; // 'playing' | 'ended'
+  let gameResult = null;     // true (correct) | false (wrong)
+  let gameExplanation = '';
+  let endScreenTime = 0;
+  let confettiParticles = [];
+
+  // End screen button bounds (logical coordinates)
+  const restartButton = { x: W / 2 - 170, y: H / 2 + 60, w: 150, h: 48 };
+  const nextButton = { x: W / 2 + 20, y: H / 2 + 60, w: 150, h: 48 };
+
+  /** Check if point is inside rectangle */
+  function pointInRect(px, py, rect) {
+    return px >= rect.x && px <= rect.x + rect.w &&
+           py >= rect.y && py <= rect.y + rect.h;
+  }
+
+  /** Draw a styled button */
+  function drawButton(rect, label, color, pulse) {
+    const p = pulse ? 1 + Math.sin(endScreenTime * 4) * 0.03 : 1;
+    ctx.save();
+    ctx.translate(rect.x + rect.w / 2, rect.y + rect.h / 2);
+    ctx.scale(p, p);
+    ctx.translate(-(rect.x + rect.w / 2), -(rect.y + rect.h / 2));
+
+    // Button background
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.roundRect(rect.x, rect.y, rect.w, rect.h, 12);
+    ctx.fill();
+
+    // Button text
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = 'bold 18px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, rect.x + rect.w / 2, rect.y + rect.h / 2);
+
+    ctx.restore();
+  }
+
+  /**
+   * Resize canvas to fill available space with proper DPR scaling.
+   * Maintains logical coordinate system (720×540).
+   */
+  function resizeCanvas() {
+    dpr = window.devicePixelRatio || 1;
+
+    // Get available space
+    const availW = window.innerWidth;
+    const availH = window.innerHeight;
+
+    // Calculate scale to fit logical space (720×540) in available space
+    const scaleX = availW / W;
+    const scaleY = availH / H;
+    scale = Math.min(scaleX, scaleY);
+
+    // Physical canvas buffer (DPR-scaled for crisp rendering)
+    canvas.width = W * scale * dpr;
+    canvas.height = H * scale * dpr;
+
+    // CSS display size
+    canvas.style.width = (W * scale) + 'px';
+    canvas.style.height = (H * scale) + 'px';
+  }
+
+  /**
+   * Convert screen coordinates to logical coordinates.
+   * Use this for mouse/click events to get positions in 720×540 space.
+   */
+  function screenToLogical(screenX, screenY) {
+    const rect = canvas.getBoundingClientRect();
+    return {
+      x: (screenX - rect.left) * (W / rect.width),
+      y: (screenY - rect.top) * (H / rect.height)
+    };
+  }
+
+  const engine = {
+    /** Call this to end the game. DO NOT draw your own end screen. */
+    end(isCorrect, explanation) {
+      if (gameState === 'ended') return;
+      gameState = 'ended';
+      gameResult = isCorrect;
+      gameExplanation = explanation || '';
+      endScreenTime = 0;
+
+      // Spawn confetti for correct answers
+      if (isCorrect) {
+        for (let i = 0; i < 50; i++) {
+          confettiParticles.push({
+            x: W / 2,
+            y: H / 2,
+            vx: (Math.random() - 0.5) * 600,
+            vy: -Math.random() * 400 - 100,
+            size: 4 + Math.random() * 6,
+            color: ['#FFD700', '#FF6B6B', '#4ECDC4', '#95E1D3', '#F38181'][Math.floor(Math.random() * 5)],
+            rotation: Math.random() * Math.PI * 2,
+            rotationSpeed: (Math.random() - 0.5) * 10
+          });
+        }
+      }
+
+      // Notify parent frame
+      if (window.parent && window.parent !== window) {
+        window.parent.postMessage({
+          type: 'quiz-end',
+          isCorrect: isCorrect,
+          explanation: explanation || ''
+        }, '*');
+      }
+    }
+  };
+
+  /** STANDARD END SCREEN - DO NOT MODIFY */
+  function drawEndScreen(dt) {
+    endScreenTime += dt;
+
+    // Update confetti
+    confettiParticles = confettiParticles.filter(p => {
+      p.vy += 800 * dt; // gravity
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.rotation += p.rotationSpeed * dt;
+      p.vx *= 0.99;
+      return p.y < H + 50;
+    });
+
+    // Dark overlay
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
+    ctx.fillRect(0, 0, W, H);
+
+    // Draw confetti
+    confettiParticles.forEach(p => {
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rotation);
+      ctx.fillStyle = p.color;
+      ctx.fillRect(-p.size / 2, -p.size / 4, p.size, p.size / 2);
+      ctx.restore();
+    });
+
+    // Result emoji
+    ctx.font = '72px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(gameResult ? '🎉' : '😢', W / 2, H / 2 - 50);
+
+    // Result text
+    ctx.fillStyle = gameResult ? '#4ADE80' : '#F87171';
+    ctx.font = 'bold 36px system-ui, sans-serif';
+    ctx.fillText(gameResult ? 'Correct!' : 'Wrong!', W / 2, H / 2 + 20);
+
+    // Buttons
+    if (gameResult) {
+      // Correct: show both Restart and Next/Finish
+      drawButton(restartButton, 'Restart', '#E87A3E', true);
+      const nextLabel = QUESTION.isLastQuestion ? 'Finish' : 'Next';
+      drawButton(nextButton, nextLabel, '#4ECDC4', true);
+    } else {
+      // Wrong: show only centered Restart button
+      const centeredRestart = { x: W / 2 - 75, y: H / 2 + 60, w: 150, h: 48 };
+      drawButton(centeredRestart, 'Restart', '#E87A3E', true);
+    }
+  }
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 3: YOUR GAME CODE - IMPLEMENT THESE FUNCTIONS                     ║
+  // ║  This is where your game logic goes. See requirements below.               ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+
+  // === COLORS (QuizHP palette) ===
+  const COLORS = {
+    bgPrimary: '#FAFAF7',
+    bgSurface: '#FFFFFF',
+    textPrimary: '#2B2B28',
+    textSecondary: '#5A5A54',
+    orange: '#E87A3E',
+    orangeHover: '#D66B31',
+    orangeLight: '#FFF4ED',
+    amber: '#F5A742',
+    cyan: '#4ECDC4',
+    cyanHover: '#45B8B0',
+    cyanLight: '#E8F9F8',
+    success: '#6BBF59',
+    error: '#E85D4A',
+    borderSubtle: '#E6E6E0',
+    borderStrong: '#D4D4CC',
+    obstacle: '#6B7280'
+  };
+
+  // === SOUND EFFECTS (Web Audio API) ===
+  let audioCtx = null;
+
+  function initAudio() {
+    if (!audioCtx) {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    }
+  }
+
+  function playSound(type) {
+    if (!audioCtx) return;
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+
+    if (type === 'correct') {
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(523.25, audioCtx.currentTime);
+      osc.frequency.setValueAtTime(659.25, audioCtx.currentTime + 0.1);
+      osc.frequency.setValueAtTime(783.99, audioCtx.currentTime + 0.2);
+      gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
+      gain.gain.exponentialDecayTo && gain.gain.exponentialDecayTo(0.01, audioCtx.currentTime + 0.4);
+      gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
+      gain.gain.linearRampToValueAtTime(0.01, audioCtx.currentTime + 0.4);
+      osc.start(audioCtx.currentTime);
+      osc.stop(audioCtx.currentTime + 0.4);
+    } else if (type === 'wrong') {
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(200, audioCtx.currentTime);
+      osc.frequency.linearRampToValueAtTime(100, audioCtx.currentTime + 0.3);
+      gain.gain.setValueAtTime(0.2, audioCtx.currentTime);
+      gain.gain.linearRampToValueAtTime(0.01, audioCtx.currentTime + 0.3);
+      osc.start(audioCtx.currentTime);
+      osc.stop(audioCtx.currentTime + 0.3);
+    } else if (type === 'tick') {
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(880, audioCtx.currentTime);
+      gain.gain.setValueAtTime(0.15, audioCtx.currentTime);
+      gain.gain.linearRampToValueAtTime(0.01, audioCtx.currentTime + 0.05);
+      osc.start(audioCtx.currentTime);
+      osc.stop(audioCtx.currentTime + 0.05);
+    }
+  }
+
+  // === GAME STATE ===
+  let leader = null;
+  let flock = [];
+  let obstacles = [];
+  let pens = [];
+  let keys = { w: false, a: false, s: false, d: false };
+  let gameTime = 0;
+  let countdownActive = false;
+  let countdownTimer = 0;
+  let selectedPen = -1;
+  let lastCountdownTick = 0;
+  let gameParticles = [];
+  let entranceAnim = 0;
+  let penAnimations = [{ scale: 0, alpha: 0 }, { scale: 0, alpha: 0 }];
+  let boidEntranceDelays = [];
+
+  // Flocking parameters
+  const FLOCK_SIZE = 30;
+  const LEADER_SPEED = 180;
+  const BOID_MAX_SPEED = 150;
+  const SEPARATION_RADIUS = 25;
+  const ALIGNMENT_RADIUS = 60;
+  const COHESION_RADIUS = 80;
+  const LEADER_FOLLOW_RADIUS = 200;
+  const SEPARATION_WEIGHT = 2.5;
+  const ALIGNMENT_WEIGHT = 1.0;
+  const COHESION_WEIGHT = 1.0;
+  const LEADER_WEIGHT = 3.0;
+  const OBSTACLE_AVOID_RADIUS = 60;
+  const OBSTACLE_AVOID_WEIGHT = 4.0;
+
+  function initGame() {
+    initAudio();
+    gameTime = 0;
+    countdownActive = false;
+    countdownTimer = 0;
+    selectedPen = -1;
+    lastCountdownTick = 0;
+    keys = { w: false, a: false, s: false, d: false };
+    gameParticles = [];
+    entranceAnim = 0;
+    penAnimations = [{ scale: 0, alpha: 0 }, { scale: 0, alpha: 0 }];
+    boidEntranceDelays = [];
+
+    // Initialize leader in center
+    leader = {
+      x: W / 2,
+      y: H / 2,
+      vx: 0,
+      vy: 0,
+      angle: 0,
+      size: 16,
+      scale: 0,
+      alpha: 0
+    };
+
+    // Initialize flock around leader
+    flock = [];
+    for (let i = 0; i < FLOCK_SIZE; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const dist = 40 + Math.random() * 80;
+      boidEntranceDelays.push(0.1 + i * 0.02);
+      flock.push({
+        x: leader.x + Math.cos(angle) * dist,
+        y: leader.y + Math.sin(angle) * dist,
+        vx: (Math.random() - 0.5) * 50,
+        vy: (Math.random() - 0.5) * 50,
+        angle: Math.random() * Math.PI * 2,
+        size: 10,
+        scale: 0,
+        alpha: 0
+      });
+    }
+
+    // Create obstacles in the middle area
+    obstacles = [
+      { x: W / 2 - 80, y: 180, radius: 35, scale: 0 },
+      { x: W / 2 + 80, y: 180, radius: 35, scale: 0 },
+      { x: W / 2, y: 300, radius: 40, scale: 0 },
+      { x: W / 2 - 120, y: 380, radius: 30, scale: 0 },
+      { x: W / 2 + 120, y: 380, radius: 30, scale: 0 }
+    ];
+
+    // Create two pens at the bottom - left and right
+    const penY = H - 80;
+    const penWidth = 200;
+    const penHeight = 100;
+    pens = [
+      { x: 40, y: penY - penHeight / 2, w: penWidth, h: penHeight, choice: 0, label: 'LEFT' },
+      { x: W - 40 - penWidth, y: penY - penHeight / 2, w: penWidth, h: penHeight, choice: 1, label: 'RIGHT' }
+    ];
+  }
+
+  function updateGame(dt) {
+    if (gameState !== 'playing') return;
+
+    gameTime += dt;
+    entranceAnim += dt;
+
+    // Entrance animations
+    // Pens entrance
+    for (let i = 0; i < 2; i++) {
+      const delay = i * 0.1;
+      if (entranceAnim > delay && penAnimations[i].scale < 1) {
+        const t = Math.min((entranceAnim - delay) / 0.35, 1);
+        const spring = 1 + Math.sin(t * Math.PI * 2) * 0.15 * (1 - t);
+        penAnimations[i].scale = t * spring;
+        penAnimations[i].alpha = t;
+        if (t >= 1) {
+          penAnimations[i].scale = 1;
+          penAnimations[i].alpha = 1;
+        }
+      }
+    }
+
+    // Obstacle entrance
+    obstacles.forEach((obs, i) => {
+      const delay = 0.2 + i * 0.05;
+      if (entranceAnim > delay && obs.scale < 1) {
+        const t = Math.min((entranceAnim - delay) / 0.3, 1);
+        const spring = 1 + Math.sin(t * Math.PI * 2) * 0.2 * (1 - t);
+        obs.scale = t * spring;
+        if (t >= 1) obs.scale = 1;
+      }
+    });
+
+    // Leader entrance
+    const leaderDelay = 0.05;
+    if (entranceAnim > leaderDelay && leader.scale < 1) {
+      const t = Math.min((entranceAnim - leaderDelay) / 0.4, 1);
+      const spring = 1 + Math.sin(t * Math.PI * 2) * 0.25 * (1 - t);
+      leader.scale = t * spring;
+      leader.alpha = t;
+      if (t >= 1) {
+        leader.scale = 1;
+        leader.alpha = 1;
+      }
+    }
+
+    // Flock entrance
+    flock.forEach((boid, i) => {
+      const delay = boidEntranceDelays[i] || 0.1;
+      if (entranceAnim > delay && boid.scale < 1) {
+        const t = Math.min((entranceAnim - delay) / 0.3, 1);
+        const spring = 1 + Math.sin(t * Math.PI * 2) * 0.2 * (1 - t);
+        boid.scale = t * spring;
+        boid.alpha = t;
+        if (t >= 1) {
+          boid.scale = 1;
+          boid.alpha = 1;
+        }
+      }
+    });
+
+    // Update particles
+    gameParticles = gameParticles.filter(p => {
+      p.vy += 400 * dt;
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.rotation += p.rotationSpeed * dt;
+      p.alpha -= dt * 0.8;
+      return p.alpha > 0 && p.y < H + 50;
+    });
+
+    // Update leader based on input
+    let ax = 0, ay = 0;
+    if (keys.a) ax -= 1;
+    if (keys.d) ax += 1;
+    if (keys.w) ay -= 1;
+    if (keys.s) ay += 1;
+
+    // Normalize diagonal movement
+    if (ax !== 0 && ay !== 0) {
+      const mag = Math.sqrt(ax * ax + ay * ay);
+      ax /= mag;
+      ay /= mag;
+    }
+
+    // Apply acceleration with some drag
+    leader.vx += ax * LEADER_SPEED * 3 * dt;
+    leader.vy += ay * LEADER_SPEED * 3 * dt;
+    leader.vx *= 0.92;
+    leader.vy *= 0.92;
+
+    // Cap leader speed
+    const leaderSpeed = Math.sqrt(leader.vx * leader.vx + leader.vy * leader.vy);
+    if (leaderSpeed > LEADER_SPEED) {
+      leader.vx = (leader.vx / leaderSpeed) * LEADER_SPEED;
+      leader.vy = (leader.vy / leaderSpeed) * LEADER_SPEED;
+    }
+
+    // Update leader position
+    leader.x += leader.vx * dt;
+    leader.y += leader.vy * dt;
+
+    // Keep leader in bounds
+    leader.x = Math.max(20, Math.min(W - 20, leader.x));
+    leader.y = Math.max(20, Math.min(H - 20, leader.y));
+
+    // Update leader angle
+    if (leaderSpeed > 5) {
+      leader.angle = Math.atan2(leader.vy, leader.vx);
+    }
+
+    // Avoid obstacles for leader
+    for (const obs of obstacles) {
+      const dx = leader.x - obs.x;
+      const dy = leader.y - obs.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      const minDist = obs.radius + leader.size;
+      if (dist < minDist) {
+        const push = (minDist - dist);
+        leader.x += (dx / dist) * push;
+        leader.y += (dy / dist) * push;
+      }
+    }
+
+    // Update flock
+    for (const boid of flock) {
+      let sepX = 0, sepY = 0, sepCount = 0;
+      let alignX = 0, alignY = 0, alignCount = 0;
+      let cohX = 0, cohY = 0, cohCount = 0;
+
+      // Calculate flocking forces
+      for (const other of flock) {
+        if (other === boid) continue;
+        const dx = other.x - boid.x;
+        const dy = other.y - boid.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+
+        // Separation
+        if (dist < SEPARATION_RADIUS && dist > 0) {
+          sepX -= dx / dist;
+          sepY -= dy / dist;
+          sepCount++;
+        }
+
+        // Alignment
+        if (dist < ALIGNMENT_RADIUS) {
+          alignX += other.vx;
+          alignY += other.vy;
+          alignCount++;
+        }
+
+        // Cohesion
+        if (dist < COHESION_RADIUS) {
+          cohX += other.x;
+          cohY += other.y;
+          cohCount++;
+        }
+      }
+
+      // Apply separation
+      if (sepCount > 0) {
+        boid.vx += sepX * SEPARATION_WEIGHT;
+        boid.vy += sepY * SEPARATION_WEIGHT;
+      }
+
+      // Apply alignment
+      if (alignCount > 0) {
+        alignX /= alignCount;
+        alignY /= alignCount;
+        boid.vx += (alignX - boid.vx) * ALIGNMENT_WEIGHT * dt;
+        boid.vy += (alignY - boid.vy) * ALIGNMENT_WEIGHT * dt;
+      }
+
+      // Apply cohesion
+      if (cohCount > 0) {
+        cohX /= cohCount;
+        cohY /= cohCount;
+        boid.vx += (cohX - boid.x) * COHESION_WEIGHT * dt;
+        boid.vy += (cohY - boid.y) * COHESION_WEIGHT * dt;
+      }
+
+      // Follow leader
+      const ldx = leader.x - boid.x;
+      const ldy = leader.y - boid.y;
+      const ldist = Math.sqrt(ldx * ldx + ldy * ldy);
+      if (ldist < LEADER_FOLLOW_RADIUS && ldist > 0) {
+        const followStrength = (1 - ldist / LEADER_FOLLOW_RADIUS) * LEADER_WEIGHT;
+        boid.vx += (ldx / ldist) * followStrength * 60 * dt;
+        boid.vy += (ldy / ldist) * followStrength * 60 * dt;
+      } else if (ldist >= LEADER_FOLLOW_RADIUS) {
+        // Strongly pull towards leader if too far
+        boid.vx += (ldx / ldist) * LEADER_WEIGHT * 80 * dt;
+        boid.vy += (ldy / ldist) * LEADER_WEIGHT * 80 * dt;
+      }
+
+      // Avoid obstacles
+      for (const obs of obstacles) {
+        const odx = boid.x - obs.x;
+        const ody = boid.y - obs.y;
+        const odist = Math.sqrt(odx * odx + ody * ody);
+        if (odist < obs.radius + OBSTACLE_AVOID_RADIUS && odist > 0) {
+          const avoidStrength = (1 - (odist - obs.radius) / OBSTACLE_AVOID_RADIUS) * OBSTACLE_AVOID_WEIGHT;
+          boid.vx += (odx / odist) * avoidStrength * 100 * dt;
+          boid.vy += (ody / odist) * avoidStrength * 100 * dt;
+        }
+        // Hard collision
+        const minDist = obs.radius + boid.size;
+        if (odist < minDist) {
+          const push = minDist - odist;
+          boid.x += (odx / odist) * push;
+          boid.y += (ody / odist) * push;
+        }
+      }
+
+      // Cap boid speed
+      const boidSpeed = Math.sqrt(boid.vx * boid.vx + boid.vy * boid.vy);
+      if (boidSpeed > BOID_MAX_SPEED) {
+        boid.vx = (boid.vx / boidSpeed) * BOID_MAX_SPEED;
+        boid.vy = (boid.vy / boidSpeed) * BOID_MAX_SPEED;
+      }
+
+      // Update position
+      boid.x += boid.vx * dt;
+      boid.y += boid.vy * dt;
+
+      // Keep in bounds with soft bounce
+      if (boid.x < 15) { boid.x = 15; boid.vx = Math.abs(boid.vx) * 0.5; }
+      if (boid.x > W - 15) { boid.x = W - 15; boid.vx = -Math.abs(boid.vx) * 0.5; }
+      if (boid.y < 15) { boid.y = 15; boid.vy = Math.abs(boid.vy) * 0.5; }
+      if (boid.y > H - 15) { boid.y = H - 15; boid.vy = -Math.abs(boid.vy) * 0.5; }
+
+      // Update angle
+      if (boidSpeed > 3) {
+        boid.angle = Math.atan2(boid.vy, boid.vx);
+      }
+    }
+
+    // Check if leader is in a pen - start countdown
+    let leaderInPen = -1;
+    for (let i = 0; i < pens.length; i++) {
+      const pen = pens[i];
+      if (leader.x >= pen.x && leader.x <= pen.x + pen.w &&
+          leader.y >= pen.y && leader.y <= pen.y + pen.h) {
+        leaderInPen = i;
+        break;
+      }
+    }
+
+    if (leaderInPen >= 0) {
+      if (!countdownActive || selectedPen !== leaderInPen) {
+        countdownActive = true;
+        countdownTimer = 2.0;
+        selectedPen = leaderInPen;
+        lastCountdownTick = Math.ceil(countdownTimer);
+      } else {
+        countdownTimer -= dt;
+
+        // Play tick sound each second
+        const currentTick = Math.ceil(countdownTimer);
+        if (currentTick > 0 && currentTick < lastCountdownTick) {
+          playSound('tick');
+          lastCountdownTick = currentTick;
+        }
+
+        if (countdownTimer <= 0) {
+          // Count boids in each pen
+          let counts = [0, 0];
+          for (const boid of flock) {
+            for (let i = 0; i < pens.length; i++) {
+              const pen = pens[i];
+              if (boid.x >= pen.x && boid.x <= pen.x + pen.w &&
+                  boid.y >= pen.y && boid.y <= pen.y + pen.h) {
+                counts[i]++;
+                break;
+              }
+            }
+          }
+
+          // Determine which pen has majority
+          const chosenPen = counts[0] > counts[1] ? 0 : (counts[1] > counts[0] ? 1 : selectedPen);
+          const choice = QUESTION.choices[chosenPen];
+
+          // Play sound and spawn confetti for correct
+          if (choice.is_correct) {
+            playSound('correct');
+            spawnGameConfetti(pens[chosenPen].x + pens[chosenPen].w / 2, pens[chosenPen].y + pens[chosenPen].h / 2);
+          } else {
+            playSound('wrong');
+          }
+
+          engine.end(choice.is_correct, choice.explanation);
+        }
+      }
+    } else {
+      countdownActive = false;
+      selectedPen = -1;
+    }
+  }
+
+  function spawnGameConfetti(x, y) {
+    const colors = [COLORS.orange, COLORS.amber, COLORS.cyan, COLORS.success];
+    for (let i = 0; i < 25; i++) {
+      gameParticles.push({
+        x,
+        y,
+        vx: (Math.random() - 0.5) * 350,
+        vy: -Math.random() * 250 - 80,
+        size: 4 + Math.random() * 5,
+        color: colors[Math.floor(Math.random() * colors.length)],
+        rotation: Math.random() * Math.PI * 2,
+        rotationSpeed: (Math.random() - 0.5) * 8,
+        alpha: 1
+      });
+    }
+  }
+
+  function drawGame() {
+    // Clear canvas with background
+    ctx.fillStyle = COLORS.bgPrimary;
+    ctx.fillRect(0, 0, W, H);
+
+    // Draw pens with entrance animation
+    for (let i = 0; i < pens.length; i++) {
+      const pen = pens[i];
+      const isSelected = selectedPen === i;
+      const anim = penAnimations[i];
+
+      ctx.save();
+      ctx.globalAlpha = anim.alpha;
+      const centerX = pen.x + pen.w / 2;
+      const centerY = pen.y + pen.h / 2;
+      ctx.translate(centerX, centerY);
+      ctx.scale(anim.scale, anim.scale);
+      ctx.translate(-centerX, -centerY);
+
+      // Pen background
+      ctx.fillStyle = isSelected ? COLORS.cyanLight : COLORS.orangeLight;
+      ctx.beginPath();
+      ctx.roundRect(pen.x, pen.y, pen.w, pen.h, 12);
+      ctx.fill();
+
+      // Pen border
+      ctx.strokeStyle = isSelected ? COLORS.cyan : COLORS.orange;
+      ctx.lineWidth = isSelected ? 4 : 2;
+      ctx.stroke();
+
+      // Answer text - wrap to fit
+      ctx.fillStyle = COLORS.textPrimary;
+      ctx.font = "400 14px 'Nunito', sans-serif";
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'top';
+
+      const text = QUESTION.choices[i].text;
+      const maxWidth = pen.w - 16;
+      const words = text.split(' ');
+      let lines = [];
+      let currentLine = '';
+
+      for (const word of words) {
+        const testLine = currentLine ? currentLine + ' ' + word : word;
+        if (ctx.measureText(testLine).width <= maxWidth) {
+          currentLine = testLine;
+        } else {
+          if (currentLine) lines.push(currentLine);
+          currentLine = word;
+        }
+      }
+      if (currentLine) lines.push(currentLine);
+
+      const lineHeight = 17;
+      const startY = pen.y + 10;
+      for (let j = 0; j < lines.length; j++) {
+        ctx.fillText(lines[j], pen.x + pen.w / 2, startY + j * lineHeight);
+      }
+
+      ctx.restore();
+    }
+
+    // Draw obstacles with entrance animation
+    for (const obs of obstacles) {
+      if (obs.scale <= 0) continue;
+      ctx.save();
+      ctx.translate(obs.x, obs.y);
+      ctx.scale(obs.scale, obs.scale);
+
+      // Soft shadow
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.1)';
+      ctx.beginPath();
+      ctx.arc(3, 4, obs.radius, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.fillStyle = COLORS.obstacle;
+      ctx.beginPath();
+      ctx.arc(0, 0, obs.radius, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Highlight
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.25)';
+      ctx.beginPath();
+      ctx.arc(-obs.radius * 0.3, -obs.radius * 0.3, obs.radius * 0.4, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.restore();
+    }
+
+    // Draw flock
+    for (const boid of flock) {
+      if (boid.alpha > 0) {
+        drawBoid(boid, COLORS.cyan, COLORS.cyanHover);
+      }
+    }
+
+    // Draw leader
+    if (leader.alpha > 0) {
+      drawBoid(leader, COLORS.orange, COLORS.orangeHover);
+    }
+
+    // Draw game particles (confetti)
+    for (const p of gameParticles) {
+      ctx.save();
+      ctx.globalAlpha = p.alpha;
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rotation);
+      ctx.fillStyle = p.color;
+      ctx.fillRect(-p.size / 2, -p.size / 4, p.size, p.size / 2);
+      ctx.restore();
+    }
+
+    // Draw countdown if active
+    if (countdownActive && selectedPen >= 0) {
+      // Background pill
+      ctx.fillStyle = 'rgba(43, 43, 40, 0.85)';
+      ctx.beginPath();
+      ctx.roundRect(W / 2 - 100, 30, 200, 90, 16);
+      ctx.fill();
+
+      ctx.fillStyle = COLORS.bgPrimary;
+      ctx.font = "700 48px 'Belanosima', sans-serif";
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(Math.ceil(countdownTimer).toString(), W / 2, 65);
+
+      ctx.fillStyle = COLORS.borderSubtle;
+      ctx.font = "500 16px 'Nunito Sans', sans-serif";
+      ctx.fillText('Hold position...', W / 2, 105);
+    }
+
+    // Draw boid count near pens
+    let counts = [0, 0];
+    for (const boid of flock) {
+      for (let i = 0; i < pens.length; i++) {
+        const pen = pens[i];
+        if (boid.x >= pen.x && boid.x <= pen.x + pen.w &&
+            boid.y >= pen.y && boid.y <= pen.y + pen.h) {
+          counts[i]++;
+          break;
+        }
+      }
+    }
+
+    ctx.font = "600 20px 'Nunito Sans', sans-serif";
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'bottom';
+    for (let i = 0; i < pens.length; i++) {
+      const pen = pens[i];
+      const anim = penAnimations[i];
+      ctx.globalAlpha = anim.alpha;
+      ctx.fillStyle = counts[i] > FLOCK_SIZE / 2 ? COLORS.success : COLORS.textPrimary;
+      ctx.fillText(`${counts[i]}/${FLOCK_SIZE}`, pen.x + pen.w / 2, pen.y - 8);
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  function drawBoid(boid, fillColor, strokeColor) {
+    ctx.save();
+    ctx.globalAlpha = boid.alpha !== undefined ? boid.alpha : 1;
+    ctx.translate(boid.x, boid.y);
+    ctx.rotate(boid.angle);
+    const s = boid.scale !== undefined ? boid.scale : 1;
+    ctx.scale(s, s);
+
+    // Soft shadow
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.1)';
+    ctx.beginPath();
+    ctx.moveTo(boid.size + 2, 2);
+    ctx.lineTo(-boid.size * 0.6 + 2, -boid.size * 0.5 + 2);
+    ctx.lineTo(-boid.size * 0.4 + 2, 2);
+    ctx.lineTo(-boid.size * 0.6 + 2, boid.size * 0.5 + 2);
+    ctx.closePath();
+    ctx.fill();
+
+    // Triangle shape pointing right
+    ctx.beginPath();
+    ctx.moveTo(boid.size, 0);
+    ctx.lineTo(-boid.size * 0.6, -boid.size * 0.5);
+    ctx.lineTo(-boid.size * 0.4, 0);
+    ctx.lineTo(-boid.size * 0.6, boid.size * 0.5);
+    ctx.closePath();
+
+    ctx.fillStyle = fillColor;
+    ctx.fill();
+    ctx.strokeStyle = strokeColor;
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    ctx.restore();
+  }
+
+  function handleInput(e) {
+    if (gameState !== 'playing') return;
+
+    const key = e.key.toLowerCase();
+    const isDown = e.type === 'keydown';
+
+    if (key === 'w' || key === 'arrowup') keys.w = isDown;
+    if (key === 'a' || key === 'arrowleft') keys.a = isDown;
+    if (key === 's' || key === 'arrowdown') keys.s = isDown;
+    if (key === 'd' || key === 'arrowright') keys.d = isDown;
+
+    if (['w', 'a', 's', 'd', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright'].includes(key)) {
+      e.preventDefault();
+    }
+  }
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 4: GAME LOOP - DO NOT MODIFY                                      ║
+  // ║  Standard loop with responsive scaling and DPR support.                    ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  let lastTime = performance.now();
+
+  function gameLoop(now) {
+    const dt = Math.min((now - lastTime) / 1000, 0.05); // Cap at 50ms
+    lastTime = now;
+
+    // Apply transform for logical coordinate system
+    ctx.setTransform(scale * dpr, 0, 0, scale * dpr, 0, 0);
+
+    if (gameState === 'playing') {
+      updateGame(dt);
+      drawGame();
+    } else {
+      drawGame(); // Draw game state behind overlay
+      drawEndScreen(dt);
+    }
+
+    // Reset transform for next frame
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+    requestAnimationFrame(gameLoop);
+  }
+
+  // Input handlers
+  document.addEventListener('keydown', (e) => {
+    if (gameState === 'ended' && (e.code === 'KeyR')) {
+      // Restart game
+      gameState = 'playing';
+      gameResult = null;
+      gameExplanation = '';
+      confettiParticles = [];
+      initGame();
+      return;
+    }
+    handleInput(e);
+  });
+
+  document.addEventListener('keyup', (e) => {
+    // Handle key release
+    handleInput(e);
+  });
+
+  // Canvas click handler for end screen buttons
+  canvas.addEventListener('click', (e) => {
+    if (gameState !== 'ended') return;
+
+    const { x, y } = screenToLogical(e.clientX, e.clientY);
+
+    if (gameResult) {
+      // Correct answer: check both buttons
+      if (pointInRect(x, y, restartButton)) {
+        gameState = 'playing';
+        gameResult = null;
+        gameExplanation = '';
+        confettiParticles = [];
+        initGame();
+        return;
+      }
+      if (pointInRect(x, y, nextButton)) {
+        // Notify parent to go to next question
+        if (window.parent && window.parent !== window) {
+          window.parent.postMessage({ type: 'quiz-next' }, '*');
+        }
+        return;
+      }
+    } else {
+      // Wrong answer: check centered restart button
+      const centeredRestart = { x: W / 2 - 75, y: H / 2 + 60, w: 150, h: 48 };
+      if (pointInRect(x, y, centeredRestart)) {
+        gameState = 'playing';
+        gameResult = null;
+        gameExplanation = '';
+        confettiParticles = [];
+        initGame();
+        return;
+      }
+    }
+  });
+
+  // Handle resize
+  window.addEventListener('resize', resizeCanvas);
+
+  // Initialize
+  resizeCanvas();
+  initGame();
+  requestAnimationFrame(gameLoop);
+  </script>
+</body>
+</html>

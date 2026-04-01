@@ -1,0 +1,796 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Bifurcation Tap</title>
+  <!--
+  ╔══════════════════════════════════════════════════════════════════════════════╗
+  ║  GAME FACTORY TEMPLATE                                                        ║
+  ║  This template enforces critical invariants. Follow the section markers.      ║
+  ╚══════════════════════════════════════════════════════════════════════════════╝
+  -->
+  <link href="https://fonts.googleapis.com/css2?family=Belanosima:wght@400;600;700&family=Nunito+Sans:wght@400;500;600;700&family=Nunito:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    /* ═══════════════════════════════════════════════════════════════════════════
+       BASE STYLES - Can be extended, not removed
+       ═══════════════════════════════════════════════════════════════════════════ */
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+    }
+    body {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      background: #1a1a2e;
+      font-family: 'Nunito Sans', system-ui, -apple-system, sans-serif;
+    }
+    #gameCanvas {
+      background: #16213e;
+      border-radius: 8px;
+      display: block;
+    }
+  </style>
+</head>
+<body>
+  <!-- ═══════════════════════════════════════════════════════════════════════════
+       CANVAS - Sized dynamically to fill available space
+       ═══════════════════════════════════════════════════════════════════════════ -->
+  <canvas id="gameCanvas"></canvas>
+
+  <script>
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 1: QUESTION PLACEHOLDER - DO NOT MODIFY FORMAT                    ║
+  // ║  Platform replaces this at runtime. Use these exact 60-char answers.       ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  const QUESTION = {
+    type: "true_false",
+    prompt: "Sample question text",
+    choices: [
+      { text: "This is sample answer A which is long enough to test text overflow", is_correct: true, explanation: "Why A is correct" },
+      { text: "This is sample answer B which is long enough to test text overflow", is_correct: false, explanation: "Why B is wrong" }
+    ],
+    isLastQuestion: false
+  };
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 2: ENGINE CORE - DO NOT MODIFY                                    ║
+  // ║  Standard engine interface and end screen. This is sacred.                 ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  const canvas = document.getElementById('gameCanvas');
+  const ctx = canvas.getContext('2d');
+
+  // Logical dimensions (game code works in this coordinate space)
+  const W = 720, H = 540;
+
+  // Scaling state (computed on resize)
+  let scale = 1;
+  let dpr = 1;
+
+  let gameState = 'playing'; // 'playing' | 'ended'
+  let gameResult = null;     // true (correct) | false (wrong)
+  let gameExplanation = '';
+  let endScreenTime = 0;
+  let confettiParticles = [];
+
+  // End screen button bounds (logical coordinates)
+  const restartButton = { x: W / 2 - 170, y: H / 2 + 60, w: 150, h: 48 };
+  const nextButton = { x: W / 2 + 20, y: H / 2 + 60, w: 150, h: 48 };
+
+  /** Check if point is inside rectangle */
+  function pointInRect(px, py, rect) {
+    return px >= rect.x && px <= rect.x + rect.w &&
+           py >= rect.y && py <= rect.y + rect.h;
+  }
+
+  /** Draw a styled button */
+  function drawButton(rect, label, color, pulse) {
+    const p = pulse ? 1 + Math.sin(endScreenTime * 4) * 0.03 : 1;
+    ctx.save();
+    ctx.translate(rect.x + rect.w / 2, rect.y + rect.h / 2);
+    ctx.scale(p, p);
+    ctx.translate(-(rect.x + rect.w / 2), -(rect.y + rect.h / 2));
+
+    // Button background
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.roundRect(rect.x, rect.y, rect.w, rect.h, 12);
+    ctx.fill();
+
+    // Button text
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = 'bold 18px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, rect.x + rect.w / 2, rect.y + rect.h / 2);
+
+    ctx.restore();
+  }
+
+  /**
+   * Resize canvas to fill available space with proper DPR scaling.
+   * Maintains logical coordinate system (720×540).
+   */
+  function resizeCanvas() {
+    dpr = window.devicePixelRatio || 1;
+
+    // Get available space
+    const availW = window.innerWidth;
+    const availH = window.innerHeight;
+
+    // Calculate scale to fit logical space (720×540) in available space
+    const scaleX = availW / W;
+    const scaleY = availH / H;
+    scale = Math.min(scaleX, scaleY);
+
+    // Physical canvas buffer (DPR-scaled for crisp rendering)
+    canvas.width = W * scale * dpr;
+    canvas.height = H * scale * dpr;
+
+    // CSS display size
+    canvas.style.width = (W * scale) + 'px';
+    canvas.style.height = (H * scale) + 'px';
+  }
+
+  /**
+   * Convert screen coordinates to logical coordinates.
+   * Use this for mouse/click events to get positions in 720×540 space.
+   */
+  function screenToLogical(screenX, screenY) {
+    const rect = canvas.getBoundingClientRect();
+    return {
+      x: (screenX - rect.left) * (W / rect.width),
+      y: (screenY - rect.top) * (H / rect.height)
+    };
+  }
+
+  const engine = {
+    /** Call this to end the game. DO NOT draw your own end screen. */
+    end(isCorrect, explanation) {
+      if (gameState === 'ended') return;
+      gameState = 'ended';
+      gameResult = isCorrect;
+      gameExplanation = explanation || '';
+      endScreenTime = 0;
+
+      // Spawn confetti for correct answers
+      if (isCorrect) {
+        for (let i = 0; i < 50; i++) {
+          confettiParticles.push({
+            x: W / 2,
+            y: H / 2,
+            vx: (Math.random() - 0.5) * 600,
+            vy: -Math.random() * 400 - 100,
+            size: 4 + Math.random() * 6,
+            color: ['#FFD700', '#FF6B6B', '#4ECDC4', '#95E1D3', '#F38181'][Math.floor(Math.random() * 5)],
+            rotation: Math.random() * Math.PI * 2,
+            rotationSpeed: (Math.random() - 0.5) * 10
+          });
+        }
+      }
+
+      // Notify parent frame
+      if (window.parent && window.parent !== window) {
+        window.parent.postMessage({
+          type: 'quiz-end',
+          isCorrect: isCorrect,
+          explanation: explanation || ''
+        }, '*');
+      }
+    }
+  };
+
+  /** STANDARD END SCREEN - DO NOT MODIFY */
+  function drawEndScreen(dt) {
+    endScreenTime += dt;
+
+    // Update confetti
+    confettiParticles = confettiParticles.filter(p => {
+      p.vy += 800 * dt; // gravity
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.rotation += p.rotationSpeed * dt;
+      p.vx *= 0.99;
+      return p.y < H + 50;
+    });
+
+    // Dark overlay
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
+    ctx.fillRect(0, 0, W, H);
+
+    // Draw confetti
+    confettiParticles.forEach(p => {
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rotation);
+      ctx.fillStyle = p.color;
+      ctx.fillRect(-p.size / 2, -p.size / 4, p.size, p.size / 2);
+      ctx.restore();
+    });
+
+    // Result emoji
+    ctx.font = '72px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(gameResult ? '🎉' : '😢', W / 2, H / 2 - 50);
+
+    // Result text
+    ctx.fillStyle = gameResult ? '#4ADE80' : '#F87171';
+    ctx.font = 'bold 36px system-ui, sans-serif';
+    ctx.fillText(gameResult ? 'Correct!' : 'Wrong!', W / 2, H / 2 + 20);
+
+    // Buttons
+    if (gameResult) {
+      // Correct: show both Restart and Next/Finish
+      drawButton(restartButton, 'Restart', '#E87A3E', true);
+      const nextLabel = QUESTION.isLastQuestion ? 'Finish' : 'Next';
+      drawButton(nextButton, nextLabel, '#4ECDC4', true);
+    } else {
+      // Wrong: show only centered Restart button
+      const centeredRestart = { x: W / 2 - 75, y: H / 2 + 60, w: 150, h: 48 };
+      drawButton(centeredRestart, 'Restart', '#E87A3E', true);
+    }
+  }
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 3: YOUR GAME CODE - IMPLEMENT THESE FUNCTIONS                     ║
+  // ║  This is where your game logic goes. See requirements below.               ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+
+  // Colors from QuizHP palette
+  const COLORS = {
+    orange: '#E87A3E',
+    amber: '#F5A742',
+    cyan: '#4ECDC4',
+    green: '#6BBF59',
+    red: '#E85D4A',
+    text: '#2B2B28',
+    bg: '#FAFAF7',
+    darkBg: '#16213e'
+  };
+
+  // Audio context for sound effects
+  let audioCtx = null;
+  function playSound(type) {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+
+    if (type === 'correct') {
+      osc.frequency.setValueAtTime(523, audioCtx.currentTime);
+      osc.frequency.setValueAtTime(659, audioCtx.currentTime + 0.1);
+      osc.frequency.setValueAtTime(784, audioCtx.currentTime + 0.2);
+      gain.gain.setValueAtTime(0.2, audioCtx.currentTime);
+      gain.gain.exponentialDecayTo && gain.gain.exponentialDecayTo(0.01, audioCtx.currentTime + 0.4);
+      osc.start();
+      osc.stop(audioCtx.currentTime + 0.4);
+    } else if (type === 'wrong') {
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(200, audioCtx.currentTime);
+      osc.frequency.setValueAtTime(150, audioCtx.currentTime + 0.15);
+      gain.gain.setValueAtTime(0.15, audioCtx.currentTime);
+      gain.gain.linearRampToValueAtTime(0, audioCtx.currentTime + 0.3);
+      osc.start();
+      osc.stop(audioCtx.currentTime + 0.3);
+    } else if (type === 'tick') {
+      osc.frequency.setValueAtTime(880, audioCtx.currentTime);
+      gain.gain.setValueAtTime(0.05, audioCtx.currentTime);
+      gain.gain.linearRampToValueAtTime(0, audioCtx.currentTime + 0.05);
+      osc.start();
+      osc.stop(audioCtx.currentTime + 0.05);
+    }
+  }
+
+  // Game state
+  let controlParam = 0;           // Control parameter (-1 to 1)
+  let curveProgress = 0;          // How far along the curve (0 to 1)
+  let bifurcationPoint = 0.7;     // Where the split happens
+  let branchDirection = 0;        // -1 left, 0 undecided, 1 right
+  let lockTimer = 0;              // Timer after branch locks
+  let selectedAnswer = null;
+  let particles = [];
+  let entranceAnim = 0;
+  let answerBoxes = [];
+  let shakeTimer = 0;
+  let shakeIntensity = 0;
+
+  // Curve parameters
+  const CURVE_START_X = 100;
+  const CURVE_END_X = 620;
+  const CURVE_CENTER_Y = 220;
+  const BRANCH_SPREAD = 100;
+
+  function initGame() {
+    controlParam = 0;
+    curveProgress = 0;
+    bifurcationPoint = 0.7;
+    branchDirection = 0;
+    lockTimer = 0;
+    selectedAnswer = null;
+    particles = [];
+    entranceAnim = 0;
+    shakeTimer = 0;
+    shakeIntensity = 0;
+
+    // Setup answer boxes at the bottom
+    const boxWidth = 320;
+    const boxHeight = 70;
+    const gap = 40;
+    const totalWidth = boxWidth * 2 + gap;
+    const startX = (W - totalWidth) / 2;
+    const boxY = H - 100;
+
+    answerBoxes = QUESTION.choices.map((choice, i) => ({
+      x: startX + i * (boxWidth + gap),
+      y: boxY,
+      w: boxWidth,
+      h: boxHeight,
+      choice: choice,
+      scale: 0,
+      targetScale: 1,
+      direction: i === 0 ? -1 : 1  // Left or right branch
+    }));
+  }
+
+  function updateGame(dt) {
+    if (gameState !== 'playing') return;
+
+    // Entrance animation
+    entranceAnim = Math.min(1, entranceAnim + dt * 2);
+
+    // Update answer box animations
+    answerBoxes.forEach((box, i) => {
+      const delay = i * 0.15;
+      const t = Math.max(0, entranceAnim - delay) / (1 - delay);
+      box.scale = easeOutBack(Math.min(1, t));
+    });
+
+    // Progress the curve automatically
+    if (branchDirection === 0) {
+      curveProgress += dt * 0.15;  // Slow progression
+    } else {
+      curveProgress += dt * 0.3;   // Faster after branch
+      lockTimer += dt;
+    }
+
+    // Check if we've passed bifurcation point without deciding
+    if (curveProgress >= bifurcationPoint && branchDirection === 0) {
+      // Force a branch based on control parameter
+      branchDirection = controlParam >= 0 ? 1 : -1;
+    }
+
+    // Update particles
+    particles = particles.filter(p => {
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.vy += 200 * dt;
+      p.life -= dt;
+      p.rotation += p.rotationSpeed * dt;
+      return p.life > 0;
+    });
+
+    // Update shake
+    if (shakeTimer > 0) {
+      shakeTimer -= dt;
+    }
+
+    // Lock in answer after branch is decided and some time passes
+    if (branchDirection !== 0 && lockTimer > 0.8 && selectedAnswer === null) {
+      const choiceIndex = branchDirection === -1 ? 0 : 1;
+      const choice = QUESTION.choices[choiceIndex];
+      selectedAnswer = choiceIndex;
+
+      if (choice.is_correct) {
+        playSound('correct');
+        spawnCelebrationParticles();
+      } else {
+        playSound('wrong');
+        shakeTimer = 0.3;
+        shakeIntensity = 8;
+      }
+
+      setTimeout(() => {
+        engine.end(choice.is_correct, choice.explanation);
+      }, 600);
+    }
+  }
+
+  function easeOutBack(t) {
+    const c1 = 1.70158;
+    const c3 = c1 + 1;
+    return 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2);
+  }
+
+  function spawnCelebrationParticles() {
+    const colors = [COLORS.orange, COLORS.amber, COLORS.cyan, COLORS.green];
+    for (let i = 0; i < 30; i++) {
+      particles.push({
+        x: W / 2,
+        y: 200,
+        vx: (Math.random() - 0.5) * 400,
+        vy: -Math.random() * 300 - 100,
+        size: 4 + Math.random() * 8,
+        color: colors[Math.floor(Math.random() * colors.length)],
+        life: 1 + Math.random(),
+        rotation: Math.random() * Math.PI * 2,
+        rotationSpeed: (Math.random() - 0.5) * 10
+      });
+    }
+  }
+
+  function drawGame() {
+    // Background
+    ctx.fillStyle = COLORS.bg;
+    ctx.fillRect(0, 0, W, H);
+
+    // Apply shake
+    if (shakeTimer > 0) {
+      ctx.save();
+      const shake = shakeIntensity * (shakeTimer / 0.3);
+      ctx.translate(
+        (Math.random() - 0.5) * shake,
+        (Math.random() - 0.5) * shake
+      );
+    }
+
+    // Draw bifurcation diagram
+    drawBifurcationCurve();
+
+    // Draw control parameter indicator
+    drawControlIndicator();
+
+    // Draw answer boxes
+    drawAnswerBoxes();
+
+    // Draw particles
+    drawParticles();
+
+    if (shakeTimer > 0) {
+      ctx.restore();
+    }
+  }
+
+  function drawBifurcationCurve() {
+    const progressX = CURVE_START_X + curveProgress * (CURVE_END_X - CURVE_START_X);
+    const bifX = CURVE_START_X + bifurcationPoint * (CURVE_END_X - CURVE_START_X);
+
+    ctx.lineWidth = 3;
+    ctx.lineCap = 'round';
+
+    // Draw the main curve up to bifurcation or current progress
+    ctx.strokeStyle = COLORS.text;
+    ctx.beginPath();
+    ctx.moveTo(CURVE_START_X, CURVE_CENTER_Y);
+
+    const mainEndX = Math.min(progressX, bifX);
+    for (let x = CURVE_START_X; x <= mainEndX; x += 2) {
+      const t = (x - CURVE_START_X) / (CURVE_END_X - CURVE_START_X);
+      const wobble = Math.sin(t * 10) * 5 * t;
+      ctx.lineTo(x, CURVE_CENTER_Y + wobble);
+    }
+    ctx.stroke();
+
+    // Draw branch previews (faded)
+    if (curveProgress < bifurcationPoint) {
+      ctx.globalAlpha = 0.2;
+
+      // Left branch preview
+      ctx.strokeStyle = COLORS.cyan;
+      ctx.beginPath();
+      ctx.moveTo(bifX, CURVE_CENTER_Y);
+      for (let x = bifX; x <= CURVE_END_X; x += 2) {
+        const t = (x - bifX) / (CURVE_END_X - bifX);
+        const y = CURVE_CENTER_Y - t * BRANCH_SPREAD;
+        ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+
+      // Right branch preview
+      ctx.strokeStyle = COLORS.orange;
+      ctx.beginPath();
+      ctx.moveTo(bifX, CURVE_CENTER_Y);
+      for (let x = bifX; x <= CURVE_END_X; x += 2) {
+        const t = (x - bifX) / (CURVE_END_X - bifX);
+        const y = CURVE_CENTER_Y + t * BRANCH_SPREAD;
+        ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+
+      ctx.globalAlpha = 1;
+    }
+
+    // Draw the chosen branch
+    if (curveProgress >= bifurcationPoint && branchDirection !== 0) {
+      const branchColor = branchDirection === -1 ? COLORS.cyan : COLORS.orange;
+      ctx.strokeStyle = branchColor;
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.moveTo(bifX, CURVE_CENTER_Y);
+
+      for (let x = bifX; x <= progressX; x += 2) {
+        const t = (x - bifX) / (CURVE_END_X - bifX);
+        const y = CURVE_CENTER_Y + branchDirection * t * BRANCH_SPREAD;
+        ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+    }
+
+    // Draw the moving point
+    let pointY = CURVE_CENTER_Y;
+    if (curveProgress >= bifurcationPoint && branchDirection !== 0) {
+      const t = (curveProgress - bifurcationPoint) / (1 - bifurcationPoint);
+      pointY = CURVE_CENTER_Y + branchDirection * t * BRANCH_SPREAD;
+    } else {
+      const wobble = Math.sin(curveProgress * 10) * 5 * curveProgress;
+      pointY = CURVE_CENTER_Y + wobble;
+    }
+
+    // Glow effect
+    const gradient = ctx.createRadialGradient(progressX, pointY, 0, progressX, pointY, 20);
+    gradient.addColorStop(0, 'rgba(232, 122, 62, 0.6)');
+    gradient.addColorStop(1, 'rgba(232, 122, 62, 0)');
+    ctx.fillStyle = gradient;
+    ctx.beginPath();
+    ctx.arc(progressX, pointY, 20, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Main point
+    ctx.fillStyle = COLORS.orange;
+    ctx.beginPath();
+    ctx.arc(progressX, pointY, 10, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Draw bifurcation point marker
+    ctx.strokeStyle = COLORS.amber;
+    ctx.lineWidth = 2;
+    ctx.setLineDash([5, 5]);
+    ctx.beginPath();
+    ctx.moveTo(bifX, CURVE_CENTER_Y - 60);
+    ctx.lineTo(bifX, CURVE_CENTER_Y + 60);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Label
+    ctx.font = "bold 14px 'Nunito Sans', sans-serif";
+    ctx.fillStyle = COLORS.amber;
+    ctx.textAlign = 'center';
+    ctx.fillText('BIFURCATION', bifX, CURVE_CENTER_Y - 70);
+  }
+
+  function drawControlIndicator() {
+    const indicatorY = 350;
+    const indicatorWidth = 300;
+    const indicatorHeight = 20;
+    const indicatorX = (W - indicatorWidth) / 2;
+
+    // Background track
+    ctx.fillStyle = '#E0E0E0';
+    ctx.beginPath();
+    ctx.roundRect(indicatorX, indicatorY, indicatorWidth, indicatorHeight, 10);
+    ctx.fill();
+
+    // Center marker
+    ctx.fillStyle = COLORS.text;
+    ctx.fillRect(W / 2 - 1, indicatorY - 5, 2, indicatorHeight + 10);
+
+    // Control handle
+    const handleX = W / 2 + controlParam * (indicatorWidth / 2 - 15);
+
+    ctx.fillStyle = COLORS.orange;
+    ctx.beginPath();
+    ctx.arc(handleX, indicatorY + indicatorHeight / 2, 15, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Labels
+    ctx.font = "bold 16px 'Nunito Sans', sans-serif";
+    ctx.textAlign = 'center';
+    ctx.fillStyle = COLORS.cyan;
+    ctx.fillText('LEFT', indicatorX - 30, indicatorY + 15);
+    ctx.fillStyle = COLORS.orange;
+    ctx.fillText('RIGHT', indicatorX + indicatorWidth + 35, indicatorY + 15);
+
+    // Parameter value
+    ctx.font = "600 14px 'Nunito', sans-serif";
+    ctx.fillStyle = COLORS.text;
+    ctx.fillText(`Parameter: ${controlParam.toFixed(2)}`, W / 2, indicatorY + 45);
+  }
+
+  function drawAnswerBoxes() {
+    answerBoxes.forEach((box, i) => {
+      if (box.scale <= 0) return;
+
+      ctx.save();
+      ctx.translate(box.x + box.w / 2, box.y + box.h / 2);
+      ctx.scale(box.scale, box.scale);
+      ctx.translate(-(box.x + box.w / 2), -(box.y + box.h / 2));
+
+      // Highlight if this is the branch direction
+      const isHighlighted = branchDirection === box.direction;
+      const isSelected = selectedAnswer === i;
+
+      // Box shadow
+      ctx.fillStyle = 'rgba(0,0,0,0.1)';
+      ctx.beginPath();
+      ctx.roundRect(box.x + 3, box.y + 3, box.w, box.h, 12);
+      ctx.fill();
+
+      // Box background
+      let bgColor = '#FFFFFF';
+      if (isSelected) {
+        bgColor = box.choice.is_correct ? COLORS.green : COLORS.red;
+      } else if (isHighlighted && branchDirection !== 0) {
+        bgColor = box.direction === -1 ? COLORS.cyan : COLORS.orange;
+      }
+
+      ctx.fillStyle = bgColor;
+      ctx.beginPath();
+      ctx.roundRect(box.x, box.y, box.w, box.h, 12);
+      ctx.fill();
+
+      // Border
+      ctx.strokeStyle = box.direction === -1 ? COLORS.cyan : COLORS.orange;
+      ctx.lineWidth = 3;
+      ctx.stroke();
+
+      // Direction label
+      ctx.font = "bold 14px 'Belanosima', sans-serif";
+      ctx.textAlign = 'center';
+      ctx.fillStyle = isHighlighted ? '#FFFFFF' : (box.direction === -1 ? COLORS.cyan : COLORS.orange);
+      ctx.fillText(box.direction === -1 ? 'LEFT BRANCH' : 'RIGHT BRANCH', box.x + box.w / 2, box.y + 20);
+
+      // Answer text - wrap to fit
+      ctx.font = "500 16px 'Nunito', sans-serif";
+      ctx.fillStyle = isHighlighted || isSelected ? '#FFFFFF' : COLORS.text;
+
+      const maxWidth = box.w - 20;
+      const words = box.choice.text.split(' ');
+      let lines = [];
+      let currentLine = '';
+
+      words.forEach(word => {
+        const testLine = currentLine ? currentLine + ' ' + word : word;
+        if (ctx.measureText(testLine).width <= maxWidth) {
+          currentLine = testLine;
+        } else {
+          if (currentLine) lines.push(currentLine);
+          currentLine = word;
+        }
+      });
+      if (currentLine) lines.push(currentLine);
+
+      // Draw lines
+      const lineHeight = 18;
+      const textStartY = box.y + 38;
+      lines.forEach((line, lineIndex) => {
+        ctx.fillText(line, box.x + box.w / 2, textStartY + lineIndex * lineHeight);
+      });
+
+      ctx.restore();
+    });
+  }
+
+  function drawParticles() {
+    particles.forEach(p => {
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rotation);
+      ctx.globalAlpha = p.life;
+      ctx.fillStyle = p.color;
+      ctx.fillRect(-p.size / 2, -p.size / 4, p.size, p.size / 2);
+      ctx.restore();
+    });
+    ctx.globalAlpha = 1;
+  }
+
+  function handleInput(e) {
+    if (gameState !== 'playing') return;
+    if (branchDirection !== 0) return;  // Can't adjust after branch is locked
+
+    const step = 0.02;  // Tiny increments
+
+    if (e.code === 'KeyA' || e.code === 'ArrowLeft') {
+      controlParam = Math.max(-1, controlParam - step);
+      playSound('tick');
+    } else if (e.code === 'KeyD' || e.code === 'ArrowRight') {
+      controlParam = Math.min(1, controlParam + step);
+      playSound('tick');
+    }
+  }
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 4: GAME LOOP - DO NOT MODIFY                                      ║
+  // ║  Standard loop with responsive scaling and DPR support.                    ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  let lastTime = performance.now();
+
+  function gameLoop(now) {
+    const dt = Math.min((now - lastTime) / 1000, 0.05); // Cap at 50ms
+    lastTime = now;
+
+    // Apply transform for logical coordinate system
+    ctx.setTransform(scale * dpr, 0, 0, scale * dpr, 0, 0);
+
+    if (gameState === 'playing') {
+      updateGame(dt);
+      drawGame();
+    } else {
+      drawGame(); // Draw game state behind overlay
+      drawEndScreen(dt);
+    }
+
+    // Reset transform for next frame
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+    requestAnimationFrame(gameLoop);
+  }
+
+  // Input handlers
+  document.addEventListener('keydown', (e) => {
+    if (gameState === 'ended' && (e.code === 'KeyR')) {
+      // Restart game
+      gameState = 'playing';
+      gameResult = null;
+      gameExplanation = '';
+      confettiParticles = [];
+      initGame();
+      return;
+    }
+    handleInput(e);
+  });
+
+  document.addEventListener('keyup', (e) => {
+    // Optional: handle key release in your handleInput
+  });
+
+  // Canvas click handler for end screen buttons
+  canvas.addEventListener('click', (e) => {
+    if (gameState !== 'ended') return;
+
+    const { x, y } = screenToLogical(e.clientX, e.clientY);
+
+    if (gameResult) {
+      // Correct answer: check both buttons
+      if (pointInRect(x, y, restartButton)) {
+        gameState = 'playing';
+        gameResult = null;
+        gameExplanation = '';
+        confettiParticles = [];
+        initGame();
+        return;
+      }
+      if (pointInRect(x, y, nextButton)) {
+        // Notify parent to go to next question
+        if (window.parent && window.parent !== window) {
+          window.parent.postMessage({ type: 'quiz-next' }, '*');
+        }
+        return;
+      }
+    } else {
+      // Wrong answer: check centered restart button
+      const centeredRestart = { x: W / 2 - 75, y: H / 2 + 60, w: 150, h: 48 };
+      if (pointInRect(x, y, centeredRestart)) {
+        gameState = 'playing';
+        gameResult = null;
+        gameExplanation = '';
+        confettiParticles = [];
+        initGame();
+        return;
+      }
+    }
+  });
+
+  // Handle resize
+  window.addEventListener('resize', resizeCanvas);
+
+  // Initialize
+  resizeCanvas();
+  initGame();
+  requestAnimationFrame(gameLoop);
+  </script>
+</body>
+</html>

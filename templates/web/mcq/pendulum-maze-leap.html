@@ -1,0 +1,1004 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Pendulum Maze Leap</title>
+  <!--
+  ╔══════════════════════════════════════════════════════════════════════════════╗
+  ║  GAME FACTORY TEMPLATE                                                        ║
+  ║  This template enforces critical invariants. Follow the section markers.      ║
+  ╚══════════════════════════════════════════════════════════════════════════════╝
+  -->
+  <link href="https://fonts.googleapis.com/css2?family=Belanosima:wght@400;600;700&family=Nunito+Sans:wght@400;500;600;700&family=Nunito:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    /* ═══════════════════════════════════════════════════════════════════════════
+       BASE STYLES - Can be extended, not removed
+       ═══════════════════════════════════════════════════════════════════════════ */
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+    }
+    body {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      background: #1a1a2e;
+      font-family: 'Nunito Sans', system-ui, -apple-system, sans-serif;
+    }
+    #gameCanvas {
+      background: #16213e;
+      border-radius: 8px;
+      display: block;
+    }
+  </style>
+</head>
+<body>
+  <!-- ═══════════════════════════════════════════════════════════════════════════
+       CANVAS - Sized dynamically to fill available space
+       ═══════════════════════════════════════════════════════════════════════════ -->
+  <canvas id="gameCanvas"></canvas>
+
+  <script>
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 1: QUESTION PLACEHOLDER - DO NOT MODIFY FORMAT                    ║
+  // ║  Platform replaces this at runtime. Use these exact 60-char answers.       ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  const QUESTION = {
+    type: "mcq",
+    prompt: "Sample question text",
+    choices: [
+      { text: "This is sample answer A which is long enough to test text overflow", is_correct: true, explanation: "Why A is correct" },
+      { text: "This is sample answer B which is long enough to test text overflow", is_correct: false, explanation: "Why B is wrong" },
+      { text: "This is sample answer C which is long enough to test text overflow", is_correct: false, explanation: "Why C is wrong" },
+      { text: "This is sample answer D which is long enough to test text overflow", is_correct: false, explanation: "Why D is wrong" }
+    ],
+    isLastQuestion: false
+  };
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 2: ENGINE CORE - DO NOT MODIFY                                    ║
+  // ║  Standard engine interface and end screen. This is sacred.                 ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  const canvas = document.getElementById('gameCanvas');
+  const ctx = canvas.getContext('2d');
+
+  // Logical dimensions (game code works in this coordinate space)
+  const W = 720, H = 540;
+
+  // Scaling state (computed on resize)
+  let scale = 1;
+  let dpr = 1;
+
+  let gameState = 'playing'; // 'playing' | 'ended'
+  let gameResult = null;     // true (correct) | false (wrong)
+  let gameExplanation = '';
+  let endScreenTime = 0;
+  let confettiParticles = [];
+
+  // End screen button bounds (logical coordinates)
+  const restartButton = { x: W / 2 - 170, y: H / 2 + 60, w: 150, h: 48 };
+  const nextButton = { x: W / 2 + 20, y: H / 2 + 60, w: 150, h: 48 };
+
+  /** Check if point is inside rectangle */
+  function pointInRect(px, py, rect) {
+    return px >= rect.x && px <= rect.x + rect.w &&
+           py >= rect.y && py <= rect.y + rect.h;
+  }
+
+  /** Draw a styled button */
+  function drawButton(rect, label, color, pulse) {
+    const p = pulse ? 1 + Math.sin(endScreenTime * 4) * 0.03 : 1;
+    ctx.save();
+    ctx.translate(rect.x + rect.w / 2, rect.y + rect.h / 2);
+    ctx.scale(p, p);
+    ctx.translate(-(rect.x + rect.w / 2), -(rect.y + rect.h / 2));
+
+    // Button background
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.roundRect(rect.x, rect.y, rect.w, rect.h, 12);
+    ctx.fill();
+
+    // Button text
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = 'bold 18px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, rect.x + rect.w / 2, rect.y + rect.h / 2);
+
+    ctx.restore();
+  }
+
+  /**
+   * Resize canvas to fill available space with proper DPR scaling.
+   * Maintains logical coordinate system (720×540).
+   */
+  function resizeCanvas() {
+    dpr = window.devicePixelRatio || 1;
+
+    // Get available space
+    const availW = window.innerWidth;
+    const availH = window.innerHeight;
+
+    // Calculate scale to fit logical space (720×540) in available space
+    const scaleX = availW / W;
+    const scaleY = availH / H;
+    scale = Math.min(scaleX, scaleY);
+
+    // Physical canvas buffer (DPR-scaled for crisp rendering)
+    canvas.width = W * scale * dpr;
+    canvas.height = H * scale * dpr;
+
+    // CSS display size
+    canvas.style.width = (W * scale) + 'px';
+    canvas.style.height = (H * scale) + 'px';
+  }
+
+  /**
+   * Convert screen coordinates to logical coordinates.
+   * Use this for mouse/click events to get positions in 720×540 space.
+   */
+  function screenToLogical(screenX, screenY) {
+    const rect = canvas.getBoundingClientRect();
+    return {
+      x: (screenX - rect.left) * (W / rect.width),
+      y: (screenY - rect.top) * (H / rect.height)
+    };
+  }
+
+  const engine = {
+    /** Call this to end the game. DO NOT draw your own end screen. */
+    end(isCorrect, explanation) {
+      if (gameState === 'ended') return;
+      gameState = 'ended';
+      gameResult = isCorrect;
+      gameExplanation = explanation || '';
+      endScreenTime = 0;
+
+      // Spawn confetti for correct answers
+      if (isCorrect) {
+        for (let i = 0; i < 50; i++) {
+          confettiParticles.push({
+            x: W / 2,
+            y: H / 2,
+            vx: (Math.random() - 0.5) * 600,
+            vy: -Math.random() * 400 - 100,
+            size: 4 + Math.random() * 6,
+            color: ['#FFD700', '#FF6B6B', '#4ECDC4', '#95E1D3', '#F38181'][Math.floor(Math.random() * 5)],
+            rotation: Math.random() * Math.PI * 2,
+            rotationSpeed: (Math.random() - 0.5) * 10
+          });
+        }
+      }
+
+      // Notify parent frame
+      if (window.parent && window.parent !== window) {
+        window.parent.postMessage({
+          type: 'quiz-end',
+          isCorrect: isCorrect,
+          explanation: explanation || ''
+        }, '*');
+      }
+    }
+  };
+
+  /** STANDARD END SCREEN - DO NOT MODIFY */
+  function drawEndScreen(dt) {
+    endScreenTime += dt;
+
+    // Update confetti
+    confettiParticles = confettiParticles.filter(p => {
+      p.vy += 800 * dt; // gravity
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.rotation += p.rotationSpeed * dt;
+      p.vx *= 0.99;
+      return p.y < H + 50;
+    });
+
+    // Dark overlay
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
+    ctx.fillRect(0, 0, W, H);
+
+    // Draw confetti
+    confettiParticles.forEach(p => {
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rotation);
+      ctx.fillStyle = p.color;
+      ctx.fillRect(-p.size / 2, -p.size / 4, p.size, p.size / 2);
+      ctx.restore();
+    });
+
+    // Result emoji
+    ctx.font = '72px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(gameResult ? '🎉' : '😢', W / 2, H / 2 - 50);
+
+    // Result text
+    ctx.fillStyle = gameResult ? '#4ADE80' : '#F87171';
+    ctx.font = 'bold 36px system-ui, sans-serif';
+    ctx.fillText(gameResult ? 'Correct!' : 'Wrong!', W / 2, H / 2 + 20);
+
+    // Buttons
+    if (gameResult) {
+      // Correct: show both Restart and Next/Finish
+      drawButton(restartButton, 'Restart', '#E87A3E', true);
+      const nextLabel = QUESTION.isLastQuestion ? 'Finish' : 'Next';
+      drawButton(nextButton, nextLabel, '#4ECDC4', true);
+    } else {
+      // Wrong: show only centered Restart button
+      const centeredRestart = { x: W / 2 - 75, y: H / 2 + 60, w: 150, h: 48 };
+      drawButton(centeredRestart, 'Restart', '#E87A3E', true);
+    }
+  }
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 3: YOUR GAME CODE - IMPLEMENT THESE FUNCTIONS                     ║
+  // ║  This is where your game logic goes. See requirements below.               ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+
+  // === GAME CONSTANTS ===
+  const GRAVITY = 1200;
+  const JUMP_VELOCITY = -620;
+  const MOVE_SPEED = 200;
+  const PLATFORM_WIDTH = 160;
+  const PLATFORM_HEIGHT = 80;
+  const PENDULUM_LENGTH = 120;
+  const PENDULUM_PERIOD = 2.5;
+
+  // === COLORS (QuizHP Palette + Theme Colors) ===
+  const COLORS = {
+    background: '#2B1810',
+    corridorFloor: '#3D2817',
+    corridorWall: '#5C3D2E',
+    mosaicLight: '#8B6914',
+    mosaicDark: '#6B4E11',
+    torchGlow: '#E85D4A',
+    torchFlame: '#F5A742',
+    pendulumBronze: '#B87333',
+    pendulumDark: '#8B5A2B',
+    platformStone: '#4A4A40',
+    platformLight: '#6B6B5C',
+    platformEngrave: '#2B2B28',
+    player: '#E87A3E',
+    playerDark: '#C65A2E',
+    shadowHorned: '#1A0A0A',
+    gearTooth: '#8B7355',
+    text: '#FAFAF7',
+    textDark: '#2B2B28',
+    correct: '#6BBF59',
+    wrong: '#E85D4A'
+  };
+
+  // === AUDIO ===
+  let audioCtx = null;
+
+  function initAudio() {
+    if (!audioCtx) {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    }
+  }
+
+  function playSound(type) {
+    if (!audioCtx) return;
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+
+    if (type === 'jump') {
+      osc.frequency.setValueAtTime(300, audioCtx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(500, audioCtx.currentTime + 0.1);
+      gain.gain.setValueAtTime(0.15, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.15);
+      osc.start();
+      osc.stop(audioCtx.currentTime + 0.15);
+    } else if (type === 'correct') {
+      osc.frequency.setValueAtTime(523, audioCtx.currentTime);
+      osc.frequency.setValueAtTime(659, audioCtx.currentTime + 0.1);
+      osc.frequency.setValueAtTime(784, audioCtx.currentTime + 0.2);
+      gain.gain.setValueAtTime(0.2, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.4);
+      osc.start();
+      osc.stop(audioCtx.currentTime + 0.4);
+    } else if (type === 'wrong') {
+      osc.frequency.setValueAtTime(200, audioCtx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(100, audioCtx.currentTime + 0.3);
+      osc.type = 'sawtooth';
+      gain.gain.setValueAtTime(0.2, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.3);
+      osc.start();
+      osc.stop(audioCtx.currentTime + 0.3);
+    } else if (type === 'land') {
+      osc.frequency.setValueAtTime(150, audioCtx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(50, audioCtx.currentTime + 0.1);
+      osc.type = 'triangle';
+      gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.1);
+      osc.start();
+      osc.stop(audioCtx.currentTime + 0.1);
+    }
+  }
+
+  // === GAME STATE ===
+  let player = {};
+  let platforms = [];
+  let pendulums = [];
+  let torches = [];
+  let mazeWalls = [];
+  let gearTeeth = [];
+  let hornedShadow = null;
+  let gameTime = 0;
+  let animationTime = 0;
+  let platformsRisen = false;
+  let selectedPlatform = null;
+  let keys = {};
+
+  function initGame() {
+    initAudio();
+    gameTime = 0;
+    animationTime = 0;
+    platformsRisen = false;
+    selectedPlatform = null;
+    gearTeeth = [];
+    hornedShadow = null;
+    keys = {};
+
+    // Player starts at bottom center
+    player = {
+      x: W / 2,
+      y: H - 60,
+      vx: 0,
+      vy: 0,
+      width: 24,
+      height: 36,
+      onGround: true,
+      facing: 1
+    };
+
+    // Create 4 answer platforms (will rise from below)
+    const platformY = H - 200;
+    const platformSpacing = 170;
+    const startX = (W - (platformSpacing * 3)) / 2;
+
+    platforms = QUESTION.choices.map((choice, i) => ({
+      x: startX + i * platformSpacing,
+      y: H + 100, // Start below screen
+      targetY: platformY,
+      width: PLATFORM_WIDTH,
+      height: PLATFORM_HEIGHT,
+      choice: choice,
+      index: i,
+      risen: false,
+      bounceTime: 0,
+      shakeTime: 0
+    }));
+
+    // Create pendulums above platforms
+    pendulums = [
+      { x: W * 0.25, y: 80, angle: 0, phase: 0 },
+      { x: W * 0.5, y: 80, angle: 0, phase: Math.PI * 0.5 },
+      { x: W * 0.75, y: 80, angle: 0, phase: Math.PI }
+    ];
+
+    // Create torches for atmosphere
+    torches = [
+      { x: 30, y: 150 },
+      { x: W - 30, y: 150 },
+      { x: 30, y: 350 },
+      { x: W - 30, y: 350 }
+    ];
+
+    // Create maze wall segments
+    mazeWalls = [];
+    for (let i = 0; i < 8; i++) {
+      mazeWalls.push({
+        x: 80 + Math.random() * (W - 160),
+        y: 120 + Math.random() * 200,
+        width: 40 + Math.random() * 60,
+        height: 8,
+        rotation: Math.random() * Math.PI * 0.5 - Math.PI * 0.25
+      });
+    }
+  }
+
+  function updateGame(dt) {
+    if (gameState !== 'playing') return;
+
+    gameTime += dt;
+    animationTime += dt;
+
+    // Rise platforms after initial delay
+    if (gameTime > 0.5 && !platformsRisen) {
+      platforms.forEach((p, i) => {
+        setTimeout(() => {
+          p.risen = true;
+          p.bounceTime = 0;
+        }, i * 150);
+      });
+      platformsRisen = true;
+    }
+
+    // Animate platform rising with bounce
+    platforms.forEach(p => {
+      if (p.risen && p.y > p.targetY) {
+        p.y -= 300 * dt;
+        if (p.y <= p.targetY) {
+          p.y = p.targetY;
+          p.bounceTime = 0.3;
+        }
+      }
+      if (p.bounceTime > 0) {
+        p.bounceTime -= dt;
+      }
+      if (p.shakeTime > 0) {
+        p.shakeTime -= dt;
+      }
+    });
+
+    // Update pendulums
+    pendulums.forEach(p => {
+      p.angle = Math.sin(gameTime * (2 * Math.PI / PENDULUM_PERIOD) + p.phase) * 0.8;
+    });
+
+    // Player movement
+    if (keys.left) {
+      player.vx = -MOVE_SPEED;
+      player.facing = -1;
+    } else if (keys.right) {
+      player.vx = MOVE_SPEED;
+      player.facing = 1;
+    } else {
+      player.vx *= 0.8;
+    }
+
+    // Apply gravity
+    if (!player.onGround) {
+      player.vy += GRAVITY * dt;
+    }
+
+    // Update position
+    player.x += player.vx * dt;
+    player.y += player.vy * dt;
+
+    // Keep player in bounds
+    player.x = Math.max(player.width / 2, Math.min(W - player.width / 2, player.x));
+
+    // Ground collision
+    const groundY = H - 40;
+    if (player.y + player.height / 2 >= groundY) {
+      player.y = groundY - player.height / 2;
+      if (!player.onGround && player.vy > 100) {
+        playSound('land');
+      }
+      player.vy = 0;
+      player.onGround = true;
+    } else {
+      player.onGround = false;
+    }
+
+    // Platform collision
+    platforms.forEach(p => {
+      if (p.y < H) { // Only if risen
+        const platTop = p.y;
+        const platLeft = p.x - p.width / 2;
+        const platRight = p.x + p.width / 2;
+
+        // Check if player lands on platform
+        if (player.vy > 0 &&
+            player.x > platLeft && player.x < platRight &&
+            player.y + player.height / 2 >= platTop &&
+            player.y + player.height / 2 <= platTop + 20) {
+          player.y = platTop - player.height / 2;
+          player.vy = 0;
+
+          if (!player.onGround) {
+            playSound('land');
+            // Player landed on platform - select this answer
+            if (!selectedPlatform) {
+              selectedPlatform = p;
+              handlePlatformSelection(p);
+            }
+          }
+          player.onGround = true;
+        }
+      }
+    });
+
+    // Update gear teeth falling
+    gearTeeth = gearTeeth.filter(g => {
+      g.vy += 500 * dt;
+      g.y += g.vy * dt;
+      g.x += g.vx * dt;
+      g.rotation += g.rotSpeed * dt;
+      return g.y < H + 50;
+    });
+
+    // Update horned shadow
+    if (hornedShadow) {
+      hornedShadow.x += hornedShadow.vx * dt;
+      if (hornedShadow.x > W + 100) {
+        hornedShadow = null;
+      }
+    }
+  }
+
+  function handlePlatformSelection(platform) {
+    const choice = platform.choice;
+
+    if (choice.is_correct) {
+      playSound('correct');
+      // Short delay then end game
+      setTimeout(() => {
+        engine.end(true, choice.explanation);
+      }, 500);
+    } else {
+      playSound('wrong');
+      platform.shakeTime = 0.5;
+
+      // Spawn horned shadow
+      hornedShadow = {
+        x: -80,
+        y: 200,
+        vx: 400
+      };
+
+      // Spawn falling gear teeth
+      for (let i = 0; i < 15; i++) {
+        gearTeeth.push({
+          x: 100 + Math.random() * (W - 200),
+          y: -20 - Math.random() * 100,
+          vy: 0,
+          vx: (Math.random() - 0.5) * 100,
+          rotation: Math.random() * Math.PI * 2,
+          rotSpeed: (Math.random() - 0.5) * 5,
+          size: 8 + Math.random() * 12
+        });
+      }
+
+      // End game after dramatic pause
+      setTimeout(() => {
+        engine.end(false, choice.explanation);
+      }, 1000);
+    }
+  }
+
+  function drawGame() {
+    // Draw gouache-style background
+    const gradient = ctx.createLinearGradient(0, 0, 0, H);
+    gradient.addColorStop(0, COLORS.background);
+    gradient.addColorStop(1, '#1A0D08');
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, W, H);
+
+    // Draw maze walls in background
+    ctx.save();
+    mazeWalls.forEach(wall => {
+      ctx.save();
+      ctx.translate(wall.x, wall.y);
+      ctx.rotate(wall.rotation + Math.sin(gameTime * 0.5) * 0.05);
+      ctx.fillStyle = COLORS.corridorWall;
+      ctx.fillRect(-wall.width / 2, -wall.height / 2, wall.width, wall.height);
+      ctx.restore();
+    });
+    ctx.restore();
+
+    // Draw mosaic floor pattern
+    drawMosaicFloor();
+
+    // Draw torchlight glow
+    torches.forEach(torch => {
+      drawTorch(torch);
+    });
+
+    // Draw pendulums
+    pendulums.forEach(p => {
+      drawPendulum(p);
+    });
+
+    // Draw platforms with answers
+    platforms.forEach(p => {
+      if (p.y < H + p.height) {
+        drawPlatform(p);
+      }
+    });
+
+    // Draw horned shadow
+    if (hornedShadow) {
+      drawHornedShadow(hornedShadow);
+    }
+
+    // Draw falling gear teeth
+    gearTeeth.forEach(g => {
+      drawGearTooth(g);
+    });
+
+    // Draw player
+    drawPlayer();
+
+    // Draw corridor walls on sides (frame effect)
+    drawCorridorFrame();
+  }
+
+  function drawMosaicFloor() {
+    const tileSize = 30;
+    const floorY = H - 60;
+
+    for (let x = 0; x < W; x += tileSize) {
+      for (let row = 0; row < 2; row++) {
+        const y = floorY + row * tileSize;
+        const isLight = (Math.floor(x / tileSize) + row) % 2 === 0;
+        ctx.fillStyle = isLight ? COLORS.mosaicLight : COLORS.mosaicDark;
+        ctx.fillRect(x, y, tileSize, tileSize);
+
+        // Gouache texture effect
+        ctx.fillStyle = `rgba(255, 255, 255, ${0.05 + Math.random() * 0.05})`;
+        ctx.fillRect(x + 2, y + 2, tileSize - 4, tileSize - 4);
+      }
+    }
+  }
+
+  function drawTorch(torch) {
+    // Glow effect
+    const flicker = 0.8 + Math.sin(gameTime * 8 + torch.x) * 0.2;
+    const gradient = ctx.createRadialGradient(torch.x, torch.y, 0, torch.x, torch.y, 150 * flicker);
+    gradient.addColorStop(0, `rgba(232, 93, 74, ${0.3 * flicker})`);
+    gradient.addColorStop(0.5, `rgba(245, 167, 66, ${0.15 * flicker})`);
+    gradient.addColorStop(1, 'rgba(0, 0, 0, 0)');
+    ctx.fillStyle = gradient;
+    ctx.fillRect(torch.x - 150, torch.y - 150, 300, 300);
+
+    // Torch bracket
+    ctx.fillStyle = COLORS.pendulumDark;
+    ctx.fillRect(torch.x - 4, torch.y - 20, 8, 40);
+
+    // Flame
+    ctx.fillStyle = COLORS.torchFlame;
+    ctx.beginPath();
+    ctx.moveTo(torch.x, torch.y - 30);
+    ctx.quadraticCurveTo(torch.x + 10 * flicker, torch.y - 50, torch.x, torch.y - 70 * flicker);
+    ctx.quadraticCurveTo(torch.x - 10 * flicker, torch.y - 50, torch.x, torch.y - 30);
+    ctx.fill();
+  }
+
+  function drawPendulum(p) {
+    const bobX = p.x + Math.sin(p.angle) * PENDULUM_LENGTH;
+    const bobY = p.y + Math.cos(p.angle) * PENDULUM_LENGTH;
+
+    // Rod
+    ctx.strokeStyle = COLORS.pendulumDark;
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.moveTo(p.x, p.y);
+    ctx.lineTo(bobX, bobY);
+    ctx.stroke();
+
+    // Bob (bronze ball)
+    ctx.fillStyle = COLORS.pendulumBronze;
+    ctx.beginPath();
+    ctx.arc(bobX, bobY, 20, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Highlight
+    ctx.fillStyle = '#D4A574';
+    ctx.beginPath();
+    ctx.arc(bobX - 5, bobY - 5, 6, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Shadow under pendulum
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
+    ctx.beginPath();
+    ctx.ellipse(bobX, H - 50, 25, 8, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  function drawPlatform(p) {
+    const bounce = p.bounceTime > 0 ? Math.sin(p.bounceTime * 30) * 5 : 0;
+    const shake = p.shakeTime > 0 ? Math.sin(p.shakeTime * 50) * 4 : 0;
+    const drawX = p.x + shake;
+    const drawY = p.y + bounce;
+
+    ctx.save();
+    ctx.translate(drawX, drawY);
+
+    // Platform shadow
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.4)';
+    ctx.beginPath();
+    ctx.roundRect(-p.width / 2 + 5, 5, p.width, p.height - 10, 8);
+    ctx.fill();
+
+    // Platform base (stone)
+    const platGradient = ctx.createLinearGradient(0, -p.height / 2, 0, p.height / 2);
+    platGradient.addColorStop(0, COLORS.platformLight);
+    platGradient.addColorStop(1, COLORS.platformStone);
+    ctx.fillStyle = platGradient;
+    ctx.beginPath();
+    ctx.roundRect(-p.width / 2, -p.height / 2, p.width, p.height, 8);
+    ctx.fill();
+
+    // Engraved border
+    ctx.strokeStyle = COLORS.platformEngrave;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.roundRect(-p.width / 2 + 4, -p.height / 2 + 4, p.width - 8, p.height - 8, 6);
+    ctx.stroke();
+
+    // Answer text - wrap to fit
+    ctx.fillStyle = COLORS.textDark;
+    ctx.font = "500 14px 'Nunito', sans-serif";
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+
+    const maxWidth = p.width - 16;
+    const lines = wrapText(p.choice.text, maxWidth);
+    const lineHeight = 16;
+    const startY = -((lines.length - 1) * lineHeight) / 2;
+
+    lines.forEach((line, i) => {
+      ctx.fillText(line, 0, startY + i * lineHeight);
+    });
+
+    // Platform letter indicator
+    const letters = ['A', 'B', 'C', 'D'];
+    ctx.fillStyle = COLORS.platformEngrave;
+    ctx.font = "bold 12px 'Belanosima', sans-serif";
+    ctx.fillText(letters[p.index], 0, p.height / 2 - 10);
+
+    ctx.restore();
+  }
+
+  function wrapText(text, maxWidth) {
+    const words = text.split(' ');
+    const lines = [];
+    let currentLine = '';
+
+    words.forEach(word => {
+      const testLine = currentLine ? currentLine + ' ' + word : word;
+      const metrics = ctx.measureText(testLine);
+      if (metrics.width > maxWidth && currentLine) {
+        lines.push(currentLine);
+        currentLine = word;
+      } else {
+        currentLine = testLine;
+      }
+    });
+    if (currentLine) {
+      lines.push(currentLine);
+    }
+
+    return lines;
+  }
+
+  function drawPlayer() {
+    ctx.save();
+    ctx.translate(player.x, player.y);
+    ctx.scale(player.facing, 1);
+
+    // Body (gouache style - layered shapes)
+    ctx.fillStyle = COLORS.playerDark;
+    ctx.beginPath();
+    ctx.roundRect(-12, -18, 24, 36, 8);
+    ctx.fill();
+
+    ctx.fillStyle = COLORS.player;
+    ctx.beginPath();
+    ctx.roundRect(-10, -16, 20, 32, 6);
+    ctx.fill();
+
+    // Head
+    ctx.fillStyle = '#FFD5B4';
+    ctx.beginPath();
+    ctx.arc(0, -24, 10, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Running animation
+    const runCycle = Math.sin(gameTime * 12) * 0.3;
+    if (Math.abs(player.vx) > 10) {
+      // Leg movement indication
+      ctx.fillStyle = COLORS.playerDark;
+      ctx.fillRect(-6, 10, 5, 8 + runCycle * 3);
+      ctx.fillRect(1, 10, 5, 8 - runCycle * 3);
+    }
+
+    ctx.restore();
+  }
+
+  function drawHornedShadow(shadow) {
+    ctx.save();
+    ctx.translate(shadow.x, shadow.y);
+
+    // Body mass
+    ctx.fillStyle = COLORS.shadowHorned;
+    ctx.beginPath();
+    ctx.ellipse(0, 0, 50, 70, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Horns
+    ctx.beginPath();
+    ctx.moveTo(-30, -40);
+    ctx.quadraticCurveTo(-50, -80, -35, -100);
+    ctx.quadraticCurveTo(-25, -85, -20, -50);
+    ctx.fill();
+
+    ctx.beginPath();
+    ctx.moveTo(30, -40);
+    ctx.quadraticCurveTo(50, -80, 35, -100);
+    ctx.quadraticCurveTo(25, -85, 20, -50);
+    ctx.fill();
+
+    // Eyes
+    ctx.fillStyle = COLORS.torchGlow;
+    ctx.beginPath();
+    ctx.arc(-15, -20, 6, 0, Math.PI * 2);
+    ctx.arc(15, -20, 6, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.restore();
+  }
+
+  function drawGearTooth(g) {
+    ctx.save();
+    ctx.translate(g.x, g.y);
+    ctx.rotate(g.rotation);
+
+    ctx.fillStyle = COLORS.gearTooth;
+    ctx.beginPath();
+    ctx.moveTo(0, -g.size);
+    ctx.lineTo(g.size * 0.7, g.size * 0.5);
+    ctx.lineTo(-g.size * 0.7, g.size * 0.5);
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.restore();
+  }
+
+  function drawCorridorFrame() {
+    // Left corridor wall
+    const wallGradient = ctx.createLinearGradient(0, 0, 60, 0);
+    wallGradient.addColorStop(0, COLORS.corridorWall);
+    wallGradient.addColorStop(1, 'rgba(92, 61, 46, 0)');
+    ctx.fillStyle = wallGradient;
+    ctx.fillRect(0, 0, 60, H);
+
+    // Right corridor wall
+    const wallGradient2 = ctx.createLinearGradient(W, 0, W - 60, 0);
+    wallGradient2.addColorStop(0, COLORS.corridorWall);
+    wallGradient2.addColorStop(1, 'rgba(92, 61, 46, 0)');
+    ctx.fillStyle = wallGradient2;
+    ctx.fillRect(W - 60, 0, 60, H);
+
+    // Top shadow
+    const topGradient = ctx.createLinearGradient(0, 0, 0, 80);
+    topGradient.addColorStop(0, 'rgba(0, 0, 0, 0.6)');
+    topGradient.addColorStop(1, 'rgba(0, 0, 0, 0)');
+    ctx.fillStyle = topGradient;
+    ctx.fillRect(0, 0, W, 80);
+  }
+
+  function handleInput(e) {
+    if (gameState !== 'playing') return;
+
+    initAudio();
+
+    // Movement
+    if (e.code === 'ArrowLeft' || e.code === 'KeyA') {
+      keys.left = true;
+      e.preventDefault();
+    }
+    if (e.code === 'ArrowRight' || e.code === 'KeyD') {
+      keys.right = true;
+      e.preventDefault();
+    }
+
+    // Jump
+    if ((e.code === 'Space' || e.code === 'Enter') && player.onGround) {
+      player.vy = JUMP_VELOCITY;
+      player.onGround = false;
+      playSound('jump');
+      e.preventDefault();
+    }
+  }
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 4: GAME LOOP - DO NOT MODIFY                                      ║
+  // ║  Standard loop with responsive scaling and DPR support.                    ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  let lastTime = performance.now();
+
+  function gameLoop(now) {
+    const dt = Math.min((now - lastTime) / 1000, 0.05); // Cap at 50ms
+    lastTime = now;
+
+    // Apply transform for logical coordinate system
+    ctx.setTransform(scale * dpr, 0, 0, scale * dpr, 0, 0);
+
+    if (gameState === 'playing') {
+      updateGame(dt);
+      drawGame();
+    } else {
+      drawGame(); // Draw game state behind overlay
+      drawEndScreen(dt);
+    }
+
+    // Reset transform for next frame
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+    requestAnimationFrame(gameLoop);
+  }
+
+  // Input handlers
+  document.addEventListener('keydown', (e) => {
+    if (gameState === 'ended' && (e.code === 'KeyR')) {
+      // Restart game
+      gameState = 'playing';
+      gameResult = null;
+      gameExplanation = '';
+      confettiParticles = [];
+      initGame();
+      return;
+    }
+    handleInput(e);
+  });
+
+  document.addEventListener('keyup', (e) => {
+    // Handle key release
+    if (e.code === 'ArrowLeft' || e.code === 'KeyA') {
+      keys.left = false;
+    }
+    if (e.code === 'ArrowRight' || e.code === 'KeyD') {
+      keys.right = false;
+    }
+  });
+
+  // Canvas click handler for end screen buttons
+  canvas.addEventListener('click', (e) => {
+    if (gameState !== 'ended') return;
+
+    const { x, y } = screenToLogical(e.clientX, e.clientY);
+
+    if (gameResult) {
+      // Correct answer: check both buttons
+      if (pointInRect(x, y, restartButton)) {
+        gameState = 'playing';
+        gameResult = null;
+        gameExplanation = '';
+        confettiParticles = [];
+        initGame();
+        return;
+      }
+      if (pointInRect(x, y, nextButton)) {
+        // Notify parent to go to next question
+        if (window.parent && window.parent !== window) {
+          window.parent.postMessage({ type: 'quiz-next' }, '*');
+        }
+        return;
+      }
+    } else {
+      // Wrong answer: check centered restart button
+      const centeredRestart = { x: W / 2 - 75, y: H / 2 + 60, w: 150, h: 48 };
+      if (pointInRect(x, y, centeredRestart)) {
+        gameState = 'playing';
+        gameResult = null;
+        gameExplanation = '';
+        confettiParticles = [];
+        initGame();
+        return;
+      }
+    }
+  });
+
+  // Handle resize
+  window.addEventListener('resize', resizeCanvas);
+
+  // Initialize
+  resizeCanvas();
+  initGame();
+  requestAnimationFrame(gameLoop);
+  </script>
+</body>
+</html>

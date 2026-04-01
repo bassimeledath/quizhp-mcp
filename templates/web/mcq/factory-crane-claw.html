@@ -1,0 +1,944 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Factory Crane Claw</title>
+  <link href="https://fonts.googleapis.com/css2?family=Belanosima:wght@400;600;700&family=Nunito+Sans:wght@400;500;600;700&family=Nunito:wght@400;500;600&display=swap" rel="stylesheet">
+  <!--
+  ╔══════════════════════════════════════════════════════════════════════════════╗
+  ║  GAME FACTORY TEMPLATE                                                        ║
+  ║  This template enforces critical invariants. Follow the section markers.      ║
+  ╚══════════════════════════════════════════════════════════════════════════════╝
+  -->
+  <style>
+    /* ═══════════════════════════════════════════════════════════════════════════
+       BASE STYLES - Can be extended, not removed
+       ═══════════════════════════════════════════════════════════════════════════ */
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+    }
+    body {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      background: #1a1a2e;
+      font-family: 'Nunito Sans', system-ui, -apple-system, sans-serif;
+    }
+    #gameCanvas {
+      background: #16213e;
+      border-radius: 8px;
+      display: block;
+    }
+  </style>
+</head>
+<body>
+  <!-- ═══════════════════════════════════════════════════════════════════════════
+       CANVAS - Sized dynamically to fill available space
+       ═══════════════════════════════════════════════════════════════════════════ -->
+  <canvas id="gameCanvas"></canvas>
+
+  <script>
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 1: QUESTION PLACEHOLDER - DO NOT MODIFY FORMAT                    ║
+  // ║  Platform replaces this at runtime. Use these exact 60-char answers.       ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  const QUESTION = {
+    type: "mcq",
+    prompt: "Sample question text",
+    choices: [
+      { text: "This is sample answer A which is long enough to test text overflow", is_correct: true, explanation: "Why A is correct" },
+      { text: "This is sample answer B which is long enough to test text overflow", is_correct: false, explanation: "Why B is wrong" },
+      { text: "This is sample answer C which is long enough to test text overflow", is_correct: false, explanation: "Why C is wrong" },
+      { text: "This is sample answer D which is long enough to test text overflow", is_correct: false, explanation: "Why D is wrong" }
+    ],
+    isLastQuestion: false
+  };
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 2: ENGINE CORE - DO NOT MODIFY                                    ║
+  // ║  Standard engine interface and end screen. This is sacred.                 ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  const canvas = document.getElementById('gameCanvas');
+  const ctx = canvas.getContext('2d');
+
+  // Logical dimensions (game code works in this coordinate space)
+  const W = 720, H = 540;
+
+  // Scaling state (computed on resize)
+  let scale = 1;
+  let dpr = 1;
+
+  let gameState = 'playing'; // 'playing' | 'ended'
+  let gameResult = null;     // true (correct) | false (wrong)
+  let gameExplanation = '';
+  let endScreenTime = 0;
+  let confettiParticles = [];
+
+  // End screen button bounds (logical coordinates)
+  const restartButton = { x: W / 2 - 170, y: H / 2 + 60, w: 150, h: 48 };
+  const nextButton = { x: W / 2 + 20, y: H / 2 + 60, w: 150, h: 48 };
+
+  /** Check if point is inside rectangle */
+  function pointInRect(px, py, rect) {
+    return px >= rect.x && px <= rect.x + rect.w &&
+           py >= rect.y && py <= rect.y + rect.h;
+  }
+
+  /** Draw a styled button */
+  function drawButton(rect, label, color, pulse) {
+    const p = pulse ? 1 + Math.sin(endScreenTime * 4) * 0.03 : 1;
+    ctx.save();
+    ctx.translate(rect.x + rect.w / 2, rect.y + rect.h / 2);
+    ctx.scale(p, p);
+    ctx.translate(-(rect.x + rect.w / 2), -(rect.y + rect.h / 2));
+
+    // Button background
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.roundRect(rect.x, rect.y, rect.w, rect.h, 12);
+    ctx.fill();
+
+    // Button text
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = 'bold 18px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, rect.x + rect.w / 2, rect.y + rect.h / 2);
+
+    ctx.restore();
+  }
+
+  /**
+   * Resize canvas to fill available space with proper DPR scaling.
+   * Maintains logical coordinate system (720×540).
+   */
+  function resizeCanvas() {
+    dpr = window.devicePixelRatio || 1;
+
+    // Get available space
+    const availW = window.innerWidth;
+    const availH = window.innerHeight;
+
+    // Calculate scale to fit logical space (720×540) in available space
+    const scaleX = availW / W;
+    const scaleY = availH / H;
+    scale = Math.min(scaleX, scaleY);
+
+    // Physical canvas buffer (DPR-scaled for crisp rendering)
+    canvas.width = W * scale * dpr;
+    canvas.height = H * scale * dpr;
+
+    // CSS display size
+    canvas.style.width = (W * scale) + 'px';
+    canvas.style.height = (H * scale) + 'px';
+  }
+
+  /**
+   * Convert screen coordinates to logical coordinates.
+   * Use this for mouse/click events to get positions in 720×540 space.
+   */
+  function screenToLogical(screenX, screenY) {
+    const rect = canvas.getBoundingClientRect();
+    return {
+      x: (screenX - rect.left) * (W / rect.width),
+      y: (screenY - rect.top) * (H / rect.height)
+    };
+  }
+
+  const engine = {
+    /** Call this to end the game. DO NOT draw your own end screen. */
+    end(isCorrect, explanation) {
+      if (gameState === 'ended') return;
+      gameState = 'ended';
+      gameResult = isCorrect;
+      gameExplanation = explanation || '';
+      endScreenTime = 0;
+
+      // Spawn confetti for correct answers
+      if (isCorrect) {
+        for (let i = 0; i < 50; i++) {
+          confettiParticles.push({
+            x: W / 2,
+            y: H / 2,
+            vx: (Math.random() - 0.5) * 600,
+            vy: -Math.random() * 400 - 100,
+            size: 4 + Math.random() * 6,
+            color: ['#FFD700', '#FF6B6B', '#4ECDC4', '#95E1D3', '#F38181'][Math.floor(Math.random() * 5)],
+            rotation: Math.random() * Math.PI * 2,
+            rotationSpeed: (Math.random() - 0.5) * 10
+          });
+        }
+      }
+
+      // Notify parent frame
+      if (window.parent && window.parent !== window) {
+        window.parent.postMessage({
+          type: 'quiz-end',
+          isCorrect: isCorrect,
+          explanation: explanation || ''
+        }, '*');
+      }
+    }
+  };
+
+  /** STANDARD END SCREEN - DO NOT MODIFY */
+  function drawEndScreen(dt) {
+    endScreenTime += dt;
+
+    // Update confetti
+    confettiParticles = confettiParticles.filter(p => {
+      p.vy += 800 * dt; // gravity
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.rotation += p.rotationSpeed * dt;
+      p.vx *= 0.99;
+      return p.y < H + 50;
+    });
+
+    // Dark overlay
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
+    ctx.fillRect(0, 0, W, H);
+
+    // Draw confetti
+    confettiParticles.forEach(p => {
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rotation);
+      ctx.fillStyle = p.color;
+      ctx.fillRect(-p.size / 2, -p.size / 4, p.size, p.size / 2);
+      ctx.restore();
+    });
+
+    // Result emoji
+    ctx.font = '72px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(gameResult ? '🎉' : '😢', W / 2, H / 2 - 50);
+
+    // Result text
+    ctx.fillStyle = gameResult ? '#4ADE80' : '#F87171';
+    ctx.font = 'bold 36px system-ui, sans-serif';
+    ctx.fillText(gameResult ? 'Correct!' : 'Wrong!', W / 2, H / 2 + 20);
+
+    // Buttons
+    if (gameResult) {
+      // Correct: show both Restart and Next/Finish
+      drawButton(restartButton, 'Restart', '#E87A3E', true);
+      const nextLabel = QUESTION.isLastQuestion ? 'Finish' : 'Next';
+      drawButton(nextButton, nextLabel, '#4ECDC4', true);
+    } else {
+      // Wrong: show only centered Restart button
+      const centeredRestart = { x: W / 2 - 75, y: H / 2 + 60, w: 150, h: 48 };
+      drawButton(centeredRestart, 'Restart', '#E87A3E', true);
+    }
+  }
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 3: YOUR GAME CODE - IMPLEMENT THESE FUNCTIONS                     ║
+  // ║  This is where your game logic goes. See requirements below.               ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+
+  // === COLORS ===
+  const COLORS = {
+    bgPrimary: '#FAFAF7',
+    bgSurface: '#FFFFFF',
+    bgSecondary: '#F5F5F0',
+    textPrimary: '#2B2B28',
+    textSecondary: '#5A5A54',
+    orange: '#E87A3E',
+    orangeHover: '#D66B31',
+    amber: '#F5A742',
+    cyan: '#4ECDC4',
+    cyanHover: '#45B8B0',
+    success: '#6BBF59',
+    error: '#E85D4A',
+    borderSubtle: '#E6E6E0',
+    borderStrong: '#D4D4CC',
+    cyanLight: '#E8F9F8',
+    floorDark: '#4A4A44',
+    floorMid: '#5A5A54',
+    floorLight: '#6A6A64',
+    metalDark: '#555550',
+    metalMid: '#7A7A74',
+    metalLight: '#9A9A94',
+    cableColor: '#3A3A34',
+  };
+
+  // === SOUND EFFECTS ===
+  const AudioCtx = window.AudioContext || window.webkitAudioContext;
+  let audioCtx = null;
+  function getAudioCtx() {
+    if (!audioCtx) audioCtx = new AudioCtx();
+    return audioCtx;
+  }
+
+  function playSound(type) {
+    try {
+      const ctx = getAudioCtx();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+
+      if (type === 'move') {
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(220, ctx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(330, ctx.currentTime + 0.05);
+        gain.gain.setValueAtTime(0.08, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.08);
+        osc.start(ctx.currentTime);
+        osc.stop(ctx.currentTime + 0.08);
+      } else if (type === 'grab') {
+        osc.type = 'square';
+        osc.frequency.setValueAtTime(150, ctx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(80, ctx.currentTime + 0.3);
+        gain.gain.setValueAtTime(0.12, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.35);
+        osc.start(ctx.currentTime);
+        osc.stop(ctx.currentTime + 0.35);
+      } else if (type === 'correct') {
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(523, ctx.currentTime);
+        osc.frequency.setValueAtTime(659, ctx.currentTime + 0.1);
+        osc.frequency.setValueAtTime(784, ctx.currentTime + 0.2);
+        gain.gain.setValueAtTime(0.15, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.4);
+        osc.start(ctx.currentTime);
+        osc.stop(ctx.currentTime + 0.4);
+      } else if (type === 'wrong') {
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(200, ctx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(100, ctx.currentTime + 0.3);
+        gain.gain.setValueAtTime(0.1, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.35);
+        osc.start(ctx.currentTime);
+        osc.stop(ctx.currentTime + 0.35);
+      }
+    } catch (e) { /* audio not available */ }
+  }
+
+  // === GAME STATE ===
+  const CLAW_SPEED = 280;
+  const GRAB_SPEED = 200;
+  const RAIL_Y = 30;
+  const CLAW_REST_Y = 80;
+  const CRATE_Y = 370;
+  const CRATE_W = 150;
+  const CRATE_H = 110;
+  const CRATE_GAP = 16;
+  const FLOOR_Y = 480;
+
+  let claw = {};
+  let crates = [];
+  let clawState = 'idle'; // 'idle' | 'descending' | 'grabbing' | 'ascending' | 'selected'
+  let selectedCrate = null;
+  let gameParticles = [];
+  let entranceProgress = 0;
+  let shakeOffset = { x: 0, timer: 0 };
+  let highlightIndex = 0;
+
+  function initGame() {
+    const totalCratesWidth = CRATE_W * 4 + CRATE_GAP * 3;
+    const startX = (W - totalCratesWidth) / 2;
+
+    claw = {
+      x: W / 2,
+      y: CLAW_REST_Y,
+      targetY: CLAW_REST_Y,
+      width: 60,
+      openAngle: 0.4,
+      swingAngle: 0,
+      swingSpeed: 2,
+    };
+
+    crates = QUESTION.choices.map((choice, i) => ({
+      x: startX + i * (CRATE_W + CRATE_GAP),
+      y: CRATE_Y,
+      w: CRATE_W,
+      h: CRATE_H,
+      choice: choice,
+      index: i,
+      label: String.fromCharCode(65 + i),
+      scale: 0,
+      alpha: 0,
+      highlighted: false,
+      grabbed: false,
+      offsetY: 0,
+    }));
+
+    clawState = 'idle';
+    selectedCrate = null;
+    gameParticles = [];
+    entranceProgress = 0;
+    shakeOffset = { x: 0, timer: 0 };
+    highlightIndex = 0;
+
+    // Entrance animation stagger
+    crates.forEach((c, i) => {
+      c.scale = 0;
+      c.alpha = 0;
+    });
+  }
+
+  function wrapText(text, maxWidth, font) {
+    ctx.font = font;
+    const words = text.split(' ');
+    const lines = [];
+    let currentLine = '';
+
+    for (const word of words) {
+      const testLine = currentLine ? currentLine + ' ' + word : word;
+      if (ctx.measureText(testLine).width > maxWidth && currentLine) {
+        lines.push(currentLine);
+        currentLine = word;
+      } else {
+        currentLine = testLine;
+      }
+    }
+    if (currentLine) lines.push(currentLine);
+    return lines;
+  }
+
+  function updateGame(dt) {
+    if (gameState !== 'playing') return;
+
+    // Entrance animation
+    if (entranceProgress < 1) {
+      entranceProgress = Math.min(entranceProgress + dt * 2.5, 1);
+      crates.forEach((c, i) => {
+        const delay = i * 0.12;
+        const t = Math.max(0, Math.min((entranceProgress - delay) / 0.3, 1));
+        // Spring easing
+        const spring = 1 + Math.sin(t * Math.PI * 2) * 0.15 * (1 - t);
+        c.scale = t * spring;
+        c.alpha = t;
+      });
+    } else {
+      crates.forEach(c => { c.scale = 1; c.alpha = 1; });
+    }
+
+    // Claw idle swing
+    if (clawState === 'idle') {
+      claw.swingAngle = Math.sin(performance.now() * 0.001 * claw.swingSpeed) * 0.05;
+    }
+
+    // Highlight current crate
+    crates.forEach((c, i) => {
+      c.highlighted = (i === highlightIndex && clawState === 'idle');
+    });
+
+    // Position claw over highlighted crate when idle
+    if (clawState === 'idle') {
+      const target = crates[highlightIndex];
+      const targetX = target.x + target.w / 2;
+      const diff = targetX - claw.x;
+      claw.x += diff * dt * 8;
+    }
+
+    // Shake animation
+    if (shakeOffset.timer > 0) {
+      shakeOffset.timer -= dt;
+      const decay = shakeOffset.timer / 0.4;
+      shakeOffset.x = Math.sin(shakeOffset.timer * Math.PI * 20) * 8 * decay;
+    } else {
+      shakeOffset.x = 0;
+    }
+
+    // Descending
+    if (clawState === 'descending') {
+      claw.y += GRAB_SPEED * dt;
+      claw.openAngle = Math.max(0, claw.openAngle - dt * 0.8);
+      const targetCrate = crates[highlightIndex];
+      if (claw.y >= targetCrate.y - 10) {
+        claw.y = targetCrate.y - 10;
+        clawState = 'grabbing';
+        claw.openAngle = 0;
+        targetCrate.grabbed = true;
+        selectedCrate = targetCrate;
+        playSound('grab');
+        setTimeout(() => { clawState = 'ascending'; }, 300);
+      }
+    }
+
+    // Ascending
+    if (clawState === 'ascending') {
+      claw.y -= GRAB_SPEED * dt * 0.7;
+      if (selectedCrate) {
+        selectedCrate.y = claw.y + 30;
+      }
+      if (claw.y <= CLAW_REST_Y + 30) {
+        claw.y = CLAW_REST_Y + 30;
+        if (selectedCrate) selectedCrate.y = claw.y + 30;
+        clawState = 'selected';
+
+        const choice = selectedCrate.choice;
+        if (choice.is_correct) {
+          playSound('correct');
+          // Spawn celebration particles
+          for (let i = 0; i < 25; i++) {
+            gameParticles.push({
+              x: claw.x,
+              y: claw.y,
+              vx: (Math.random() - 0.5) * 300,
+              vy: -Math.random() * 200 - 50,
+              color: [COLORS.orange, COLORS.amber, COLORS.cyan, COLORS.success][Math.floor(Math.random() * 4)],
+              size: 3 + Math.random() * 5,
+              rotation: Math.random() * Math.PI * 2,
+              rotationSpeed: (Math.random() - 0.5) * 8,
+              life: 1,
+            });
+          }
+        } else {
+          playSound('wrong');
+          shakeOffset.timer = 0.4;
+        }
+
+        setTimeout(() => {
+          engine.end(choice.is_correct, choice.explanation);
+        }, 600);
+      }
+    }
+
+    // Update particles
+    gameParticles.forEach(p => {
+      p.vy += 400 * dt;
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.rotation += p.rotationSpeed * dt;
+      p.life -= dt * 1.2;
+    });
+    gameParticles = gameParticles.filter(p => p.life > 0);
+  }
+
+  function drawGame() {
+    // Background - factory setting
+    ctx.fillStyle = COLORS.bgPrimary;
+    ctx.fillRect(0, 0, W, H);
+
+    ctx.save();
+    ctx.translate(shakeOffset.x, 0);
+
+    // Factory wall pattern
+    drawFactoryWall();
+
+    // Draw rail/beam at top
+    drawRail();
+
+    // Draw cable from rail to claw
+    drawCable();
+
+    // Draw the claw
+    drawClaw();
+
+    // Factory floor
+    drawFloor();
+
+    // Draw crates
+    crates.forEach(c => {
+      if (!c.grabbed || clawState === 'ascending' || clawState === 'selected') {
+        drawCrate(c);
+      }
+    });
+
+    // Draw particles
+    gameParticles.forEach(p => {
+      ctx.save();
+      ctx.globalAlpha = Math.max(0, p.life);
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rotation);
+      ctx.fillStyle = p.color;
+      ctx.fillRect(-p.size / 2, -p.size / 4, p.size, p.size / 2);
+      ctx.restore();
+    });
+
+    ctx.restore();
+  }
+
+  function drawFactoryWall() {
+    // Subtle grid pattern
+    ctx.strokeStyle = '#EDEDEA';
+    ctx.lineWidth = 0.5;
+    for (let x = 0; x < W; x += 40) {
+      ctx.beginPath();
+      ctx.moveTo(x, 0);
+      ctx.lineTo(x, FLOOR_Y);
+      ctx.stroke();
+    }
+    for (let y = 0; y < FLOOR_Y; y += 40) {
+      ctx.beginPath();
+      ctx.moveTo(0, y);
+      ctx.lineTo(W, y);
+      ctx.stroke();
+    }
+
+    // Hazard stripes at top
+    const stripeH = 12;
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(0, 0, W, stripeH);
+    ctx.clip();
+    for (let x = -stripeH; x < W + stripeH; x += stripeH * 2) {
+      ctx.fillStyle = COLORS.amber;
+      ctx.beginPath();
+      ctx.moveTo(x, 0);
+      ctx.lineTo(x + stripeH, 0);
+      ctx.lineTo(x + stripeH * 2, stripeH);
+      ctx.lineTo(x + stripeH, stripeH);
+      ctx.fill();
+      ctx.fillStyle = COLORS.textPrimary;
+      ctx.beginPath();
+      ctx.moveTo(x + stripeH, 0);
+      ctx.lineTo(x + stripeH * 2, 0);
+      ctx.lineTo(x + stripeH * 3, stripeH);
+      ctx.lineTo(x + stripeH * 2, stripeH);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  function drawRail() {
+    // Main horizontal beam
+    const gradient = ctx.createLinearGradient(0, RAIL_Y - 8, 0, RAIL_Y + 8);
+    gradient.addColorStop(0, COLORS.metalLight);
+    gradient.addColorStop(0.5, COLORS.metalMid);
+    gradient.addColorStop(1, COLORS.metalDark);
+    ctx.fillStyle = gradient;
+    ctx.fillRect(20, RAIL_Y - 8, W - 40, 16);
+
+    // Rail bolts
+    ctx.fillStyle = COLORS.metalDark;
+    for (let x = 40; x < W - 20; x += 80) {
+      ctx.beginPath();
+      ctx.arc(x, RAIL_Y, 4, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Rail bracket (follows claw)
+    const bracketW = 40;
+    ctx.fillStyle = COLORS.metalMid;
+    ctx.fillRect(claw.x - bracketW / 2, RAIL_Y - 12, bracketW, 24);
+    ctx.fillStyle = COLORS.metalDark;
+    ctx.beginPath();
+    ctx.arc(claw.x - 10, RAIL_Y, 3, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(claw.x + 10, RAIL_Y, 3, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  function drawCable() {
+    ctx.strokeStyle = COLORS.cableColor;
+    ctx.lineWidth = 3;
+    ctx.setLineDash([]);
+    ctx.beginPath();
+    ctx.moveTo(claw.x, RAIL_Y + 12);
+    ctx.lineTo(claw.x, claw.y - 15);
+    ctx.stroke();
+
+    // Secondary cables
+    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = COLORS.metalDark;
+    ctx.beginPath();
+    ctx.moveTo(claw.x - 8, RAIL_Y + 12);
+    ctx.lineTo(claw.x - 12, claw.y - 10);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(claw.x + 8, RAIL_Y + 12);
+    ctx.lineTo(claw.x + 12, claw.y - 10);
+    ctx.stroke();
+  }
+
+  function drawClaw() {
+    ctx.save();
+    ctx.translate(claw.x, claw.y);
+    ctx.rotate(claw.swingAngle);
+
+    // Claw housing
+    const housW = 36;
+    const housH = 20;
+    const gradient = ctx.createLinearGradient(-housW/2, -housH/2, -housW/2, housH/2);
+    gradient.addColorStop(0, COLORS.metalLight);
+    gradient.addColorStop(1, COLORS.metalDark);
+    ctx.fillStyle = gradient;
+    ctx.beginPath();
+    ctx.roundRect(-housW/2, -housH/2, housW, housH, 4);
+    ctx.fill();
+
+    // Indicator light
+    ctx.fillStyle = clawState === 'idle' ? COLORS.success : COLORS.orange;
+    ctx.beginPath();
+    ctx.arc(0, -housH/2 + 5, 3, 0, Math.PI * 2);
+    ctx.fill();
+    // Glow
+    ctx.globalAlpha = 0.3 + Math.sin(performance.now() * 0.005) * 0.2;
+    ctx.fillStyle = clawState === 'idle' ? COLORS.success : COLORS.orange;
+    ctx.beginPath();
+    ctx.arc(0, -housH/2 + 5, 6, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+
+    // Claw arms
+    const openAmount = claw.openAngle;
+    const armLen = 30;
+
+    // Left arm
+    ctx.save();
+    ctx.translate(-10, housH/2);
+    ctx.rotate(-0.3 - openAmount);
+    ctx.fillStyle = COLORS.metalMid;
+    ctx.beginPath();
+    ctx.roundRect(-3, 0, 6, armLen, 2);
+    ctx.fill();
+    // Hook tip
+    ctx.fillStyle = COLORS.orange;
+    ctx.beginPath();
+    ctx.roundRect(-4, armLen - 4, 8, 8, 2);
+    ctx.fill();
+    ctx.restore();
+
+    // Right arm
+    ctx.save();
+    ctx.translate(10, housH/2);
+    ctx.rotate(0.3 + openAmount);
+    ctx.fillStyle = COLORS.metalMid;
+    ctx.beginPath();
+    ctx.roundRect(-3, 0, 6, armLen, 2);
+    ctx.fill();
+    // Hook tip
+    ctx.fillStyle = COLORS.orange;
+    ctx.beginPath();
+    ctx.roundRect(-4, armLen - 4, 8, 8, 2);
+    ctx.fill();
+    ctx.restore();
+
+    ctx.restore();
+  }
+
+  function drawFloor() {
+    // Floor base
+    ctx.fillStyle = COLORS.floorDark;
+    ctx.fillRect(0, FLOOR_Y, W, H - FLOOR_Y);
+
+    // Floor highlight line
+    ctx.fillStyle = COLORS.floorMid;
+    ctx.fillRect(0, FLOOR_Y, W, 3);
+
+    // Floor tiles
+    ctx.strokeStyle = COLORS.floorLight;
+    ctx.lineWidth = 0.5;
+    for (let x = 0; x < W; x += 60) {
+      ctx.beginPath();
+      ctx.moveTo(x, FLOOR_Y);
+      ctx.lineTo(x, H);
+      ctx.stroke();
+    }
+
+    // Landing zone markers under crates
+    crates.forEach(c => {
+      if (c.highlighted && clawState === 'idle') {
+        ctx.fillStyle = 'rgba(78, 205, 196, 0.15)';
+        ctx.fillRect(c.x - 4, FLOOR_Y + 3, c.w + 8, H - FLOOR_Y - 3);
+      }
+    });
+  }
+
+  function drawCrate(crate) {
+    ctx.save();
+
+    const cx = crate.x + crate.w / 2;
+    const cy = crate.y + crate.h / 2;
+
+    ctx.translate(cx, cy);
+    ctx.scale(crate.scale, crate.scale);
+    ctx.globalAlpha = crate.alpha;
+    ctx.translate(-cx, -cy);
+
+    const x = crate.x;
+    const y = crate.y;
+    const w = crate.w;
+    const h = crate.h;
+
+    // Shadow
+    ctx.fillStyle = 'rgba(0,0,0,0.1)';
+    ctx.beginPath();
+    ctx.roundRect(x + 3, y + 3, w, h, 8);
+    ctx.fill();
+
+    // Crate body
+    if (crate.highlighted && clawState === 'idle') {
+      ctx.fillStyle = COLORS.cyanLight;
+      ctx.strokeStyle = COLORS.cyan;
+    } else {
+      ctx.fillStyle = COLORS.bgSurface;
+      ctx.strokeStyle = COLORS.borderSubtle;
+    }
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.roundRect(x, y, w, h, 8);
+    ctx.fill();
+    ctx.stroke();
+
+    // Crate label (letter badge)
+    const badgeRadius = 14;
+    const badgeX = x + w / 2;
+    const badgeY = y + 20;
+
+    ctx.fillStyle = crate.highlighted && clawState === 'idle' ? COLORS.cyan : COLORS.orange;
+    ctx.beginPath();
+    ctx.arc(badgeX, badgeY, badgeRadius, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = "700 16px 'Nunito Sans', sans-serif";
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(crate.label, badgeX, badgeY);
+
+    // Answer text - wrapped
+    const textFont = "400 14px 'Nunito', sans-serif";
+    const textMaxW = w - 16;
+    const lines = wrapText(crate.choice.text, textMaxW, textFont);
+    ctx.font = textFont;
+    ctx.fillStyle = COLORS.textPrimary;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
+
+    const lineHeight = 17;
+    const totalTextH = lines.length * lineHeight;
+    const textStartY = badgeY + badgeRadius + 6;
+
+    lines.forEach((line, i) => {
+      ctx.fillText(line, x + w / 2, textStartY + i * lineHeight);
+    });
+
+    // Highlight arrow indicator
+    if (crate.highlighted && clawState === 'idle') {
+      const arrowY = y - 16 + Math.sin(performance.now() * 0.004) * 4;
+      ctx.fillStyle = COLORS.cyan;
+      ctx.beginPath();
+      ctx.moveTo(x + w / 2, arrowY + 10);
+      ctx.lineTo(x + w / 2 - 8, arrowY);
+      ctx.lineTo(x + w / 2 + 8, arrowY);
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    ctx.restore();
+  }
+
+  function handleInput(e) {
+    if (gameState !== 'playing') return;
+    if (clawState !== 'idle') return;
+
+    if (e.code === 'ArrowLeft') {
+      e.preventDefault();
+      highlightIndex = Math.max(0, highlightIndex - 1);
+      playSound('move');
+    } else if (e.code === 'ArrowRight') {
+      e.preventDefault();
+      highlightIndex = Math.min(crates.length - 1, highlightIndex + 1);
+      playSound('move');
+    } else if (e.code === 'Space') {
+      e.preventDefault();
+      clawState = 'descending';
+      claw.openAngle = 0.4;
+      playSound('grab');
+    }
+  }
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 4: GAME LOOP - DO NOT MODIFY                                      ║
+  // ║  Standard loop with responsive scaling and DPR support.                    ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  let lastTime = performance.now();
+
+  function gameLoop(now) {
+    const dt = Math.min((now - lastTime) / 1000, 0.05); // Cap at 50ms
+    lastTime = now;
+
+    // Apply transform for logical coordinate system
+    ctx.setTransform(scale * dpr, 0, 0, scale * dpr, 0, 0);
+
+    if (gameState === 'playing') {
+      updateGame(dt);
+      drawGame();
+    } else {
+      drawGame(); // Draw game state behind overlay
+      drawEndScreen(dt);
+    }
+
+    // Reset transform for next frame
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+    requestAnimationFrame(gameLoop);
+  }
+
+  // Input handlers
+  document.addEventListener('keydown', (e) => {
+    if (gameState === 'ended' && (e.code === 'KeyR')) {
+      // Restart game
+      gameState = 'playing';
+      gameResult = null;
+      gameExplanation = '';
+      confettiParticles = [];
+      initGame();
+      return;
+    }
+    handleInput(e);
+  });
+
+  document.addEventListener('keyup', (e) => {
+    // Optional: handle key release in your handleInput
+  });
+
+  // Canvas click handler for end screen buttons
+  canvas.addEventListener('click', (e) => {
+    if (gameState !== 'ended') return;
+
+    const { x, y } = screenToLogical(e.clientX, e.clientY);
+
+    if (gameResult) {
+      // Correct answer: check both buttons
+      if (pointInRect(x, y, restartButton)) {
+        gameState = 'playing';
+        gameResult = null;
+        gameExplanation = '';
+        confettiParticles = [];
+        initGame();
+        return;
+      }
+      if (pointInRect(x, y, nextButton)) {
+        // Notify parent to go to next question
+        if (window.parent && window.parent !== window) {
+          window.parent.postMessage({ type: 'quiz-next' }, '*');
+        }
+        return;
+      }
+    } else {
+      // Wrong answer: check centered restart button
+      const centeredRestart = { x: W / 2 - 75, y: H / 2 + 60, w: 150, h: 48 };
+      if (pointInRect(x, y, centeredRestart)) {
+        gameState = 'playing';
+        gameResult = null;
+        gameExplanation = '';
+        confettiParticles = [];
+        initGame();
+        return;
+      }
+    }
+  });
+
+  // Handle resize
+  window.addEventListener('resize', resizeCanvas);
+
+  // Initialize
+  resizeCanvas();
+  initGame();
+  requestAnimationFrame(gameLoop);
+  </script>
+</body>
+</html>

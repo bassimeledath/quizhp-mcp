@@ -1,0 +1,866 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Eclipse Forge Clockhand</title>
+  <!--
+  ╔══════════════════════════════════════════════════════════════════════════════╗
+  ║  GAME FACTORY TEMPLATE                                                        ║
+  ║  This template enforces critical invariants. Follow the section markers.      ║
+  ╚══════════════════════════════════════════════════════════════════════════════╝
+  -->
+  <link href="https://fonts.googleapis.com/css2?family=Belanosima:wght@400;600;700&family=Nunito+Sans:wght@400;500;600;700&family=Nunito:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    /* ═══════════════════════════════════════════════════════════════════════════
+       BASE STYLES - Can be extended, not removed
+       ═══════════════════════════════════════════════════════════════════════════ */
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+    }
+    body {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      background: #1a1a2e;
+      font-family: 'Nunito Sans', system-ui, -apple-system, sans-serif;
+    }
+    #gameCanvas {
+      background: #16213e;
+      border-radius: 8px;
+      display: block;
+    }
+  </style>
+</head>
+<body>
+  <!-- ═══════════════════════════════════════════════════════════════════════════
+       CANVAS - Sized dynamically to fill available space
+       ═══════════════════════════════════════════════════════════════════════════ -->
+  <canvas id="gameCanvas"></canvas>
+
+  <script>
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 1: QUESTION PLACEHOLDER - DO NOT MODIFY FORMAT                    ║
+  // ║  Platform replaces this at runtime. Use these exact 60-char answers.       ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  const QUESTION = {
+    type: "true_false",
+    prompt: "Sample question text",
+    choices: [
+      { text: "True", is_correct: true, explanation: "Why True is correct" },
+      { text: "False", is_correct: false, explanation: "Why False is wrong" }
+    ],
+    isLastQuestion: false
+  };
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 2: ENGINE CORE - DO NOT MODIFY                                    ║
+  // ║  Standard engine interface and end screen. This is sacred.                 ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  const canvas = document.getElementById('gameCanvas');
+  const ctx = canvas.getContext('2d');
+
+  // Logical dimensions (game code works in this coordinate space)
+  const W = 720, H = 540;
+
+  // Scaling state (computed on resize)
+  let scale = 1;
+  let dpr = 1;
+
+  let gameState = 'playing'; // 'playing' | 'ended'
+  let gameResult = null;     // true (correct) | false (wrong)
+  let gameExplanation = '';
+  let endScreenTime = 0;
+  let confettiParticles = [];
+
+  // End screen button bounds (logical coordinates)
+  const restartButton = { x: W / 2 - 170, y: H / 2 + 60, w: 150, h: 48 };
+  const nextButton = { x: W / 2 + 20, y: H / 2 + 60, w: 150, h: 48 };
+
+  /** Check if point is inside rectangle */
+  function pointInRect(px, py, rect) {
+    return px >= rect.x && px <= rect.x + rect.w &&
+           py >= rect.y && py <= rect.y + rect.h;
+  }
+
+  /** Draw a styled button */
+  function drawButton(rect, label, color, pulse) {
+    const p = pulse ? 1 + Math.sin(endScreenTime * 4) * 0.03 : 1;
+    ctx.save();
+    ctx.translate(rect.x + rect.w / 2, rect.y + rect.h / 2);
+    ctx.scale(p, p);
+    ctx.translate(-(rect.x + rect.w / 2), -(rect.y + rect.h / 2));
+
+    // Button background
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.roundRect(rect.x, rect.y, rect.w, rect.h, 12);
+    ctx.fill();
+
+    // Button text
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = 'bold 18px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, rect.x + rect.w / 2, rect.y + rect.h / 2);
+
+    ctx.restore();
+  }
+
+  /**
+   * Resize canvas to fill available space with proper DPR scaling.
+   * Maintains logical coordinate system (720×540).
+   */
+  function resizeCanvas() {
+    dpr = window.devicePixelRatio || 1;
+
+    // Get available space
+    const availW = window.innerWidth;
+    const availH = window.innerHeight;
+
+    // Calculate scale to fit logical space (720×540) in available space
+    const scaleX = availW / W;
+    const scaleY = availH / H;
+    scale = Math.min(scaleX, scaleY);
+
+    // Physical canvas buffer (DPR-scaled for crisp rendering)
+    canvas.width = W * scale * dpr;
+    canvas.height = H * scale * dpr;
+
+    // CSS display size
+    canvas.style.width = (W * scale) + 'px';
+    canvas.style.height = (H * scale) + 'px';
+  }
+
+  /**
+   * Convert screen coordinates to logical coordinates.
+   * Use this for mouse/click events to get positions in 720×540 space.
+   */
+  function screenToLogical(screenX, screenY) {
+    const rect = canvas.getBoundingClientRect();
+    return {
+      x: (screenX - rect.left) * (W / rect.width),
+      y: (screenY - rect.top) * (H / rect.height)
+    };
+  }
+
+  const engine = {
+    /** Call this to end the game. DO NOT draw your own end screen. */
+    end(isCorrect, explanation) {
+      if (gameState === 'ended') return;
+      gameState = 'ended';
+      gameResult = isCorrect;
+      gameExplanation = explanation || '';
+      endScreenTime = 0;
+
+      // Spawn confetti for correct answers
+      if (isCorrect) {
+        for (let i = 0; i < 50; i++) {
+          confettiParticles.push({
+            x: W / 2,
+            y: H / 2,
+            vx: (Math.random() - 0.5) * 600,
+            vy: -Math.random() * 400 - 100,
+            size: 4 + Math.random() * 6,
+            color: ['#FFD700', '#FF6B6B', '#4ECDC4', '#95E1D3', '#F38181'][Math.floor(Math.random() * 5)],
+            rotation: Math.random() * Math.PI * 2,
+            rotationSpeed: (Math.random() - 0.5) * 10
+          });
+        }
+      }
+
+      // Notify parent frame
+      if (window.parent && window.parent !== window) {
+        window.parent.postMessage({
+          type: 'quiz-end',
+          isCorrect: isCorrect,
+          explanation: explanation || ''
+        }, '*');
+      }
+    }
+  };
+
+  /** STANDARD END SCREEN - DO NOT MODIFY */
+  function drawEndScreen(dt) {
+    endScreenTime += dt;
+
+    // Update confetti
+    confettiParticles = confettiParticles.filter(p => {
+      p.vy += 800 * dt; // gravity
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.rotation += p.rotationSpeed * dt;
+      p.vx *= 0.99;
+      return p.y < H + 50;
+    });
+
+    // Dark overlay
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
+    ctx.fillRect(0, 0, W, H);
+
+    // Draw confetti
+    confettiParticles.forEach(p => {
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rotation);
+      ctx.fillStyle = p.color;
+      ctx.fillRect(-p.size / 2, -p.size / 4, p.size, p.size / 2);
+      ctx.restore();
+    });
+
+    // Result emoji
+    ctx.font = '72px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(gameResult ? '🎉' : '😢', W / 2, H / 2 - 50);
+
+    // Result text
+    ctx.fillStyle = gameResult ? '#4ADE80' : '#F87171';
+    ctx.font = 'bold 36px system-ui, sans-serif';
+    ctx.fillText(gameResult ? 'Correct!' : 'Wrong!', W / 2, H / 2 + 20);
+
+    // Buttons
+    if (gameResult) {
+      // Correct: show both Restart and Next/Finish
+      drawButton(restartButton, 'Restart', '#E87A3E', true);
+      const nextLabel = QUESTION.isLastQuestion ? 'Finish' : 'Next';
+      drawButton(nextButton, nextLabel, '#4ECDC4', true);
+    } else {
+      // Wrong: show only centered Restart button
+      const centeredRestart = { x: W / 2 - 75, y: H / 2 + 60, w: 150, h: 48 };
+      drawButton(centeredRestart, 'Restart', '#E87A3E', true);
+    }
+  }
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 3: YOUR GAME CODE - IMPLEMENT THESE FUNCTIONS                     ║
+  // ║  This is where your game logic goes. See requirements below.               ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+
+  // === GAME STATE ===
+  let clockAngle = 0;           // Current angle of clock hand (radians)
+  let clockSpeed = 1.5;         // Current rotation speed (radians/second)
+  let baseSpeed = 1.5;          // Base rotation speed
+  let handLocked = false;       // Whether hand is locked in place
+  let selectedZone = null;      // Which zone the hand stopped in
+  let embers = [];              // Trailing ember particles
+  let heatWaves = [];           // Heat distortion waves
+  let rivets = [];              // Glowing rivets on FALSE zone
+  let cracks = [];              // Cinder cracks on FALSE zone
+  let slagParticles = [];       // Slag particles for wrong answer
+  let ashParticles = [];        // Ash particles
+  let doorBuckle = 0;           // Door buckling animation progress
+  let lockTime = 0;             // Time since hand was locked
+  let entranceAnim = 0;         // Entrance animation progress
+  let zoneHighlight = 0;        // Zone highlight pulse
+
+  // Audio context for sound effects
+  let audioCtx = null;
+
+  // Zone boundaries (TRUE is narrow crescent, FALSE is wider)
+  const TRUE_START = -Math.PI * 0.25;  // -45 degrees
+  const TRUE_END = Math.PI * 0.25;      // 45 degrees (90 degree arc)
+  const FALSE_START = Math.PI * 0.25;   // Rest is FALSE
+  const FALSE_END = -Math.PI * 0.25 + Math.PI * 2;
+
+  // Clock center and radius
+  const CX = 360;
+  const CY = 270;
+  const CLOCK_RADIUS = 180;
+  const HAND_LENGTH = 150;
+
+  function initSound() {
+    if (!audioCtx) {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    }
+  }
+
+  function playSound(type) {
+    if (!audioCtx) return;
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+
+    if (type === 'correct') {
+      osc.frequency.setValueAtTime(523.25, audioCtx.currentTime);
+      osc.frequency.setValueAtTime(659.25, audioCtx.currentTime + 0.1);
+      osc.frequency.setValueAtTime(783.99, audioCtx.currentTime + 0.2);
+      gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
+      gain.gain.exponentialDecayTo && gain.gain.exponentialDecayTo(0.01, audioCtx.currentTime + 0.4);
+      gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
+      gain.gain.linearRampToValueAtTime(0.01, audioCtx.currentTime + 0.4);
+      osc.start(audioCtx.currentTime);
+      osc.stop(audioCtx.currentTime + 0.4);
+    } else if (type === 'wrong') {
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(200, audioCtx.currentTime);
+      osc.frequency.linearRampToValueAtTime(100, audioCtx.currentTime + 0.3);
+      gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
+      gain.gain.linearRampToValueAtTime(0.01, audioCtx.currentTime + 0.4);
+      osc.start(audioCtx.currentTime);
+      osc.stop(audioCtx.currentTime + 0.4);
+    } else if (type === 'lock') {
+      osc.type = 'square';
+      osc.frequency.setValueAtTime(150, audioCtx.currentTime);
+      gain.gain.setValueAtTime(0.2, audioCtx.currentTime);
+      gain.gain.linearRampToValueAtTime(0.01, audioCtx.currentTime + 0.15);
+      osc.start(audioCtx.currentTime);
+      osc.stop(audioCtx.currentTime + 0.15);
+    }
+  }
+
+  function initGame() {
+    clockAngle = Math.random() * Math.PI * 2;
+    clockSpeed = baseSpeed;
+    handLocked = false;
+    selectedZone = null;
+    embers = [];
+    heatWaves = [];
+    slagParticles = [];
+    ashParticles = [];
+    doorBuckle = 0;
+    lockTime = 0;
+    entranceAnim = 0;
+    zoneHighlight = 0;
+
+    // Initialize rivets around FALSE zone
+    rivets = [];
+    for (let i = 0; i < 12; i++) {
+      const angle = FALSE_START + (i / 12) * (Math.PI * 1.5);
+      rivets.push({
+        angle: angle,
+        glow: Math.random(),
+        glowSpeed: 0.5 + Math.random() * 1.5
+      });
+    }
+
+    // Initialize cracks on FALSE zone
+    cracks = [];
+    for (let i = 0; i < 8; i++) {
+      const angle = FALSE_START + Math.random() * (Math.PI * 1.5);
+      const dist = 80 + Math.random() * 80;
+      cracks.push({
+        x: CX + Math.cos(angle) * dist,
+        y: CY + Math.sin(angle) * dist,
+        angle: Math.random() * Math.PI * 2,
+        length: 15 + Math.random() * 25
+      });
+    }
+
+    // Initialize heat waves
+    for (let i = 0; i < 3; i++) {
+      heatWaves.push({
+        y: 100 + Math.random() * 340,
+        offset: Math.random() * Math.PI * 2,
+        speed: 0.5 + Math.random() * 0.5
+      });
+    }
+
+    initSound();
+  }
+
+  function normalizeAngle(angle) {
+    while (angle < -Math.PI) angle += Math.PI * 2;
+    while (angle > Math.PI) angle -= Math.PI * 2;
+    return angle;
+  }
+
+  function isInTrueZone(angle) {
+    const normalized = normalizeAngle(angle);
+    return normalized >= TRUE_START && normalized <= TRUE_END;
+  }
+
+  function updateGame(dt) {
+    if (gameState !== 'playing') return;
+
+    entranceAnim = Math.min(1, entranceAnim + dt * 2);
+    zoneHighlight += dt * 3;
+
+    // Update heat waves
+    heatWaves.forEach(wave => {
+      wave.offset += wave.speed * dt;
+    });
+
+    // Update rivets glow
+    rivets.forEach(rivet => {
+      rivet.glow += rivet.glowSpeed * dt;
+    });
+
+    if (!handLocked) {
+      // Rotate clock hand
+      clockAngle += clockSpeed * dt;
+      if (clockAngle > Math.PI * 2) clockAngle -= Math.PI * 2;
+
+      // Spawn embers trailing the hand
+      if (Math.random() < dt * 30) {
+        const handX = CX + Math.cos(clockAngle - Math.PI / 2) * HAND_LENGTH * 0.9;
+        const handY = CY + Math.sin(clockAngle - Math.PI / 2) * HAND_LENGTH * 0.9;
+        embers.push({
+          x: handX + (Math.random() - 0.5) * 10,
+          y: handY + (Math.random() - 0.5) * 10,
+          vx: (Math.random() - 0.5) * 30,
+          vy: -20 - Math.random() * 40,
+          life: 1,
+          size: 2 + Math.random() * 4
+        });
+      }
+    } else {
+      lockTime += dt;
+
+      // Check if we got the wrong answer - trigger slag cascade
+      if (selectedZone !== null) {
+        const choice = selectedZone === 'true' ? QUESTION.choices[0] : QUESTION.choices[1];
+
+        if (!choice.is_correct && doorBuckle < 1) {
+          doorBuckle = Math.min(1, doorBuckle + dt * 2);
+
+          // Spawn slag particles
+          if (Math.random() < dt * 50) {
+            slagParticles.push({
+              x: CX + (Math.random() - 0.5) * 200,
+              y: 50 + Math.random() * 100,
+              vx: (Math.random() - 0.5) * 100,
+              vy: 50 + Math.random() * 100,
+              life: 1,
+              size: 5 + Math.random() * 10
+            });
+          }
+
+          // Spawn ash particles
+          if (Math.random() < dt * 40) {
+            ashParticles.push({
+              x: CX + (Math.random() - 0.5) * 300,
+              y: CY + (Math.random() - 0.5) * 200,
+              vx: (Math.random() - 0.5) * 20,
+              vy: -10 - Math.random() * 30,
+              life: 1,
+              size: 2 + Math.random() * 3
+            });
+          }
+        }
+
+        // End game after animation
+        if (lockTime > 1.2) {
+          playSound(choice.is_correct ? 'correct' : 'wrong');
+          engine.end(choice.is_correct, choice.explanation);
+        }
+      }
+    }
+
+    // Update embers
+    embers = embers.filter(e => {
+      e.x += e.vx * dt;
+      e.y += e.vy * dt;
+      e.vy += 50 * dt; // slight gravity
+      e.life -= dt * 1.5;
+      return e.life > 0;
+    });
+
+    // Update slag particles
+    slagParticles = slagParticles.filter(s => {
+      s.x += s.vx * dt;
+      s.y += s.vy * dt;
+      s.vy += 200 * dt;
+      s.life -= dt * 0.8;
+      return s.life > 0 && s.y < H;
+    });
+
+    // Update ash particles
+    ashParticles = ashParticles.filter(a => {
+      a.x += a.vx * dt;
+      a.y += a.vy * dt;
+      a.life -= dt * 0.5;
+      return a.life > 0;
+    });
+  }
+
+  function drawGame() {
+    // Dark forge background
+    ctx.fillStyle = '#0D0D12';
+    ctx.fillRect(0, 0, W, H);
+
+    // Draw heat distortion waves (subtle)
+    ctx.save();
+    ctx.globalAlpha = 0.1;
+    heatWaves.forEach(wave => {
+      ctx.strokeStyle = '#E87A3E';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      for (let x = 0; x < W; x += 5) {
+        const y = wave.y + Math.sin(x * 0.02 + wave.offset) * 8;
+        if (x === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+    });
+    ctx.restore();
+
+    // Draw furnace door frame
+    const doorScale = 1 + doorBuckle * 0.05;
+    ctx.save();
+    ctx.translate(CX, CY);
+    ctx.scale(doorScale, doorScale);
+    ctx.translate(-CX, -CY);
+
+    // Outer iron frame
+    ctx.strokeStyle = '#3D3D3D';
+    ctx.lineWidth = 25;
+    ctx.beginPath();
+    ctx.arc(CX, CY, CLOCK_RADIUS + 30, 0, Math.PI * 2);
+    ctx.stroke();
+
+    // Inner glow rim
+    const rimGradient = ctx.createRadialGradient(CX, CY, CLOCK_RADIUS - 10, CX, CY, CLOCK_RADIUS + 10);
+    rimGradient.addColorStop(0, 'rgba(232, 122, 62, 0.8)');
+    rimGradient.addColorStop(1, 'rgba(232, 122, 62, 0)');
+    ctx.strokeStyle = rimGradient;
+    ctx.lineWidth = 15;
+    ctx.beginPath();
+    ctx.arc(CX, CY, CLOCK_RADIUS, 0, Math.PI * 2);
+    ctx.stroke();
+
+    ctx.restore();
+
+    // Draw clock face zones
+    // FALSE zone (wider, cooled iron with cracks)
+    ctx.save();
+    const falseGradient = ctx.createRadialGradient(CX, CY, 0, CX, CY, CLOCK_RADIUS);
+    falseGradient.addColorStop(0, '#2B2B28');
+    falseGradient.addColorStop(0.7, '#1A1A18');
+    falseGradient.addColorStop(1, '#0D0D0A');
+    ctx.fillStyle = falseGradient;
+    ctx.beginPath();
+    ctx.moveTo(CX, CY);
+    ctx.arc(CX, CY, CLOCK_RADIUS, TRUE_END - Math.PI / 2, TRUE_START - Math.PI / 2 + Math.PI * 2);
+    ctx.closePath();
+    ctx.fill();
+
+    // Cinder cracks
+    ctx.strokeStyle = '#E85D4A';
+    ctx.lineWidth = 2;
+    ctx.globalAlpha = 0.6;
+    cracks.forEach(crack => {
+      ctx.beginPath();
+      ctx.moveTo(crack.x, crack.y);
+      ctx.lineTo(
+        crack.x + Math.cos(crack.angle) * crack.length,
+        crack.y + Math.sin(crack.angle) * crack.length
+      );
+      ctx.stroke();
+      // Branch
+      ctx.beginPath();
+      ctx.moveTo(
+        crack.x + Math.cos(crack.angle) * crack.length * 0.5,
+        crack.y + Math.sin(crack.angle) * crack.length * 0.5
+      );
+      ctx.lineTo(
+        crack.x + Math.cos(crack.angle + 0.5) * crack.length * 0.4,
+        crack.y + Math.sin(crack.angle + 0.5) * crack.length * 0.4
+      );
+      ctx.stroke();
+    });
+    ctx.globalAlpha = 1;
+
+    // Glowing rivets
+    rivets.forEach(rivet => {
+      const rx = CX + Math.cos(rivet.angle - Math.PI / 2) * (CLOCK_RADIUS - 25);
+      const ry = CY + Math.sin(rivet.angle - Math.PI / 2) * (CLOCK_RADIUS - 25);
+      const glowIntensity = 0.3 + Math.sin(rivet.glow) * 0.3;
+
+      // Rivet glow
+      const rivetGlow = ctx.createRadialGradient(rx, ry, 0, rx, ry, 12);
+      rivetGlow.addColorStop(0, `rgba(232, 93, 74, ${glowIntensity})`);
+      rivetGlow.addColorStop(1, 'rgba(232, 93, 74, 0)');
+      ctx.fillStyle = rivetGlow;
+      ctx.beginPath();
+      ctx.arc(rx, ry, 12, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Rivet center
+      ctx.fillStyle = '#4A4A48';
+      ctx.beginPath();
+      ctx.arc(rx, ry, 5, 0, Math.PI * 2);
+      ctx.fill();
+    });
+    ctx.restore();
+
+    // TRUE zone (narrow crescent, molten gold eclipse corona)
+    ctx.save();
+    const trueGradient = ctx.createRadialGradient(CX, CY - 50, 0, CX, CY, CLOCK_RADIUS);
+    trueGradient.addColorStop(0, '#FFD93D');
+    trueGradient.addColorStop(0.5, '#F5A742');
+    trueGradient.addColorStop(0.8, '#E87A3E');
+    trueGradient.addColorStop(1, '#D64545');
+    ctx.fillStyle = trueGradient;
+    ctx.beginPath();
+    ctx.moveTo(CX, CY);
+    ctx.arc(CX, CY, CLOCK_RADIUS, TRUE_START - Math.PI / 2, TRUE_END - Math.PI / 2);
+    ctx.closePath();
+    ctx.fill();
+
+    // Corona glow effect
+    ctx.globalAlpha = 0.5 + Math.sin(zoneHighlight) * 0.2;
+    const coronaGlow = ctx.createRadialGradient(CX, CY, CLOCK_RADIUS - 30, CX, CY, CLOCK_RADIUS + 20);
+    coronaGlow.addColorStop(0, 'rgba(255, 217, 61, 0)');
+    coronaGlow.addColorStop(0.5, 'rgba(255, 217, 61, 0.4)');
+    coronaGlow.addColorStop(1, 'rgba(255, 217, 61, 0)');
+    ctx.fillStyle = coronaGlow;
+    ctx.beginPath();
+    ctx.moveTo(CX, CY);
+    ctx.arc(CX, CY, CLOCK_RADIUS + 20, TRUE_START - Math.PI / 2, TRUE_END - Math.PI / 2);
+    ctx.closePath();
+    ctx.fill();
+    ctx.globalAlpha = 1;
+    ctx.restore();
+
+    // Zone labels
+    ctx.save();
+    ctx.font = 'bold 28px Belanosima, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+
+    // TRUE label (in corona zone)
+    ctx.fillStyle = '#FAFAF7';
+    ctx.shadowColor = '#E87A3E';
+    ctx.shadowBlur = 15;
+    const trueLabelX = CX + Math.cos(-Math.PI / 2) * 100;
+    const trueLabelY = CY + Math.sin(-Math.PI / 2) * 100;
+    ctx.fillText('TRUE', trueLabelX, trueLabelY);
+
+    // FALSE label (in cooled iron zone)
+    ctx.fillStyle = '#E85D4A';
+    ctx.shadowColor = '#E85D4A';
+    ctx.shadowBlur = 10;
+    const falseLabelX = CX + Math.cos(Math.PI / 2) * 100;
+    const falseLabelY = CY + Math.sin(Math.PI / 2) * 100;
+    ctx.fillText('FALSE', falseLabelX, falseLabelY);
+    ctx.shadowBlur = 0;
+    ctx.restore();
+
+    // Draw embers
+    embers.forEach(e => {
+      ctx.globalAlpha = e.life;
+      const emberGradient = ctx.createRadialGradient(e.x, e.y, 0, e.x, e.y, e.size);
+      emberGradient.addColorStop(0, '#FFD93D');
+      emberGradient.addColorStop(0.5, '#E87A3E');
+      emberGradient.addColorStop(1, 'rgba(232, 122, 62, 0)');
+      ctx.fillStyle = emberGradient;
+      ctx.beginPath();
+      ctx.arc(e.x, e.y, e.size, 0, Math.PI * 2);
+      ctx.fill();
+    });
+    ctx.globalAlpha = 1;
+
+    // Draw clock hand
+    ctx.save();
+    ctx.translate(CX, CY);
+    ctx.rotate(clockAngle - Math.PI / 2);
+
+    // Hand shadow/glow
+    ctx.shadowColor = '#E87A3E';
+    ctx.shadowBlur = 20;
+
+    // Hand body (iron with molten edge)
+    const handGradient = ctx.createLinearGradient(0, 0, 0, -HAND_LENGTH);
+    handGradient.addColorStop(0, '#5A5A58');
+    handGradient.addColorStop(0.3, '#3D3D3B');
+    handGradient.addColorStop(0.7, '#E87A3E');
+    handGradient.addColorStop(1, '#FFD93D');
+    ctx.fillStyle = handGradient;
+    ctx.beginPath();
+    ctx.moveTo(-8, 0);
+    ctx.lineTo(-4, -HAND_LENGTH + 20);
+    ctx.lineTo(0, -HAND_LENGTH);
+    ctx.lineTo(4, -HAND_LENGTH + 20);
+    ctx.lineTo(8, 0);
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.shadowBlur = 0;
+    ctx.restore();
+
+    // Center hub
+    ctx.fillStyle = '#3D3D3D';
+    ctx.beginPath();
+    ctx.arc(CX, CY, 18, 0, Math.PI * 2);
+    ctx.fill();
+
+    const hubGlow = ctx.createRadialGradient(CX, CY, 5, CX, CY, 18);
+    hubGlow.addColorStop(0, '#E87A3E');
+    hubGlow.addColorStop(1, '#3D3D3D');
+    ctx.fillStyle = hubGlow;
+    ctx.beginPath();
+    ctx.arc(CX, CY, 12, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Draw slag particles (for wrong answer)
+    slagParticles.forEach(s => {
+      ctx.globalAlpha = s.life;
+      ctx.fillStyle = '#5A5A58';
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, s.size, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Molten edge
+      ctx.fillStyle = `rgba(232, 122, 62, ${s.life * 0.5})`;
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, s.size * 0.6, 0, Math.PI * 2);
+      ctx.fill();
+    });
+    ctx.globalAlpha = 1;
+
+    // Draw ash particles
+    ashParticles.forEach(a => {
+      ctx.globalAlpha = a.life * 0.7;
+      ctx.fillStyle = '#8A8A88';
+      ctx.beginPath();
+      ctx.arc(a.x, a.y, a.size, 0, Math.PI * 2);
+      ctx.fill();
+    });
+    ctx.globalAlpha = 1;
+
+    // Speed indicator
+    ctx.save();
+    ctx.font = '16px Nunito, sans-serif';
+    ctx.fillStyle = '#FAFAF7';
+    ctx.textAlign = 'right';
+    ctx.fillText(`Speed: ${clockSpeed.toFixed(1)}x`, W - 30, 30);
+    ctx.restore();
+
+    // Entrance animation overlay
+    if (entranceAnim < 1) {
+      ctx.globalAlpha = 1 - entranceAnim;
+      ctx.fillStyle = '#0D0D12';
+      ctx.fillRect(0, 0, W, H);
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  function handleInput(e) {
+    if (gameState !== 'playing') return;
+
+    if (handLocked) return; // Already locked
+
+    // Adjust speed with arrow keys or WASD
+    if (e.code === 'ArrowUp' || e.code === 'KeyW') {
+      clockSpeed = Math.min(5, clockSpeed + 0.3);
+    } else if (e.code === 'ArrowDown' || e.code === 'KeyS') {
+      clockSpeed = Math.max(0.3, clockSpeed - 0.3);
+    } else if (e.code === 'ArrowLeft' || e.code === 'KeyA') {
+      clockSpeed = -Math.abs(clockSpeed); // Reverse direction
+    } else if (e.code === 'ArrowRight' || e.code === 'KeyD') {
+      clockSpeed = Math.abs(clockSpeed); // Forward direction
+    }
+
+    // Lock hand with Space or Enter
+    if (e.code === 'Space' || e.code === 'Enter') {
+      e.preventDefault();
+      handLocked = true;
+      playSound('lock');
+
+      // Determine which zone the hand is in
+      const normalizedAngle = normalizeAngle(clockAngle - Math.PI / 2);
+      if (isInTrueZone(normalizedAngle)) {
+        selectedZone = 'true';
+      } else {
+        selectedZone = 'false';
+      }
+    }
+  }
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 4: GAME LOOP - DO NOT MODIFY                                      ║
+  // ║  Standard loop with responsive scaling and DPR support.                    ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  let lastTime = performance.now();
+
+  function gameLoop(now) {
+    const dt = Math.min((now - lastTime) / 1000, 0.05); // Cap at 50ms
+    lastTime = now;
+
+    // Apply transform for logical coordinate system
+    ctx.setTransform(scale * dpr, 0, 0, scale * dpr, 0, 0);
+
+    if (gameState === 'playing') {
+      updateGame(dt);
+      drawGame();
+    } else {
+      drawGame(); // Draw game state behind overlay
+      drawEndScreen(dt);
+    }
+
+    // Reset transform for next frame
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+    requestAnimationFrame(gameLoop);
+  }
+
+  // Input handlers
+  document.addEventListener('keydown', (e) => {
+    if (gameState === 'ended' && (e.code === 'KeyR')) {
+      // Restart game
+      gameState = 'playing';
+      gameResult = null;
+      gameExplanation = '';
+      confettiParticles = [];
+      initGame();
+      return;
+    }
+    handleInput(e);
+  });
+
+  document.addEventListener('keyup', (e) => {
+    // Optional: handle key release in your handleInput
+  });
+
+  // Canvas click handler for end screen buttons
+  canvas.addEventListener('click', (e) => {
+    if (gameState !== 'ended') return;
+
+    const { x, y } = screenToLogical(e.clientX, e.clientY);
+
+    if (gameResult) {
+      // Correct answer: check both buttons
+      if (pointInRect(x, y, restartButton)) {
+        gameState = 'playing';
+        gameResult = null;
+        gameExplanation = '';
+        confettiParticles = [];
+        initGame();
+        return;
+      }
+      if (pointInRect(x, y, nextButton)) {
+        // Notify parent to go to next question
+        if (window.parent && window.parent !== window) {
+          window.parent.postMessage({ type: 'quiz-next' }, '*');
+        }
+        return;
+      }
+    } else {
+      // Wrong answer: check centered restart button
+      const centeredRestart = { x: W / 2 - 75, y: H / 2 + 60, w: 150, h: 48 };
+      if (pointInRect(x, y, centeredRestart)) {
+        gameState = 'playing';
+        gameResult = null;
+        gameExplanation = '';
+        confettiParticles = [];
+        initGame();
+        return;
+      }
+    }
+  });
+
+  // Handle resize
+  window.addEventListener('resize', resizeCanvas);
+
+  // Initialize
+  resizeCanvas();
+  initGame();
+  requestAnimationFrame(gameLoop);
+  </script>
+</body>
+</html>

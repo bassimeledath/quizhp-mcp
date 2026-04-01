@@ -1,0 +1,1291 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ember Canyon Bowling</title>
+  <!--
+  ╔══════════════════════════════════════════════════════════════════════════════╗
+  ║  GAME FACTORY TEMPLATE                                                        ║
+  ║  This template enforces critical invariants. Follow the section markers.      ║
+  ╚══════════════════════════════════════════════════════════════════════════════╝
+  -->
+  <link href="https://fonts.googleapis.com/css2?family=Belanosima:wght@400;600;700&family=Nunito+Sans:wght@400;500;600;700&family=Nunito:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    /* ═══════════════════════════════════════════════════════════════════════════
+       BASE STYLES - Can be extended, not removed
+       ═══════════════════════════════════════════════════════════════════════════ */
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+    }
+    body {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      background: #1a1a2e;
+      font-family: 'Nunito Sans', system-ui, -apple-system, sans-serif;
+    }
+    #gameCanvas {
+      background: #16213e;
+      border-radius: 8px;
+      display: block;
+    }
+  </style>
+</head>
+<body>
+  <!-- ═══════════════════════════════════════════════════════════════════════════
+       CANVAS - Sized dynamically to fill available space
+       ═══════════════════════════════════════════════════════════════════════════ -->
+  <canvas id="gameCanvas"></canvas>
+
+  <script>
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 1: QUESTION PLACEHOLDER - DO NOT MODIFY FORMAT                    ║
+  // ║  Platform replaces this at runtime. Use these exact 60-char answers.       ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  const QUESTION = {
+    type: "mcq",
+    prompt: "Sample question text",
+    choices: [
+      { text: "This is sample answer A which is long enough to test text overflow", is_correct: true, explanation: "Why A is correct" },
+      { text: "This is sample answer B which is long enough to test text overflow", is_correct: false, explanation: "Why B is wrong" },
+      { text: "This is sample answer C which is long enough to test text overflow", is_correct: false, explanation: "Why C is wrong" },
+      { text: "This is sample answer D which is long enough to test text overflow", is_correct: false, explanation: "Why D is wrong" }
+    ],
+    isLastQuestion: false
+  };
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 2: ENGINE CORE - DO NOT MODIFY                                    ║
+  // ║  Standard engine interface and end screen. This is sacred.                 ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  const canvas = document.getElementById('gameCanvas');
+  const ctx = canvas.getContext('2d');
+
+  // Logical dimensions (game code works in this coordinate space)
+  const W = 720, H = 540;
+
+  // Scaling state (computed on resize)
+  let scale = 1;
+  let dpr = 1;
+
+  let gameState = 'playing'; // 'playing' | 'ended'
+  let gameResult = null;     // true (correct) | false (wrong)
+  let gameExplanation = '';
+  let endScreenTime = 0;
+  let confettiParticles = [];
+
+  // End screen button bounds (logical coordinates)
+  const restartButton = { x: W / 2 - 170, y: H / 2 + 60, w: 150, h: 48 };
+  const nextButton = { x: W / 2 + 20, y: H / 2 + 60, w: 150, h: 48 };
+
+  /** Check if point is inside rectangle */
+  function pointInRect(px, py, rect) {
+    return px >= rect.x && px <= rect.x + rect.w &&
+           py >= rect.y && py <= rect.y + rect.h;
+  }
+
+  /** Draw a styled button */
+  function drawButton(rect, label, color, pulse) {
+    const p = pulse ? 1 + Math.sin(endScreenTime * 4) * 0.03 : 1;
+    ctx.save();
+    ctx.translate(rect.x + rect.w / 2, rect.y + rect.h / 2);
+    ctx.scale(p, p);
+    ctx.translate(-(rect.x + rect.w / 2), -(rect.y + rect.h / 2));
+
+    // Button background
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.roundRect(rect.x, rect.y, rect.w, rect.h, 12);
+    ctx.fill();
+
+    // Button text
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = 'bold 18px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, rect.x + rect.w / 2, rect.y + rect.h / 2);
+
+    ctx.restore();
+  }
+
+  /**
+   * Resize canvas to fill available space with proper DPR scaling.
+   * Maintains logical coordinate system (720×540).
+   */
+  function resizeCanvas() {
+    dpr = window.devicePixelRatio || 1;
+
+    // Get available space
+    const availW = window.innerWidth;
+    const availH = window.innerHeight;
+
+    // Calculate scale to fit logical space (720×540) in available space
+    const scaleX = availW / W;
+    const scaleY = availH / H;
+    scale = Math.min(scaleX, scaleY);
+
+    // Physical canvas buffer (DPR-scaled for crisp rendering)
+    canvas.width = W * scale * dpr;
+    canvas.height = H * scale * dpr;
+
+    // CSS display size
+    canvas.style.width = (W * scale) + 'px';
+    canvas.style.height = (H * scale) + 'px';
+  }
+
+  /**
+   * Convert screen coordinates to logical coordinates.
+   * Use this for mouse/click events to get positions in 720×540 space.
+   */
+  function screenToLogical(screenX, screenY) {
+    const rect = canvas.getBoundingClientRect();
+    return {
+      x: (screenX - rect.left) * (W / rect.width),
+      y: (screenY - rect.top) * (H / rect.height)
+    };
+  }
+
+  const engine = {
+    /** Call this to end the game. DO NOT draw your own end screen. */
+    end(isCorrect, explanation) {
+      if (gameState === 'ended') return;
+      gameState = 'ended';
+      gameResult = isCorrect;
+      gameExplanation = explanation || '';
+      endScreenTime = 0;
+
+      // Spawn confetti for correct answers
+      if (isCorrect) {
+        for (let i = 0; i < 50; i++) {
+          confettiParticles.push({
+            x: W / 2,
+            y: H / 2,
+            vx: (Math.random() - 0.5) * 600,
+            vy: -Math.random() * 400 - 100,
+            size: 4 + Math.random() * 6,
+            color: ['#FFD700', '#FF6B6B', '#4ECDC4', '#95E1D3', '#F38181'][Math.floor(Math.random() * 5)],
+            rotation: Math.random() * Math.PI * 2,
+            rotationSpeed: (Math.random() - 0.5) * 10
+          });
+        }
+      }
+
+      // Notify parent frame
+      if (window.parent && window.parent !== window) {
+        window.parent.postMessage({
+          type: 'quiz-end',
+          isCorrect: isCorrect,
+          explanation: explanation || ''
+        }, '*');
+      }
+    }
+  };
+
+  /** STANDARD END SCREEN - DO NOT MODIFY */
+  function drawEndScreen(dt) {
+    endScreenTime += dt;
+
+    // Update confetti
+    confettiParticles = confettiParticles.filter(p => {
+      p.vy += 800 * dt; // gravity
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.rotation += p.rotationSpeed * dt;
+      p.vx *= 0.99;
+      return p.y < H + 50;
+    });
+
+    // Dark overlay
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
+    ctx.fillRect(0, 0, W, H);
+
+    // Draw confetti
+    confettiParticles.forEach(p => {
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rotation);
+      ctx.fillStyle = p.color;
+      ctx.fillRect(-p.size / 2, -p.size / 4, p.size, p.size / 2);
+      ctx.restore();
+    });
+
+    // Result emoji
+    ctx.font = '72px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(gameResult ? '🎉' : '😢', W / 2, H / 2 - 50);
+
+    // Result text
+    ctx.fillStyle = gameResult ? '#4ADE80' : '#F87171';
+    ctx.font = 'bold 36px system-ui, sans-serif';
+    ctx.fillText(gameResult ? 'Correct!' : 'Wrong!', W / 2, H / 2 + 20);
+
+    // Buttons
+    if (gameResult) {
+      // Correct: show both Restart and Next/Finish
+      drawButton(restartButton, 'Restart', '#E87A3E', true);
+      const nextLabel = QUESTION.isLastQuestion ? 'Finish' : 'Next';
+      drawButton(nextButton, nextLabel, '#4ECDC4', true);
+    } else {
+      // Wrong: show only centered Restart button
+      const centeredRestart = { x: W / 2 - 75, y: H / 2 + 60, w: 150, h: 48 };
+      drawButton(centeredRestart, 'Restart', '#E87A3E', true);
+    }
+  }
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 3: YOUR GAME CODE - IMPLEMENT THESE FUNCTIONS                     ║
+  // ║  This is where your game logic goes. See requirements below.               ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+
+  // === AUDIO SYSTEM ===
+  let audioCtx = null;
+  function getAudioContext() {
+    if (!audioCtx) {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    return audioCtx;
+  }
+
+  function playSound(type) {
+    try {
+      const ctx = getAudioContext();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+
+      if (type === 'roll') {
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(150, ctx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(80, ctx.currentTime + 0.3);
+        gain.gain.setValueAtTime(0.15, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.3);
+        osc.start(ctx.currentTime);
+        osc.stop(ctx.currentTime + 0.3);
+      } else if (type === 'hit') {
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(300, ctx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(100, ctx.currentTime + 0.15);
+        gain.gain.setValueAtTime(0.2, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.15);
+        osc.start(ctx.currentTime);
+        osc.stop(ctx.currentTime + 0.15);
+      } else if (type === 'correct') {
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(523, ctx.currentTime);
+        osc.frequency.setValueAtTime(659, ctx.currentTime + 0.1);
+        osc.frequency.setValueAtTime(784, ctx.currentTime + 0.2);
+        gain.gain.setValueAtTime(0.2, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.4);
+        osc.start(ctx.currentTime);
+        osc.stop(ctx.currentTime + 0.4);
+      } else if (type === 'wrong') {
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(200, ctx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(80, ctx.currentTime + 0.3);
+        gain.gain.setValueAtTime(0.15, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.3);
+        osc.start(ctx.currentTime);
+        osc.stop(ctx.currentTime + 0.3);
+      } else if (type === 'select') {
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(440, ctx.currentTime);
+        gain.gain.setValueAtTime(0.1, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.08);
+        osc.start(ctx.currentTime);
+        osc.stop(ctx.currentTime + 0.08);
+      }
+    } catch(e) {}
+  }
+
+  // === GAME STATE ===
+  // Colors
+  const COLORS = {
+    canyonBg: '#3D2417',
+    canyonWall: '#5C3A28',
+    canyonHighlight: '#8B5A3C',
+    lava: '#E85D4A',
+    lavaGlow: '#F5A742',
+    ember: '#E87A3E',
+    smoke: '#4A4A4A',
+    rope: '#8B7355',
+    shrine: '#C9B896',
+    shrineFlag: '#E87A3E',
+    sky: '#2B1810',
+    text: '#FAFAF7',
+    waxSeal: '#8B0000',
+    cairnStone: '#6E5C4A',
+    bridge: '#5C4033',
+    success: '#6BBF59',
+    error: '#E85D4A'
+  };
+
+  // Game objects
+  let ball = { x: 0, y: 0, vx: 0, vy: 0, rolling: false, radius: 12 };
+  let aimAngle = 0;
+  let aimDirection = 1;
+  let power = 0;
+  let powerDirection = 1;
+  let charging = false;
+  let selectedLane = 0;
+  let lanes = [];
+  let cairns = [];
+  let ashCrows = [];
+  let shrineFlags = [];
+  let bridges = [];
+  let emberParticles = [];
+  let smokeParticles = [];
+  let correctAnswers = 0;
+  let shakeTime = 0;
+  let shakeIntensity = 0;
+  let celebrationTime = 0;
+  let answerSelected = false;
+  let entranceTime = 0;
+  let laneEntranceProgress = [0, 0, 0, 0];
+
+  // Lane geometry
+  const LANE_START_Y = 450;
+  const LANE_END_Y = 80;
+  const LANE_WIDTH = 140;
+  const LANE_SPACING = 10;
+  const TOTAL_LANES_WIDTH = 4 * LANE_WIDTH + 3 * LANE_SPACING;
+  const LANES_START_X = (W - TOTAL_LANES_WIDTH) / 2;
+
+  function initGame() {
+    // Reset game state
+    ball = { x: W / 2, y: LANE_START_Y + 30, vx: 0, vy: 0, rolling: false, radius: 12 };
+    aimAngle = 0;
+    aimDirection = 1;
+    power = 0;
+    powerDirection = 1;
+    charging = false;
+    selectedLane = 0;
+    ashCrows = [];
+    emberParticles = [];
+    smokeParticles = [];
+    shakeTime = 0;
+    shakeIntensity = 0;
+    celebrationTime = 0;
+    answerSelected = false;
+
+    // Initialize lanes with cairn clusters for each answer
+    lanes = [];
+    cairns = [];
+
+    for (let i = 0; i < 4; i++) {
+      const laneX = LANES_START_X + i * (LANE_WIDTH + LANE_SPACING) + LANE_WIDTH / 2;
+      lanes.push({
+        x: laneX,
+        index: i,
+        choice: QUESTION.choices[i]
+      });
+
+      // Create cairn cluster (pins) for this lane - triangular arrangement
+      const cairnBaseY = LANE_END_Y + 50;
+      const cairnPositions = [
+        { x: 0, y: 0 },           // Front
+        { x: -20, y: -30 },       // Back left
+        { x: 20, y: -30 },        // Back right
+        { x: 0, y: -60 }          // Top
+      ];
+
+      cairnPositions.forEach((pos, j) => {
+        cairns.push({
+          x: laneX + pos.x,
+          y: cairnBaseY + pos.y,
+          lane: i,
+          standing: true,
+          fallAngle: 0,
+          fallSpeed: 0,
+          stones: generateStoneStack()
+        });
+      });
+    }
+
+    // Initialize shrine flags (decorative elements on sides)
+    shrineFlags = [];
+    for (let i = 0; i < 6; i++) {
+      shrineFlags.push({
+        x: i < 3 ? 30 + i * 25 : W - 80 + (i - 3) * 25,
+        y: 100 + Math.random() * 300,
+        angle: 0,
+        stripped: false,
+        color: i % 2 === 0 ? COLORS.ember : COLORS.lavaGlow
+      });
+    }
+
+    // Initialize bridges (revealed on correct answers)
+    bridges = [];
+    for (let i = 0; i < 5; i++) {
+      bridges.push({
+        x: 60 + i * 40,
+        y: 50,
+        revealed: i < correctAnswers,
+        revealProgress: i < correctAnswers ? 1 : 0
+      });
+    }
+
+    // Position ball at currently selected lane
+    updateBallPosition();
+
+    // Reset entrance animation
+    entranceTime = 0;
+    laneEntranceProgress = [0, 0, 0, 0];
+  }
+
+  function generateStoneStack() {
+    const stones = [];
+    const stackHeight = 3 + Math.floor(Math.random() * 2);
+    for (let i = 0; i < stackHeight; i++) {
+      stones.push({
+        offsetX: (Math.random() - 0.5) * 6,
+        offsetY: -i * 12,
+        width: 14 + Math.random() * 8,
+        height: 10 + Math.random() * 5
+      });
+    }
+    return stones;
+  }
+
+  function updateBallPosition() {
+    ball.x = lanes[selectedLane].x;
+    ball.y = LANE_START_Y + 30;
+  }
+
+  function updateGame(dt) {
+    if (gameState !== 'playing') return;
+
+    // Update entrance animations
+    entranceTime += dt;
+    for (let i = 0; i < 4; i++) {
+      const delay = i * 0.1;
+      if (entranceTime > delay) {
+        const progress = Math.min(1, (entranceTime - delay) * 3);
+        // Spring easing
+        const spring = 1 + Math.sin(progress * Math.PI * 2) * 0.15 * (1 - progress);
+        laneEntranceProgress[i] = progress * spring;
+      }
+    }
+
+    // Update shake effect
+    if (shakeTime > 0) {
+      shakeTime -= dt;
+    }
+
+    // Update celebration
+    if (celebrationTime > 0) {
+      celebrationTime -= dt;
+    }
+
+    // Auto-oscillate aim angle when not charging
+    if (!charging && !ball.rolling) {
+      aimAngle += aimDirection * dt * 1.5;
+      if (aimAngle > 0.4) {
+        aimAngle = 0.4;
+        aimDirection = -1;
+      } else if (aimAngle < -0.4) {
+        aimAngle = -0.4;
+        aimDirection = 1;
+      }
+    }
+
+    // Update power when charging
+    if (charging) {
+      power += powerDirection * dt * 1.2;
+      if (power > 1) {
+        power = 1;
+        powerDirection = -1;
+      } else if (power < 0.3) {
+        power = 0.3;
+        powerDirection = 1;
+      }
+    }
+
+    // Update rolling ball
+    if (ball.rolling) {
+      ball.x += ball.vx * dt;
+      ball.y += ball.vy * dt;
+
+      // Add some drag
+      ball.vx *= 0.995;
+      ball.vy *= 0.995;
+
+      // Add ember trail
+      if (Math.random() < 0.3) {
+        emberParticles.push({
+          x: ball.x + (Math.random() - 0.5) * 10,
+          y: ball.y + (Math.random() - 0.5) * 10,
+          vx: (Math.random() - 0.5) * 30,
+          vy: Math.random() * 20,
+          life: 0.5 + Math.random() * 0.5,
+          size: 2 + Math.random() * 3
+        });
+      }
+
+      // Check collision with cairns
+      cairns.forEach(cairn => {
+        if (cairn.standing && cairn.lane === selectedLane) {
+          const dx = ball.x - cairn.x;
+          const dy = ball.y - cairn.y;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+
+          if (dist < 30) {
+            cairn.standing = false;
+            cairn.fallAngle = Math.atan2(dx, -dy);
+            cairn.fallSpeed = 3;
+            playSound('hit');
+
+            // Add smoke on impact
+            for (let i = 0; i < 5; i++) {
+              smokeParticles.push({
+                x: cairn.x,
+                y: cairn.y,
+                vx: (Math.random() - 0.5) * 50,
+                vy: -Math.random() * 30,
+                life: 0.8 + Math.random() * 0.4,
+                size: 8 + Math.random() * 8
+              });
+            }
+          }
+        }
+      });
+
+      // Check if ball reached the end zone
+      if (ball.y < LANE_END_Y + 80 && !answerSelected) {
+        answerSelected = true;
+        const choice = lanes[selectedLane].choice;
+
+        if (choice.is_correct) {
+          correctAnswers++;
+          celebrationTime = 1;
+          playSound('correct');
+          // Reveal next bridge span
+          if (bridges[correctAnswers - 1]) {
+            bridges[correctAnswers - 1].revealed = true;
+          }
+          // Celebration particles
+          for (let i = 0; i < 30; i++) {
+            emberParticles.push({
+              x: ball.x,
+              y: ball.y,
+              vx: (Math.random() - 0.5) * 200,
+              vy: -Math.random() * 150 - 50,
+              life: 1 + Math.random(),
+              size: 4 + Math.random() * 4
+            });
+          }
+          setTimeout(() => {
+            engine.end(true, choice.explanation);
+          }, 800);
+        } else {
+          shakeTime = 0.5;
+          shakeIntensity = 8;
+          playSound('wrong');
+          // Spawn ash crows
+          spawnAshCrows();
+          setTimeout(() => {
+            engine.end(false, choice.explanation);
+          }, 1200);
+        }
+      }
+
+      // Stop ball if it goes too slow or out of bounds
+      if (ball.y < LANE_END_Y - 20 || Math.abs(ball.vy) < 5) {
+        ball.rolling = false;
+      }
+    }
+
+    // Update ash crows
+    ashCrows.forEach(crow => {
+      crow.x += crow.vx * dt;
+      crow.y += crow.vy * dt;
+      crow.flapPhase += dt * 10;
+      crow.life -= dt;
+
+      // Strip nearest flag
+      if (crow.life > 0.5) {
+        shrineFlags.forEach(flag => {
+          const dx = flag.x - crow.x;
+          const dy = flag.y - crow.y;
+          if (Math.sqrt(dx * dx + dy * dy) < 40) {
+            flag.stripped = true;
+          }
+        });
+      }
+    });
+    ashCrows = ashCrows.filter(c => c.life > 0);
+
+    // Update ember particles
+    emberParticles.forEach(p => {
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.vy += 50 * dt;
+      p.life -= dt;
+    });
+    emberParticles = emberParticles.filter(p => p.life > 0);
+
+    // Update smoke particles
+    smokeParticles.forEach(p => {
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.vy -= 20 * dt;
+      p.life -= dt;
+      p.size += dt * 15;
+    });
+    smokeParticles = smokeParticles.filter(p => p.life > 0);
+
+    // Update falling cairns
+    cairns.forEach(cairn => {
+      if (!cairn.standing && cairn.fallSpeed > 0) {
+        cairn.fallAngle += cairn.fallSpeed * dt;
+        if (Math.abs(cairn.fallAngle) > Math.PI / 2) {
+          cairn.fallSpeed = 0;
+        }
+      }
+    });
+
+    // Update bridge reveal animations
+    bridges.forEach(b => {
+      if (b.revealed && b.revealProgress < 1) {
+        b.revealProgress = Math.min(1, b.revealProgress + dt * 2);
+      }
+    });
+  }
+
+  function spawnAshCrows() {
+    const startX = lanes[selectedLane].x;
+    const startY = LANE_END_Y + 50;
+
+    for (let i = 0; i < 8; i++) {
+      ashCrows.push({
+        x: startX + (Math.random() - 0.5) * 40,
+        y: startY + Math.random() * 30,
+        vx: (Math.random() - 0.5) * 100 + (startX < W / 2 ? -80 : 80),
+        vy: -50 - Math.random() * 50,
+        flapPhase: Math.random() * Math.PI * 2,
+        life: 1.5 + Math.random()
+      });
+    }
+  }
+
+  function drawGame() {
+    // Apply shake effect
+    ctx.save();
+    if (shakeTime > 0) {
+      const shake = shakeIntensity * (shakeTime / 0.5);
+      ctx.translate(
+        (Math.random() - 0.5) * shake,
+        (Math.random() - 0.5) * shake
+      );
+    }
+
+    // Draw volcanic canyon background
+    ctx.fillStyle = COLORS.sky;
+    ctx.fillRect(0, 0, W, H);
+
+    // Draw distant canyon walls
+    drawCanyonWalls();
+
+    // Draw lava glow at bottom
+    const lavaGradient = ctx.createLinearGradient(0, H - 50, 0, H);
+    lavaGradient.addColorStop(0, 'transparent');
+    lavaGradient.addColorStop(1, COLORS.lava + '60');
+    ctx.fillStyle = lavaGradient;
+    ctx.fillRect(0, H - 50, W, 50);
+
+    // Draw rope bridges (revealed on correct answers)
+    drawBridges();
+
+    // Draw shrine flags on sides
+    drawShrineFlags();
+
+    // Draw bowling lanes
+    drawLanes();
+
+    // Draw cairn clusters (pins)
+    drawCairns();
+
+    // Draw wax-sealed placards
+    drawPlacards();
+
+    // Draw aiming indicator
+    if (!ball.rolling) {
+      drawAimIndicator();
+    }
+
+    // Draw power bar when charging
+    if (charging) {
+      drawPowerBar();
+    }
+
+    // Draw ball
+    drawBall();
+
+    // Draw ember particles
+    drawEmberParticles();
+
+    // Draw smoke particles
+    drawSmokeParticles();
+
+    // Draw ash crows
+    drawAshCrows();
+
+    // Draw cinder wind effect
+    drawCinderWind();
+
+    ctx.restore();
+  }
+
+  function drawCanyonWalls() {
+    // Left wall
+    ctx.fillStyle = COLORS.canyonWall;
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.lineTo(50, 0);
+    ctx.lineTo(70, H);
+    ctx.lineTo(0, H);
+    ctx.fill();
+
+    // Right wall
+    ctx.beginPath();
+    ctx.moveTo(W, 0);
+    ctx.lineTo(W - 50, 0);
+    ctx.lineTo(W - 70, H);
+    ctx.lineTo(W, H);
+    ctx.fill();
+
+    // Wall highlights (drybrush poster style)
+    ctx.strokeStyle = COLORS.canyonHighlight;
+    ctx.lineWidth = 2;
+    for (let i = 0; i < 8; i++) {
+      const y = 50 + i * 60;
+      // Left side strokes
+      ctx.beginPath();
+      ctx.moveTo(10 + Math.random() * 20, y);
+      ctx.lineTo(40 + Math.random() * 15, y + 10 + Math.random() * 20);
+      ctx.stroke();
+      // Right side strokes
+      ctx.beginPath();
+      ctx.moveTo(W - 10 - Math.random() * 20, y);
+      ctx.lineTo(W - 40 - Math.random() * 15, y + 10 + Math.random() * 20);
+      ctx.stroke();
+    }
+  }
+
+  function drawBridges() {
+    bridges.forEach((bridge, i) => {
+      if (bridge.revealProgress > 0) {
+        const alpha = bridge.revealProgress;
+        ctx.save();
+        ctx.globalAlpha = alpha;
+
+        // Bridge planks
+        ctx.fillStyle = COLORS.bridge;
+        const bx = 100 + i * 100;
+        const by = 30;
+        ctx.fillRect(bx, by, 80 * bridge.revealProgress, 12);
+
+        // Rope rails
+        ctx.strokeStyle = COLORS.rope;
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.moveTo(bx, by - 5);
+        ctx.lineTo(bx + 80 * bridge.revealProgress, by - 5);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(bx, by + 17);
+        ctx.lineTo(bx + 80 * bridge.revealProgress, by + 17);
+        ctx.stroke();
+
+        ctx.restore();
+      }
+    });
+  }
+
+  function drawShrineFlags() {
+    shrineFlags.forEach(flag => {
+      ctx.save();
+      ctx.translate(flag.x, flag.y);
+
+      // Flag pole
+      ctx.fillStyle = COLORS.shrine;
+      ctx.fillRect(-2, 0, 4, 40);
+
+      // Flag (if not stripped)
+      if (!flag.stripped) {
+        ctx.fillStyle = flag.color;
+        ctx.beginPath();
+        ctx.moveTo(2, 0);
+        ctx.lineTo(25, 8);
+        ctx.lineTo(2, 16);
+        ctx.fill();
+      } else {
+        // Tattered remains
+        ctx.fillStyle = COLORS.smoke;
+        ctx.beginPath();
+        ctx.moveTo(2, 0);
+        ctx.lineTo(8, 4);
+        ctx.lineTo(2, 8);
+        ctx.fill();
+      }
+
+      ctx.restore();
+    });
+  }
+
+  function drawLanes() {
+    lanes.forEach((lane, i) => {
+      const progress = laneEntranceProgress[i] || 1;
+      if (progress <= 0) return;
+
+      ctx.save();
+      const laneLeft = LANES_START_X + i * (LANE_WIDTH + LANE_SPACING);
+      const laneCenterX = laneLeft + LANE_WIDTH / 2;
+      const laneCenterY = (LANE_END_Y + LANE_START_Y + 50) / 2;
+
+      // Apply entrance scale animation
+      ctx.translate(laneCenterX, laneCenterY);
+      ctx.scale(progress, progress);
+      ctx.translate(-laneCenterX, -laneCenterY);
+
+      // Lane background (volcanic rock)
+      const laneGradient = ctx.createLinearGradient(0, LANE_START_Y, 0, LANE_END_Y);
+      laneGradient.addColorStop(0, COLORS.canyonBg);
+      laneGradient.addColorStop(1, COLORS.canyonWall);
+      ctx.fillStyle = laneGradient;
+      ctx.fillRect(laneLeft, LANE_END_Y, LANE_WIDTH, LANE_START_Y - LANE_END_Y + 50);
+
+      // Lane edges (ember glow if selected)
+      ctx.strokeStyle = i === selectedLane ? COLORS.ember : COLORS.canyonHighlight;
+      ctx.lineWidth = i === selectedLane ? 3 : 1;
+      ctx.strokeRect(laneLeft, LANE_END_Y, LANE_WIDTH, LANE_START_Y - LANE_END_Y + 50);
+
+      // Mile markers
+      for (let m = 0; m < 3; m++) {
+        const my = LANE_END_Y + 80 + m * 100;
+        ctx.fillStyle = COLORS.ember;
+        ctx.beginPath();
+        ctx.arc(laneLeft + 10, my, 4, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(laneLeft + LANE_WIDTH - 10, my, 4, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      ctx.restore();
+    });
+  }
+
+  function drawCairns() {
+    cairns.forEach(cairn => {
+      ctx.save();
+      ctx.translate(cairn.x, cairn.y);
+
+      if (!cairn.standing) {
+        ctx.rotate(cairn.fallAngle);
+      }
+
+      // Draw stacked stones
+      cairn.stones.forEach((stone, j) => {
+        ctx.fillStyle = j % 2 === 0 ? COLORS.cairnStone : '#5A4A3A';
+        ctx.beginPath();
+        ctx.ellipse(
+          stone.offsetX,
+          stone.offsetY,
+          stone.width / 2,
+          stone.height / 2,
+          0, 0, Math.PI * 2
+        );
+        ctx.fill();
+
+        // Stone highlight
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.2)';
+        ctx.beginPath();
+        ctx.ellipse(
+          stone.offsetX - 2,
+          stone.offsetY - 2,
+          stone.width / 4,
+          stone.height / 4,
+          0, 0, Math.PI * 2
+        );
+        ctx.fill();
+      });
+
+      ctx.restore();
+    });
+  }
+
+  function drawPlacards() {
+    lanes.forEach((lane, i) => {
+      const px = lane.x;
+      const py = LANE_END_Y + 15;
+
+      // Placard background
+      ctx.fillStyle = '#E8DCC8';
+      ctx.beginPath();
+      ctx.roundRect(px - 65, py - 12, 130, 24, 4);
+      ctx.fill();
+
+      // Wax seal
+      ctx.fillStyle = COLORS.waxSeal;
+      ctx.beginPath();
+      ctx.arc(px - 55, py, 8, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Seal letter
+      ctx.fillStyle = '#FFD700';
+      ctx.font = 'bold 10px Belanosima, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(String.fromCharCode(65 + i), px - 55, py);
+
+      // Answer text - wrap to fit
+      ctx.fillStyle = COLORS.text === '#FAFAF7' ? '#2B2B28' : COLORS.text;
+      ctx.font = '14px Nunito, sans-serif';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
+
+      const text = lane.choice.text;
+      const maxWidth = 100;
+      wrapText(ctx, text, px - 42, py, maxWidth, 14);
+    });
+  }
+
+  function wrapText(ctx, text, x, y, maxWidth, lineHeight) {
+    // For placards, show truncated but readable text
+    const words = text.split(' ');
+    let line = '';
+    let lines = [];
+
+    for (let n = 0; n < words.length; n++) {
+      const testLine = line + words[n] + ' ';
+      const metrics = ctx.measureText(testLine);
+      if (metrics.width > maxWidth && n > 0) {
+        lines.push(line.trim());
+        line = words[n] + ' ';
+        if (lines.length >= 2) break;
+      } else {
+        line = testLine;
+      }
+    }
+    if (lines.length < 2) {
+      lines.push(line.trim());
+    }
+
+    // Draw centered vertically
+    const totalHeight = lines.length * lineHeight;
+    const startY = y - totalHeight / 2 + lineHeight / 2;
+
+    lines.forEach((l, i) => {
+      ctx.fillText(l, x, startY + i * lineHeight);
+    });
+  }
+
+  function drawAimIndicator() {
+    const lane = lanes[selectedLane];
+
+    ctx.save();
+    ctx.translate(lane.x, LANE_START_Y + 30);
+    ctx.rotate(aimAngle);
+
+    // Arrow indicator
+    ctx.strokeStyle = COLORS.ember;
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.lineTo(0, -60);
+    ctx.stroke();
+
+    // Arrow head
+    ctx.fillStyle = COLORS.ember;
+    ctx.beginPath();
+    ctx.moveTo(0, -70);
+    ctx.lineTo(-8, -55);
+    ctx.lineTo(8, -55);
+    ctx.fill();
+
+    ctx.restore();
+  }
+
+  function drawPowerBar() {
+    const barX = 20;
+    const barY = H - 60;
+    const barW = 150;
+    const barH = 20;
+
+    // Background
+    ctx.fillStyle = '#333';
+    ctx.beginPath();
+    ctx.roundRect(barX, barY, barW, barH, 5);
+    ctx.fill();
+
+    // Power fill
+    const powerGradient = ctx.createLinearGradient(barX, 0, barX + barW, 0);
+    powerGradient.addColorStop(0, COLORS.success);
+    powerGradient.addColorStop(0.5, COLORS.lavaGlow);
+    powerGradient.addColorStop(1, COLORS.lava);
+    ctx.fillStyle = powerGradient;
+    ctx.beginPath();
+    ctx.roundRect(barX + 2, barY + 2, (barW - 4) * power, barH - 4, 3);
+    ctx.fill();
+
+    // Label
+    ctx.fillStyle = COLORS.text;
+    ctx.font = '14px Nunito Sans, sans-serif';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('POWER', barX, barY - 10);
+  }
+
+  function drawBall() {
+    ctx.save();
+    ctx.translate(ball.x, ball.y);
+
+    // Ball glow
+    const glowGradient = ctx.createRadialGradient(0, 0, 0, 0, 0, ball.radius * 2);
+    glowGradient.addColorStop(0, COLORS.lava + '80');
+    glowGradient.addColorStop(1, 'transparent');
+    ctx.fillStyle = glowGradient;
+    ctx.beginPath();
+    ctx.arc(0, 0, ball.radius * 2, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Ball body (molten rock)
+    const ballGradient = ctx.createRadialGradient(-3, -3, 0, 0, 0, ball.radius);
+    ballGradient.addColorStop(0, COLORS.lavaGlow);
+    ballGradient.addColorStop(0.5, COLORS.ember);
+    ballGradient.addColorStop(1, COLORS.lava);
+    ctx.fillStyle = ballGradient;
+    ctx.beginPath();
+    ctx.arc(0, 0, ball.radius, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Hot core highlight
+    ctx.fillStyle = '#FFE4B5';
+    ctx.beginPath();
+    ctx.arc(-3, -3, ball.radius / 3, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.restore();
+  }
+
+  function drawEmberParticles() {
+    emberParticles.forEach(p => {
+      const alpha = p.life;
+      ctx.fillStyle = `rgba(232, 122, 62, ${alpha})`;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.size * alpha, 0, Math.PI * 2);
+      ctx.fill();
+    });
+  }
+
+  function drawSmokeParticles() {
+    smokeParticles.forEach(p => {
+      const alpha = p.life * 0.5;
+      ctx.fillStyle = `rgba(74, 74, 74, ${alpha})`;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+      ctx.fill();
+    });
+  }
+
+  function drawAshCrows() {
+    ashCrows.forEach(crow => {
+      ctx.save();
+      ctx.translate(crow.x, crow.y);
+
+      const flapOffset = Math.sin(crow.flapPhase) * 8;
+
+      // Body
+      ctx.fillStyle = '#1a1a1a';
+      ctx.beginPath();
+      ctx.ellipse(0, 0, 10, 6, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Wings
+      ctx.beginPath();
+      ctx.moveTo(-5, 0);
+      ctx.quadraticCurveTo(-15, -5 + flapOffset, -20, flapOffset);
+      ctx.quadraticCurveTo(-15, 5 + flapOffset, -5, 2);
+      ctx.fill();
+
+      ctx.beginPath();
+      ctx.moveTo(5, 0);
+      ctx.quadraticCurveTo(15, -5 + flapOffset, 20, flapOffset);
+      ctx.quadraticCurveTo(15, 5 + flapOffset, 5, 2);
+      ctx.fill();
+
+      // Ash trail
+      ctx.fillStyle = `rgba(100, 100, 100, ${crow.life * 0.3})`;
+      for (let i = 0; i < 3; i++) {
+        ctx.beginPath();
+        ctx.arc(
+          -crow.vx * 0.01 * (i + 1) + (Math.random() - 0.5) * 5,
+          -crow.vy * 0.01 * (i + 1),
+          3 - i,
+          0, Math.PI * 2
+        );
+        ctx.fill();
+      }
+
+      ctx.restore();
+    });
+  }
+
+  function drawCinderWind() {
+    // Random floating embers across the scene
+    const time = performance.now() / 1000;
+    for (let i = 0; i < 15; i++) {
+      const seed = i * 1234.5678;
+      const x = ((time * 30 + seed) % (W + 100)) - 50;
+      const y = (Math.sin(time + seed) * 0.5 + 0.5) * H;
+      const size = 1 + (i % 3);
+      const alpha = 0.3 + Math.sin(time * 3 + seed) * 0.2;
+
+      ctx.fillStyle = `rgba(232, 122, 62, ${alpha})`;
+      ctx.beginPath();
+      ctx.arc(x, y, size, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  function handleInput(e) {
+    if (gameState !== 'playing') return;
+
+    // Lane selection with arrow keys or WASD
+    if ((e.code === 'ArrowLeft' || e.code === 'KeyA') && !ball.rolling) {
+      const newLane = Math.max(0, selectedLane - 1);
+      if (newLane !== selectedLane) {
+        selectedLane = newLane;
+        updateBallPosition();
+        playSound('select');
+      }
+    }
+    if ((e.code === 'ArrowRight' || e.code === 'KeyD') && !ball.rolling) {
+      const newLane = Math.min(3, selectedLane + 1);
+      if (newLane !== selectedLane) {
+        selectedLane = newLane;
+        updateBallPosition();
+        playSound('select');
+      }
+    }
+
+    // Start charging with space or enter
+    if ((e.code === 'Space' || e.code === 'Enter') && !ball.rolling && !charging) {
+      charging = true;
+      power = 0.3;
+      powerDirection = 1;
+      playSound('select');
+      e.preventDefault();
+    }
+  }
+
+  // Handle key up for releasing the ball
+  document.addEventListener('keyup', (e) => {
+    if (gameState !== 'playing') return;
+
+    if ((e.code === 'Space' || e.code === 'Enter') && charging) {
+      charging = false;
+      ball.rolling = true;
+      playSound('roll');
+
+      // Calculate velocity based on power and aim
+      const speed = 200 + power * 300;
+      ball.vx = Math.sin(aimAngle) * speed * 0.3;
+      ball.vy = -speed;
+    }
+  });
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 4: GAME LOOP - DO NOT MODIFY                                      ║
+  // ║  Standard loop with responsive scaling and DPR support.                    ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  let lastTime = performance.now();
+
+  function gameLoop(now) {
+    const dt = Math.min((now - lastTime) / 1000, 0.05); // Cap at 50ms
+    lastTime = now;
+
+    // Apply transform for logical coordinate system
+    ctx.setTransform(scale * dpr, 0, 0, scale * dpr, 0, 0);
+
+    if (gameState === 'playing') {
+      updateGame(dt);
+      drawGame();
+    } else {
+      drawGame(); // Draw game state behind overlay
+      drawEndScreen(dt);
+    }
+
+    // Reset transform for next frame
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+    requestAnimationFrame(gameLoop);
+  }
+
+  // Input handlers
+  document.addEventListener('keydown', (e) => {
+    if (gameState === 'ended' && (e.code === 'KeyR')) {
+      // Restart game
+      gameState = 'playing';
+      gameResult = null;
+      gameExplanation = '';
+      confettiParticles = [];
+      initGame();
+      return;
+    }
+    handleInput(e);
+  });
+
+  // Canvas click handler for end screen buttons
+  canvas.addEventListener('click', (e) => {
+    if (gameState !== 'ended') return;
+
+    const { x, y } = screenToLogical(e.clientX, e.clientY);
+
+    if (gameResult) {
+      // Correct answer: check both buttons
+      if (pointInRect(x, y, restartButton)) {
+        gameState = 'playing';
+        gameResult = null;
+        gameExplanation = '';
+        confettiParticles = [];
+        initGame();
+        return;
+      }
+      if (pointInRect(x, y, nextButton)) {
+        // Notify parent to go to next question
+        if (window.parent && window.parent !== window) {
+          window.parent.postMessage({ type: 'quiz-next' }, '*');
+        }
+        return;
+      }
+    } else {
+      // Wrong answer: check centered restart button
+      const centeredRestart = { x: W / 2 - 75, y: H / 2 + 60, w: 150, h: 48 };
+      if (pointInRect(x, y, centeredRestart)) {
+        gameState = 'playing';
+        gameResult = null;
+        gameExplanation = '';
+        confettiParticles = [];
+        initGame();
+        return;
+      }
+    }
+  });
+
+  // Handle resize
+  window.addEventListener('resize', resizeCanvas);
+
+  // Initialize
+  resizeCanvas();
+  initGame();
+  requestAnimationFrame(gameLoop);
+  </script>
+</body>
+</html>

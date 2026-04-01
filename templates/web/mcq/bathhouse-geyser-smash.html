@@ -1,0 +1,887 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Bathhouse Geyser Smash</title>
+  <!--
+  ╔══════════════════════════════════════════════════════════════════════════════╗
+  ║  GAME FACTORY TEMPLATE                                                        ║
+  ║  This template enforces critical invariants. Follow the section markers.      ║
+  ╚══════════════════════════════════════════════════════════════════════════════╝
+  -->
+  <link href="https://fonts.googleapis.com/css2?family=Belanosima:wght@400;600;700&family=Nunito+Sans:wght@400;500;600;700&family=Nunito:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    /* ═══════════════════════════════════════════════════════════════════════════
+       BASE STYLES - Can be extended, not removed
+       ═══════════════════════════════════════════════════════════════════════════ */
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+    }
+    body {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      background: #1a1a2e;
+      font-family: 'Nunito Sans', system-ui, -apple-system, sans-serif;
+    }
+    #gameCanvas {
+      background: #16213e;
+      border-radius: 8px;
+      display: block;
+    }
+  </style>
+</head>
+<body>
+  <!-- ═══════════════════════════════════════════════════════════════════════════
+       CANVAS - Sized dynamically to fill available space
+       ═══════════════════════════════════════════════════════════════════════════ -->
+  <canvas id="gameCanvas"></canvas>
+
+  <script>
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 1: QUESTION PLACEHOLDER - DO NOT MODIFY FORMAT                    ║
+  // ║  Platform replaces this at runtime. Use these exact 60-char answers.       ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  const QUESTION = {
+    type: "mcq",
+    prompt: "Sample question text",
+    choices: [
+      { text: "This is sample answer A which is long enough to test text overflow", is_correct: true, explanation: "Why A is correct" },
+      { text: "This is sample answer B which is long enough to test text overflow", is_correct: false, explanation: "Why B is wrong" },
+      { text: "This is sample answer C which is long enough to test text overflow", is_correct: false, explanation: "Why C is wrong" },
+      { text: "This is sample answer D which is long enough to test text overflow", is_correct: false, explanation: "Why D is wrong" }
+    ],
+    isLastQuestion: false
+  };
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 2: ENGINE CORE - DO NOT MODIFY                                    ║
+  // ║  Standard engine interface and end screen. This is sacred.                 ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  const canvas = document.getElementById('gameCanvas');
+  const ctx = canvas.getContext('2d');
+
+  // Logical dimensions (game code works in this coordinate space)
+  const W = 720, H = 540;
+
+  // Scaling state (computed on resize)
+  let scale = 1;
+  let dpr = 1;
+
+  let gameState = 'playing'; // 'playing' | 'ended'
+  let gameResult = null;     // true (correct) | false (wrong)
+  let gameExplanation = '';
+  let endScreenTime = 0;
+  let confettiParticles = [];
+
+  // End screen button bounds (logical coordinates)
+  const restartButton = { x: W / 2 - 170, y: H / 2 + 60, w: 150, h: 48 };
+  const nextButton = { x: W / 2 + 20, y: H / 2 + 60, w: 150, h: 48 };
+
+  /** Check if point is inside rectangle */
+  function pointInRect(px, py, rect) {
+    return px >= rect.x && px <= rect.x + rect.w &&
+           py >= rect.y && py <= rect.y + rect.h;
+  }
+
+  /** Draw a styled button */
+  function drawButton(rect, label, color, pulse) {
+    const p = pulse ? 1 + Math.sin(endScreenTime * 4) * 0.03 : 1;
+    ctx.save();
+    ctx.translate(rect.x + rect.w / 2, rect.y + rect.h / 2);
+    ctx.scale(p, p);
+    ctx.translate(-(rect.x + rect.w / 2), -(rect.y + rect.h / 2));
+
+    // Button background
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.roundRect(rect.x, rect.y, rect.w, rect.h, 12);
+    ctx.fill();
+
+    // Button text
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = 'bold 18px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, rect.x + rect.w / 2, rect.y + rect.h / 2);
+
+    ctx.restore();
+  }
+
+  /**
+   * Resize canvas to fill available space with proper DPR scaling.
+   * Maintains logical coordinate system (720×540).
+   */
+  function resizeCanvas() {
+    dpr = window.devicePixelRatio || 1;
+
+    // Get available space
+    const availW = window.innerWidth;
+    const availH = window.innerHeight;
+
+    // Calculate scale to fit logical space (720×540) in available space
+    const scaleX = availW / W;
+    const scaleY = availH / H;
+    scale = Math.min(scaleX, scaleY);
+
+    // Physical canvas buffer (DPR-scaled for crisp rendering)
+    canvas.width = W * scale * dpr;
+    canvas.height = H * scale * dpr;
+
+    // CSS display size
+    canvas.style.width = (W * scale) + 'px';
+    canvas.style.height = (H * scale) + 'px';
+  }
+
+  /**
+   * Convert screen coordinates to logical coordinates.
+   * Use this for mouse/click events to get positions in 720×540 space.
+   */
+  function screenToLogical(screenX, screenY) {
+    const rect = canvas.getBoundingClientRect();
+    return {
+      x: (screenX - rect.left) * (W / rect.width),
+      y: (screenY - rect.top) * (H / rect.height)
+    };
+  }
+
+  const engine = {
+    /** Call this to end the game. DO NOT draw your own end screen. */
+    end(isCorrect, explanation) {
+      if (gameState === 'ended') return;
+      gameState = 'ended';
+      gameResult = isCorrect;
+      gameExplanation = explanation || '';
+      endScreenTime = 0;
+
+      // Spawn confetti for correct answers
+      if (isCorrect) {
+        for (let i = 0; i < 50; i++) {
+          confettiParticles.push({
+            x: W / 2,
+            y: H / 2,
+            vx: (Math.random() - 0.5) * 600,
+            vy: -Math.random() * 400 - 100,
+            size: 4 + Math.random() * 6,
+            color: ['#FFD700', '#FF6B6B', '#4ECDC4', '#95E1D3', '#F38181'][Math.floor(Math.random() * 5)],
+            rotation: Math.random() * Math.PI * 2,
+            rotationSpeed: (Math.random() - 0.5) * 10
+          });
+        }
+      }
+
+      // Notify parent frame
+      if (window.parent && window.parent !== window) {
+        window.parent.postMessage({
+          type: 'quiz-end',
+          isCorrect: isCorrect,
+          explanation: explanation || ''
+        }, '*');
+      }
+    }
+  };
+
+  /** STANDARD END SCREEN - DO NOT MODIFY */
+  function drawEndScreen(dt) {
+    endScreenTime += dt;
+
+    // Update confetti
+    confettiParticles = confettiParticles.filter(p => {
+      p.vy += 800 * dt; // gravity
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.rotation += p.rotationSpeed * dt;
+      p.vx *= 0.99;
+      return p.y < H + 50;
+    });
+
+    // Dark overlay
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
+    ctx.fillRect(0, 0, W, H);
+
+    // Draw confetti
+    confettiParticles.forEach(p => {
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rotation);
+      ctx.fillStyle = p.color;
+      ctx.fillRect(-p.size / 2, -p.size / 4, p.size, p.size / 2);
+      ctx.restore();
+    });
+
+    // Result emoji
+    ctx.font = '72px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(gameResult ? '🎉' : '😢', W / 2, H / 2 - 50);
+
+    // Result text
+    ctx.fillStyle = gameResult ? '#4ADE80' : '#F87171';
+    ctx.font = 'bold 36px system-ui, sans-serif';
+    ctx.fillText(gameResult ? 'Correct!' : 'Wrong!', W / 2, H / 2 + 20);
+
+    // Buttons
+    if (gameResult) {
+      // Correct: show both Restart and Next/Finish
+      drawButton(restartButton, 'Restart', '#E87A3E', true);
+      const nextLabel = QUESTION.isLastQuestion ? 'Finish' : 'Next';
+      drawButton(nextButton, nextLabel, '#4ECDC4', true);
+    } else {
+      // Wrong: show only centered Restart button
+      const centeredRestart = { x: W / 2 - 75, y: H / 2 + 60, w: 150, h: 48 };
+      drawButton(centeredRestart, 'Restart', '#E87A3E', true);
+    }
+  }
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 3: YOUR GAME CODE - IMPLEMENT THESE FUNCTIONS                     ║
+  // ║  This is where your game logic goes. See requirements below.               ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+
+  // === GAME CONSTANTS ===
+  const GRID_COLS = 2;
+  const GRID_ROWS = 2;
+  const VENT_WIDTH = 320;
+  const VENT_HEIGHT = 180;
+  const GRID_START_X = (W - VENT_WIDTH * GRID_COLS - 20) / 2;
+  const GRID_START_Y = 80;
+  const GRID_GAP = 20;
+
+  // Colors (QuizHP palette)
+  const COLORS = {
+    wood: '#8B5A2B',
+    woodDark: '#654321',
+    woodLight: '#A0522D',
+    tile: '#D4C4A8',
+    tileDark: '#B8A888',
+    steam: 'rgba(255, 255, 255, 0.7)',
+    water: '#4ECDC4',
+    orange: '#E87A3E',
+    amber: '#F5A742',
+    text: '#2B2B28',
+    background: '#FAFAF7',
+    errorRed: '#E85D4A',
+    successGreen: '#6BBF59'
+  };
+
+  // === GAME STATE ===
+  let paddle = { gridX: 0, gridY: 0, visualX: 0, visualY: 0, striking: false, strikeProgress: 0 };
+  let vents = [];
+  let steamParticles = [];
+  let crackParticles = [];
+  let fogOpacity = 0;
+  let time = 0;
+  let selectedAnswer = null;
+  let wrongVentIndex = -1;
+
+  // Sound effects using Web Audio API
+  let audioCtx = null;
+
+  function initAudio() {
+    if (!audioCtx) {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    }
+  }
+
+  function playSound(type) {
+    if (!audioCtx) return;
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+
+    if (type === 'correct') {
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(523.25, audioCtx.currentTime);
+      osc.frequency.setValueAtTime(659.25, audioCtx.currentTime + 0.1);
+      osc.frequency.setValueAtTime(783.99, audioCtx.currentTime + 0.2);
+      gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
+      gain.gain.exponentialDecayTo && gain.gain.exponentialDecayTo(0.01, audioCtx.currentTime + 0.4);
+      gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
+      gain.gain.linearRampToValueAtTime(0.01, audioCtx.currentTime + 0.4);
+      osc.start(audioCtx.currentTime);
+      osc.stop(audioCtx.currentTime + 0.4);
+    } else if (type === 'wrong') {
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(200, audioCtx.currentTime);
+      osc.frequency.linearRampToValueAtTime(100, audioCtx.currentTime + 0.3);
+      gain.gain.setValueAtTime(0.2, audioCtx.currentTime);
+      gain.gain.linearRampToValueAtTime(0.01, audioCtx.currentTime + 0.5);
+      osc.start(audioCtx.currentTime);
+      osc.stop(audioCtx.currentTime + 0.5);
+    } else if (type === 'strike') {
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(150, audioCtx.currentTime);
+      osc.frequency.linearRampToValueAtTime(80, audioCtx.currentTime + 0.1);
+      gain.gain.setValueAtTime(0.4, audioCtx.currentTime);
+      gain.gain.linearRampToValueAtTime(0.01, audioCtx.currentTime + 0.15);
+      osc.start(audioCtx.currentTime);
+      osc.stop(audioCtx.currentTime + 0.15);
+    } else if (type === 'move') {
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(400, audioCtx.currentTime);
+      gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
+      gain.gain.linearRampToValueAtTime(0.01, audioCtx.currentTime + 0.05);
+      osc.start(audioCtx.currentTime);
+      osc.stop(audioCtx.currentTime + 0.05);
+    }
+  }
+
+  function initGame() {
+    initAudio();
+
+    paddle = {
+      gridX: 0,
+      gridY: 0,
+      visualX: GRID_START_X + VENT_WIDTH / 2,
+      visualY: GRID_START_Y + VENT_HEIGHT / 2,
+      striking: false,
+      strikeProgress: 0
+    };
+
+    vents = [];
+    steamParticles = [];
+    crackParticles = [];
+    fogOpacity = 0;
+    time = 0;
+    selectedAnswer = null;
+    wrongVentIndex = -1;
+
+    // Create vents in 2x2 grid
+    for (let row = 0; row < GRID_ROWS; row++) {
+      for (let col = 0; col < GRID_COLS; col++) {
+        const index = row * GRID_COLS + col;
+        const choice = QUESTION.choices[index];
+        vents.push({
+          x: GRID_START_X + col * (VENT_WIDTH + GRID_GAP),
+          y: GRID_START_Y + row * (VENT_HEIGHT + GRID_GAP),
+          width: VENT_WIDTH,
+          height: VENT_HEIGHT,
+          choice: choice,
+          steamLevel: 0.8, // Start mostly covered
+          steamTimer: Math.random() * 3 + 1, // Random eruption timing
+          erupting: false,
+          eruptionTime: 0,
+          cracked: false,
+          entranceDelay: index * 0.1,
+          entranceProgress: 0
+        });
+      }
+    }
+  }
+
+  function updateGame(dt) {
+    if (gameState !== 'playing') return;
+
+    time += dt;
+
+    // Update entrance animations
+    vents.forEach(vent => {
+      if (vent.entranceProgress < 1) {
+        vent.entranceProgress = Math.min(1, vent.entranceProgress + dt * 3);
+      }
+    });
+
+    // Update paddle visual position (smooth movement)
+    const targetX = GRID_START_X + paddle.gridX * (VENT_WIDTH + GRID_GAP) + VENT_WIDTH / 2;
+    const targetY = GRID_START_Y + paddle.gridY * (VENT_HEIGHT + GRID_GAP) + VENT_HEIGHT / 2;
+    paddle.visualX += (targetX - paddle.visualX) * 10 * dt;
+    paddle.visualY += (targetY - paddle.visualY) * 10 * dt;
+
+    // Update strike animation
+    if (paddle.striking) {
+      paddle.strikeProgress += dt * 8;
+      if (paddle.strikeProgress >= 1) {
+        paddle.striking = false;
+        paddle.strikeProgress = 0;
+
+        // Check which vent was struck
+        const ventIndex = paddle.gridY * GRID_COLS + paddle.gridX;
+        const vent = vents[ventIndex];
+        if (vent && selectedAnswer === null) {
+          selectedAnswer = vent.choice;
+
+          if (vent.choice.is_correct) {
+            playSound('correct');
+            setTimeout(() => {
+              engine.end(true, vent.choice.explanation);
+            }, 500);
+          } else {
+            playSound('wrong');
+            vent.cracked = true;
+            wrongVentIndex = ventIndex;
+
+            // Spawn crack particles
+            for (let i = 0; i < 15; i++) {
+              crackParticles.push({
+                x: vent.x + vent.width / 2 + (Math.random() - 0.5) * 100,
+                y: vent.y + vent.height / 2 + (Math.random() - 0.5) * 60,
+                vx: (Math.random() - 0.5) * 200,
+                vy: -Math.random() * 150 - 50,
+                size: 3 + Math.random() * 5,
+                life: 1
+              });
+            }
+
+            // Trigger fog effect
+            setTimeout(() => {
+              engine.end(false, vent.choice.explanation);
+            }, 1500);
+          }
+        }
+      }
+    }
+
+    // Update vent steam eruptions
+    vents.forEach((vent, index) => {
+      if (wrongVentIndex === index) {
+        // Wrong vent gushes steam
+        vent.erupting = true;
+        vent.steamLevel = Math.max(0, vent.steamLevel - dt * 0.5);
+        fogOpacity = Math.min(0.9, fogOpacity + dt * 0.8);
+
+        // Spawn extra steam
+        if (Math.random() < dt * 30) {
+          steamParticles.push({
+            x: vent.x + Math.random() * vent.width,
+            y: vent.y + vent.height / 2,
+            vx: (Math.random() - 0.5) * 100,
+            vy: -Math.random() * 200 - 100,
+            size: 20 + Math.random() * 30,
+            life: 1,
+            opacity: 0.8
+          });
+        }
+      } else if (selectedAnswer === null) {
+        // Normal eruption cycle
+        vent.steamTimer -= dt;
+
+        if (vent.steamTimer <= 0 && !vent.erupting) {
+          vent.erupting = true;
+          vent.eruptionTime = 0;
+        }
+
+        if (vent.erupting) {
+          vent.eruptionTime += dt;
+          vent.steamLevel = Math.max(0, vent.steamLevel - dt * 2);
+
+          // Spawn steam particles during eruption
+          if (Math.random() < dt * 15) {
+            steamParticles.push({
+              x: vent.x + Math.random() * vent.width,
+              y: vent.y + vent.height / 2,
+              vx: (Math.random() - 0.5) * 60,
+              vy: -Math.random() * 150 - 50,
+              size: 15 + Math.random() * 20,
+              life: 1,
+              opacity: 0.6
+            });
+          }
+
+          if (vent.eruptionTime > 2) {
+            vent.erupting = false;
+            vent.steamTimer = Math.random() * 4 + 2;
+          }
+        } else {
+          // Steam slowly rebuilds
+          vent.steamLevel = Math.min(0.9, vent.steamLevel + dt * 0.3);
+        }
+      }
+    });
+
+    // Update steam particles
+    steamParticles.forEach(p => {
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.size += dt * 30;
+      p.life -= dt * 0.8;
+      p.opacity = p.life * 0.6;
+    });
+    steamParticles = steamParticles.filter(p => p.life > 0);
+
+    // Update crack particles
+    crackParticles.forEach(p => {
+      p.vy += 400 * dt;
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.life -= dt;
+    });
+    crackParticles = crackParticles.filter(p => p.life > 0);
+  }
+
+  function drawGame() {
+    // Draw wooden bathhouse background
+    ctx.fillStyle = COLORS.woodDark;
+    ctx.fillRect(0, 0, W, H);
+
+    // Draw wooden planks pattern
+    ctx.fillStyle = COLORS.wood;
+    for (let i = 0; i < 12; i++) {
+      const y = i * 50;
+      ctx.fillRect(0, y, W, 45);
+
+      // Wood grain
+      ctx.strokeStyle = COLORS.woodLight;
+      ctx.lineWidth = 1;
+      ctx.globalAlpha = 0.3;
+      for (let j = 0; j < 8; j++) {
+        ctx.beginPath();
+        ctx.moveTo(j * 100 + (i % 2) * 50, y + 5);
+        ctx.bezierCurveTo(j * 100 + 30, y + 15, j * 100 + 70, y + 30, j * 100 + 100, y + 40);
+        ctx.stroke();
+      }
+      ctx.globalAlpha = 1;
+    }
+
+    // Draw vents
+    vents.forEach((vent, index) => {
+      // Entrance animation
+      const entrance = easeOutBack(vent.entranceProgress);
+      ctx.save();
+      ctx.translate(vent.x + vent.width / 2, vent.y + vent.height / 2);
+      ctx.scale(entrance, entrance);
+      ctx.translate(-(vent.x + vent.width / 2), -(vent.y + vent.height / 2));
+
+      // Tile border
+      ctx.fillStyle = vent.cracked ? '#8B4513' : COLORS.tileDark;
+      ctx.beginPath();
+      ctx.roundRect(vent.x - 8, vent.y - 8, vent.width + 16, vent.height + 16, 8);
+      ctx.fill();
+
+      // Main tile area
+      const gradient = ctx.createLinearGradient(vent.x, vent.y, vent.x, vent.y + vent.height);
+      gradient.addColorStop(0, vent.cracked ? '#A0522D' : COLORS.tile);
+      gradient.addColorStop(1, vent.cracked ? '#8B4513' : COLORS.tileDark);
+      ctx.fillStyle = gradient;
+      ctx.beginPath();
+      ctx.roundRect(vent.x, vent.y, vent.width, vent.height, 6);
+      ctx.fill();
+
+      // Draw cracks if wrong answer
+      if (vent.cracked) {
+        ctx.strokeStyle = '#3d2817';
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.moveTo(vent.x + vent.width / 2, vent.y);
+        ctx.lineTo(vent.x + vent.width / 2 - 20, vent.y + 40);
+        ctx.lineTo(vent.x + vent.width / 2 + 30, vent.y + 80);
+        ctx.lineTo(vent.x + vent.width / 2 - 10, vent.y + vent.height);
+        ctx.stroke();
+
+        ctx.beginPath();
+        ctx.moveTo(vent.x + vent.width / 2, vent.y + 40);
+        ctx.lineTo(vent.x + vent.width / 2 + 50, vent.y + 60);
+        ctx.stroke();
+      }
+
+      // Geyser vent grate
+      ctx.fillStyle = '#444';
+      const grateWidth = vent.width - 40;
+      const grateHeight = 30;
+      const grateX = vent.x + 20;
+      const grateY = vent.y + vent.height - 50;
+      ctx.beginPath();
+      ctx.roundRect(grateX, grateY, grateWidth, grateHeight, 4);
+      ctx.fill();
+
+      // Grate slots
+      ctx.fillStyle = '#222';
+      for (let i = 0; i < 8; i++) {
+        ctx.fillRect(grateX + 15 + i * 35, grateY + 5, 20, 20);
+      }
+
+      // Answer text - wrap to fit in vent
+      ctx.fillStyle = COLORS.text;
+      ctx.font = '500 16px Nunito, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'top';
+
+      const maxWidth = vent.width - 30;
+      const lineHeight = 22;
+      const textY = vent.y + 15;
+      wrapText(ctx, vent.choice.text, vent.x + vent.width / 2, textY, maxWidth, lineHeight);
+
+      // Steam layer covering the vent
+      if (vent.steamLevel > 0) {
+        const steamGradient = ctx.createRadialGradient(
+          vent.x + vent.width / 2, vent.y + vent.height / 2, 0,
+          vent.x + vent.width / 2, vent.y + vent.height / 2, vent.width / 2
+        );
+        steamGradient.addColorStop(0, `rgba(255, 255, 255, ${vent.steamLevel * 0.9})`);
+        steamGradient.addColorStop(0.5, `rgba(240, 240, 245, ${vent.steamLevel * 0.85})`);
+        steamGradient.addColorStop(1, `rgba(220, 220, 230, ${vent.steamLevel * 0.7})`);
+        ctx.fillStyle = steamGradient;
+        ctx.beginPath();
+        ctx.roundRect(vent.x, vent.y, vent.width, vent.height, 6);
+        ctx.fill();
+
+        // Animated steam swirls
+        ctx.globalAlpha = vent.steamLevel * 0.5;
+        for (let i = 0; i < 3; i++) {
+          const swirl = Math.sin(time * 2 + i * 2) * 20;
+          ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+          ctx.beginPath();
+          ctx.ellipse(
+            vent.x + vent.width * (0.3 + i * 0.2) + swirl,
+            vent.y + vent.height * 0.5 + Math.cos(time * 1.5 + i) * 15,
+            40 + Math.sin(time + i) * 10,
+            25 + Math.cos(time * 1.3 + i) * 8,
+            0, 0, Math.PI * 2
+          );
+          ctx.fill();
+        }
+        ctx.globalAlpha = 1;
+      }
+
+      ctx.restore();
+    });
+
+    // Draw steam particles
+    steamParticles.forEach(p => {
+      ctx.globalAlpha = p.opacity;
+      const steamGrad = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, p.size);
+      steamGrad.addColorStop(0, 'rgba(255, 255, 255, 0.8)');
+      steamGrad.addColorStop(1, 'rgba(255, 255, 255, 0)');
+      ctx.fillStyle = steamGrad;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+      ctx.fill();
+    });
+    ctx.globalAlpha = 1;
+
+    // Draw crack particles (tile pieces)
+    crackParticles.forEach(p => {
+      ctx.globalAlpha = p.life;
+      ctx.fillStyle = COLORS.tile;
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.life * 5);
+      ctx.fillRect(-p.size / 2, -p.size / 2, p.size, p.size);
+      ctx.restore();
+    });
+    ctx.globalAlpha = 1;
+
+    // Draw wooden paddle
+    const paddleIndex = paddle.gridY * GRID_COLS + paddle.gridX;
+    const currentVent = vents[paddleIndex];
+    if (currentVent) {
+      const paddleWidth = 80;
+      const paddleHeight = 120;
+
+      // Strike animation offset
+      const strikeOffset = paddle.striking ? Math.sin(paddle.strikeProgress * Math.PI) * 30 : 0;
+      const paddleX = paddle.visualX;
+      const paddleY = paddle.visualY - 60 + strikeOffset;
+
+      // Paddle shadow
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
+      ctx.beginPath();
+      ctx.ellipse(paddleX, currentVent.y + currentVent.height / 2 + 30, 50, 15, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Paddle handle
+      ctx.fillStyle = COLORS.woodDark;
+      ctx.fillRect(paddleX - 8, paddleY - 60, 16, 70);
+
+      // Paddle head
+      ctx.fillStyle = COLORS.wood;
+      ctx.beginPath();
+      ctx.roundRect(paddleX - paddleWidth / 2, paddleY, paddleWidth, paddleHeight - 40, 8);
+      ctx.fill();
+
+      // Paddle highlight
+      ctx.fillStyle = COLORS.woodLight;
+      ctx.globalAlpha = 0.4;
+      ctx.beginPath();
+      ctx.roundRect(paddleX - paddleWidth / 2 + 10, paddleY + 10, 20, paddleHeight - 60, 4);
+      ctx.fill();
+      ctx.globalAlpha = 1;
+
+      // Selection indicator ring
+      ctx.strokeStyle = COLORS.orange;
+      ctx.lineWidth = 4;
+      ctx.setLineDash([10, 5]);
+      ctx.lineDashOffset = -time * 30;
+      ctx.beginPath();
+      ctx.roundRect(currentVent.x - 4, currentVent.y - 4, currentVent.width + 8, currentVent.height + 8, 10);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+
+    // Fog overlay for wrong answer
+    if (fogOpacity > 0) {
+      const fogGrad = ctx.createRadialGradient(W / 2, H / 2, 0, W / 2, H / 2, W);
+      fogGrad.addColorStop(0, `rgba(255, 255, 255, ${fogOpacity * 0.5})`);
+      fogGrad.addColorStop(1, `rgba(200, 200, 210, ${fogOpacity * 0.9})`);
+      ctx.fillStyle = fogGrad;
+      ctx.fillRect(0, 0, W, H);
+    }
+  }
+
+  // Helper function to wrap text
+  function wrapText(context, text, x, y, maxWidth, lineHeight) {
+    const words = text.split(' ');
+    let line = '';
+    let testLine = '';
+    let lineCount = 0;
+    const maxLines = 4;
+
+    for (let n = 0; n < words.length; n++) {
+      testLine = line + words[n] + ' ';
+      const metrics = context.measureText(testLine);
+
+      if (metrics.width > maxWidth && n > 0) {
+        context.fillText(line.trim(), x, y + lineCount * lineHeight);
+        line = words[n] + ' ';
+        lineCount++;
+        if (lineCount >= maxLines) break;
+      } else {
+        line = testLine;
+      }
+    }
+
+    if (lineCount < maxLines) {
+      context.fillText(line.trim(), x, y + lineCount * lineHeight);
+    }
+  }
+
+  // Easing function for bounce effect
+  function easeOutBack(t) {
+    const c1 = 1.70158;
+    const c3 = c1 + 1;
+    return 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2);
+  }
+
+  function handleInput(e) {
+    if (gameState !== 'playing') return;
+    if (selectedAnswer !== null) return; // Already selected
+
+    initAudio();
+
+    // Movement
+    if (e.code === 'ArrowLeft' || e.code === 'KeyA') {
+      if (paddle.gridX > 0) {
+        paddle.gridX--;
+        playSound('move');
+      }
+    } else if (e.code === 'ArrowRight' || e.code === 'KeyD') {
+      if (paddle.gridX < GRID_COLS - 1) {
+        paddle.gridX++;
+        playSound('move');
+      }
+    } else if (e.code === 'ArrowUp' || e.code === 'KeyW') {
+      if (paddle.gridY > 0) {
+        paddle.gridY--;
+        playSound('move');
+      }
+    } else if (e.code === 'ArrowDown' || e.code === 'KeyS') {
+      if (paddle.gridY < GRID_ROWS - 1) {
+        paddle.gridY++;
+        playSound('move');
+      }
+    }
+
+    // Strike
+    if ((e.code === 'Space' || e.code === 'Enter') && !paddle.striking) {
+      paddle.striking = true;
+      paddle.strikeProgress = 0;
+      playSound('strike');
+    }
+  }
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 4: GAME LOOP - DO NOT MODIFY                                      ║
+  // ║  Standard loop with responsive scaling and DPR support.                    ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  let lastTime = performance.now();
+
+  function gameLoop(now) {
+    const dt = Math.min((now - lastTime) / 1000, 0.05); // Cap at 50ms
+    lastTime = now;
+
+    // Apply transform for logical coordinate system
+    ctx.setTransform(scale * dpr, 0, 0, scale * dpr, 0, 0);
+
+    if (gameState === 'playing') {
+      updateGame(dt);
+      drawGame();
+    } else {
+      drawGame(); // Draw game state behind overlay
+      drawEndScreen(dt);
+    }
+
+    // Reset transform for next frame
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+    requestAnimationFrame(gameLoop);
+  }
+
+  // Input handlers
+  document.addEventListener('keydown', (e) => {
+    if (gameState === 'ended' && (e.code === 'KeyR')) {
+      // Restart game
+      gameState = 'playing';
+      gameResult = null;
+      gameExplanation = '';
+      confettiParticles = [];
+      initGame();
+      return;
+    }
+    handleInput(e);
+  });
+
+  document.addEventListener('keyup', (e) => {
+    // Optional: handle key release in your handleInput
+  });
+
+  // Canvas click handler for end screen buttons
+  canvas.addEventListener('click', (e) => {
+    if (gameState !== 'ended') return;
+
+    const { x, y } = screenToLogical(e.clientX, e.clientY);
+
+    if (gameResult) {
+      // Correct answer: check both buttons
+      if (pointInRect(x, y, restartButton)) {
+        gameState = 'playing';
+        gameResult = null;
+        gameExplanation = '';
+        confettiParticles = [];
+        initGame();
+        return;
+      }
+      if (pointInRect(x, y, nextButton)) {
+        // Notify parent to go to next question
+        if (window.parent && window.parent !== window) {
+          window.parent.postMessage({ type: 'quiz-next' }, '*');
+        }
+        return;
+      }
+    } else {
+      // Wrong answer: check centered restart button
+      const centeredRestart = { x: W / 2 - 75, y: H / 2 + 60, w: 150, h: 48 };
+      if (pointInRect(x, y, centeredRestart)) {
+        gameState = 'playing';
+        gameResult = null;
+        gameExplanation = '';
+        confettiParticles = [];
+        initGame();
+        return;
+      }
+    }
+  });
+
+  // Handle resize
+  window.addEventListener('resize', resizeCanvas);
+
+  // Initialize
+  resizeCanvas();
+  initGame();
+  requestAnimationFrame(gameLoop);
+  </script>
+</body>
+</html>

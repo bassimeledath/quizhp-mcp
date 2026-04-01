@@ -1,0 +1,913 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Glacial Signal Craneyard</title>
+  <!--
+  ╔══════════════════════════════════════════════════════════════════════════════╗
+  ║  GAME FACTORY TEMPLATE                                                        ║
+  ║  This template enforces critical invariants. Follow the section markers.      ║
+  ╚══════════════════════════════════════════════════════════════════════════════╝
+  -->
+  <link href="https://fonts.googleapis.com/css2?family=Belanosima:wght@400;600;700&family=Nunito+Sans:wght@400;500;600;700&family=Nunito:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    /* ═══════════════════════════════════════════════════════════════════════════
+       BASE STYLES - Can be extended, not removed
+       ═══════════════════════════════════════════════════════════════════════════ */
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+    }
+    body {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      background: #1a1a2e;
+      font-family: 'Nunito Sans', system-ui, -apple-system, sans-serif;
+    }
+    #gameCanvas {
+      background: #16213e;
+      border-radius: 8px;
+      display: block;
+    }
+  </style>
+</head>
+<body>
+  <!-- ═══════════════════════════════════════════════════════════════════════════
+       CANVAS - Sized dynamically to fill available space
+       ═══════════════════════════════════════════════════════════════════════════ -->
+  <canvas id="gameCanvas"></canvas>
+
+  <script>
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 1: QUESTION PLACEHOLDER - DO NOT MODIFY FORMAT                    ║
+  // ║  Platform replaces this at runtime. Use these exact 60-char answers.       ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  const QUESTION = {
+    type: "mcq",
+    prompt: "Sample question text",
+    choices: [
+      { text: "This is sample answer A which is long enough to test text overflow", is_correct: true, explanation: "Why A is correct" },
+      { text: "This is sample answer B which is long enough to test text overflow", is_correct: false, explanation: "Why B is wrong" },
+      { text: "This is sample answer C which is long enough to test text overflow", is_correct: false, explanation: "Why C is wrong" },
+      { text: "This is sample answer D which is long enough to test text overflow", is_correct: false, explanation: "Why D is wrong" }
+    ],
+    isLastQuestion: false
+  };
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 2: ENGINE CORE - DO NOT MODIFY                                    ║
+  // ║  Standard engine interface and end screen. This is sacred.                 ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  const canvas = document.getElementById('gameCanvas');
+  const ctx = canvas.getContext('2d');
+
+  // Logical dimensions (game code works in this coordinate space)
+  const W = 720, H = 540;
+
+  // Scaling state (computed on resize)
+  let scale = 1;
+  let dpr = 1;
+
+  let gameState = 'playing'; // 'playing' | 'ended'
+  let gameResult = null;     // true (correct) | false (wrong)
+  let gameExplanation = '';
+  let endScreenTime = 0;
+  let confettiParticles = [];
+
+  // End screen button bounds (logical coordinates)
+  const restartButton = { x: W / 2 - 170, y: H / 2 + 60, w: 150, h: 48 };
+  const nextButton = { x: W / 2 + 20, y: H / 2 + 60, w: 150, h: 48 };
+
+  /** Check if point is inside rectangle */
+  function pointInRect(px, py, rect) {
+    return px >= rect.x && px <= rect.x + rect.w &&
+           py >= rect.y && py <= rect.y + rect.h;
+  }
+
+  /** Draw a styled button */
+  function drawButton(rect, label, color, pulse) {
+    const p = pulse ? 1 + Math.sin(endScreenTime * 4) * 0.03 : 1;
+    ctx.save();
+    ctx.translate(rect.x + rect.w / 2, rect.y + rect.h / 2);
+    ctx.scale(p, p);
+    ctx.translate(-(rect.x + rect.w / 2), -(rect.y + rect.h / 2));
+
+    // Button background
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.roundRect(rect.x, rect.y, rect.w, rect.h, 12);
+    ctx.fill();
+
+    // Button text
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = 'bold 18px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, rect.x + rect.w / 2, rect.y + rect.h / 2);
+
+    ctx.restore();
+  }
+
+  /**
+   * Resize canvas to fill available space with proper DPR scaling.
+   * Maintains logical coordinate system (720×540).
+   */
+  function resizeCanvas() {
+    dpr = window.devicePixelRatio || 1;
+
+    // Get available space
+    const availW = window.innerWidth;
+    const availH = window.innerHeight;
+
+    // Calculate scale to fit logical space (720×540) in available space
+    const scaleX = availW / W;
+    const scaleY = availH / H;
+    scale = Math.min(scaleX, scaleY);
+
+    // Physical canvas buffer (DPR-scaled for crisp rendering)
+    canvas.width = W * scale * dpr;
+    canvas.height = H * scale * dpr;
+
+    // CSS display size
+    canvas.style.width = (W * scale) + 'px';
+    canvas.style.height = (H * scale) + 'px';
+  }
+
+  /**
+   * Convert screen coordinates to logical coordinates.
+   * Use this for mouse/click events to get positions in 720×540 space.
+   */
+  function screenToLogical(screenX, screenY) {
+    const rect = canvas.getBoundingClientRect();
+    return {
+      x: (screenX - rect.left) * (W / rect.width),
+      y: (screenY - rect.top) * (H / rect.height)
+    };
+  }
+
+  const engine = {
+    /** Call this to end the game. DO NOT draw your own end screen. */
+    end(isCorrect, explanation) {
+      if (gameState === 'ended') return;
+      gameState = 'ended';
+      gameResult = isCorrect;
+      gameExplanation = explanation || '';
+      endScreenTime = 0;
+
+      // Spawn confetti for correct answers
+      if (isCorrect) {
+        for (let i = 0; i < 50; i++) {
+          confettiParticles.push({
+            x: W / 2,
+            y: H / 2,
+            vx: (Math.random() - 0.5) * 600,
+            vy: -Math.random() * 400 - 100,
+            size: 4 + Math.random() * 6,
+            color: ['#FFD700', '#FF6B6B', '#4ECDC4', '#95E1D3', '#F38181'][Math.floor(Math.random() * 5)],
+            rotation: Math.random() * Math.PI * 2,
+            rotationSpeed: (Math.random() - 0.5) * 10
+          });
+        }
+      }
+
+      // Notify parent frame
+      if (window.parent && window.parent !== window) {
+        window.parent.postMessage({
+          type: 'quiz-end',
+          isCorrect: isCorrect,
+          explanation: explanation || ''
+        }, '*');
+      }
+    }
+  };
+
+  /** STANDARD END SCREEN - DO NOT MODIFY */
+  function drawEndScreen(dt) {
+    endScreenTime += dt;
+
+    // Update confetti
+    confettiParticles = confettiParticles.filter(p => {
+      p.vy += 800 * dt; // gravity
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.rotation += p.rotationSpeed * dt;
+      p.vx *= 0.99;
+      return p.y < H + 50;
+    });
+
+    // Dark overlay
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
+    ctx.fillRect(0, 0, W, H);
+
+    // Draw confetti
+    confettiParticles.forEach(p => {
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rotation);
+      ctx.fillStyle = p.color;
+      ctx.fillRect(-p.size / 2, -p.size / 4, p.size, p.size / 2);
+      ctx.restore();
+    });
+
+    // Result emoji
+    ctx.font = '72px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(gameResult ? '🎉' : '😢', W / 2, H / 2 - 50);
+
+    // Result text
+    ctx.fillStyle = gameResult ? '#4ADE80' : '#F87171';
+    ctx.font = 'bold 36px system-ui, sans-serif';
+    ctx.fillText(gameResult ? 'Correct!' : 'Wrong!', W / 2, H / 2 + 20);
+
+    // Buttons
+    if (gameResult) {
+      // Correct: show both Restart and Next/Finish
+      drawButton(restartButton, 'Restart', '#E87A3E', true);
+      const nextLabel = QUESTION.isLastQuestion ? 'Finish' : 'Next';
+      drawButton(nextButton, nextLabel, '#4ECDC4', true);
+    } else {
+      // Wrong: show only centered Restart button
+      const centeredRestart = { x: W / 2 - 75, y: H / 2 + 60, w: 150, h: 48 };
+      drawButton(centeredRestart, 'Restart', '#E87A3E', true);
+    }
+  }
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 3: YOUR GAME CODE - IMPLEMENT THESE FUNCTIONS                     ║
+  // ║  This is where your game logic goes. See requirements below.               ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+
+  // === GAME STATE ===
+  let crane = { x: 0, y: 0, targetX: 0, speed: 300, hookY: 0, hookState: 'up', hookSpeed: 200, grabbedCrate: null };
+  let crates = [];
+  let snowParticles = [];
+  let signalLights = [];
+  let crevasse = { width: 0, targetWidth: 0, crateIndex: -1 };
+  let selectedCrate = null;
+  let animationTime = 0;
+  let entranceAnim = 0;
+
+  // Audio context for sound effects
+  let audioCtx = null;
+
+  function initAudio() {
+    if (!audioCtx) {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    }
+  }
+
+  function playSound(type) {
+    if (!audioCtx) return;
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+
+    if (type === 'correct') {
+      osc.frequency.setValueAtTime(523, audioCtx.currentTime);
+      osc.frequency.setValueAtTime(659, audioCtx.currentTime + 0.1);
+      osc.frequency.setValueAtTime(784, audioCtx.currentTime + 0.2);
+      gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
+      gain.gain.exponentialDecayTo && gain.gain.exponentialDecayTo(0.01, audioCtx.currentTime + 0.4);
+      gain.gain.linearRampToValueAtTime(0.01, audioCtx.currentTime + 0.4);
+      osc.start();
+      osc.stop(audioCtx.currentTime + 0.4);
+    } else if (type === 'wrong') {
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(200, audioCtx.currentTime);
+      osc.frequency.linearRampToValueAtTime(100, audioCtx.currentTime + 0.3);
+      gain.gain.setValueAtTime(0.2, audioCtx.currentTime);
+      gain.gain.linearRampToValueAtTime(0.01, audioCtx.currentTime + 0.4);
+      osc.start();
+      osc.stop(audioCtx.currentTime + 0.4);
+    } else if (type === 'click') {
+      osc.frequency.setValueAtTime(880, audioCtx.currentTime);
+      gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
+      gain.gain.linearRampToValueAtTime(0.01, audioCtx.currentTime + 0.05);
+      osc.start();
+      osc.stop(audioCtx.currentTime + 0.05);
+    } else if (type === 'grab') {
+      osc.type = 'square';
+      osc.frequency.setValueAtTime(150, audioCtx.currentTime);
+      osc.frequency.setValueAtTime(200, audioCtx.currentTime + 0.05);
+      gain.gain.setValueAtTime(0.15, audioCtx.currentTime);
+      gain.gain.linearRampToValueAtTime(0.01, audioCtx.currentTime + 0.1);
+      osc.start();
+      osc.stop(audioCtx.currentTime + 0.1);
+    }
+  }
+
+  function initGame() {
+    // Crane starts centered at top
+    crane = {
+      x: W / 2,
+      y: 60,
+      targetX: W / 2,
+      speed: 350,
+      hookY: 80,
+      hookState: 'up', // 'up', 'lowering', 'grabbing', 'raising'
+      hookSpeed: 250,
+      grabbedCrate: null
+    };
+
+    // Four crates for four answers, positioned across the width
+    const crateWidth = 150;
+    const crateHeight = 80;
+    const startX = 55;
+    const spacing = (W - 2 * startX - crateWidth) / 3;
+
+    crates = QUESTION.choices.map((choice, i) => ({
+      x: startX + i * spacing,
+      y: 320,
+      width: crateWidth,
+      height: crateHeight,
+      choice: choice,
+      index: i,
+      state: 'docked', // 'docked', 'grabbed', 'falling', 'sunk'
+      fallY: 0,
+      shake: 0,
+      entranceDelay: i * 0.1
+    }));
+
+    // Snow particles
+    snowParticles = [];
+    for (let i = 0; i < 80; i++) {
+      snowParticles.push({
+        x: Math.random() * W,
+        y: Math.random() * H,
+        size: 1 + Math.random() * 3,
+        speed: 20 + Math.random() * 40,
+        drift: (Math.random() - 0.5) * 30
+      });
+    }
+
+    // Signal lights on gantries
+    signalLights = [
+      { x: 80, y: 45, phase: 0 },
+      { x: 640, y: 45, phase: Math.PI },
+      { x: 200, y: 30, phase: Math.PI / 2 },
+      { x: 520, y: 30, phase: Math.PI * 1.5 }
+    ];
+
+    crevasse = { width: 0, targetWidth: 0, crateIndex: -1 };
+    selectedCrate = null;
+    animationTime = 0;
+    entranceAnim = 0;
+  }
+
+  function updateGame(dt) {
+    if (gameState !== 'playing') return;
+
+    animationTime += dt;
+    entranceAnim = Math.min(entranceAnim + dt * 2, 1);
+
+    // Move crane towards target
+    const diff = crane.targetX - crane.x;
+    if (Math.abs(diff) > 2) {
+      crane.x += Math.sign(diff) * crane.speed * dt;
+      if (Math.abs(crane.targetX - crane.x) < 2) crane.x = crane.targetX;
+    }
+
+    // Hook movement
+    if (crane.hookState === 'lowering') {
+      crane.hookY += crane.hookSpeed * dt;
+      // Check if hook reached crate level
+      const targetY = 300;
+      if (crane.hookY >= targetY) {
+        crane.hookY = targetY;
+        crane.hookState = 'grabbing';
+        // Find which crate we're over
+        const hookX = crane.x;
+        for (let crate of crates) {
+          if (crate.state === 'docked' &&
+              hookX >= crate.x && hookX <= crate.x + crate.width) {
+            selectedCrate = crate;
+            crate.state = 'grabbed';
+            crane.grabbedCrate = crate;
+            playSound('grab');
+            break;
+          }
+        }
+        crane.hookState = 'raising';
+      }
+    } else if (crane.hookState === 'raising') {
+      crane.hookY -= crane.hookSpeed * dt;
+      if (crane.hookY <= 80) {
+        crane.hookY = 80;
+        crane.hookState = 'up';
+        // Check answer when fully raised
+        if (crane.grabbedCrate) {
+          const crate = crane.grabbedCrate;
+          if (crate.choice.is_correct) {
+            playSound('correct');
+            engine.end(true, crate.choice.explanation);
+          } else {
+            // Wrong answer - crate falls into crevasse
+            playSound('wrong');
+            crate.state = 'falling';
+            crate.fallY = crane.hookY + crane.y;
+            crevasse.crateIndex = crate.index;
+            crevasse.targetWidth = 100;
+            crane.grabbedCrate = null;
+
+            // Delay before ending
+            setTimeout(() => {
+              engine.end(false, crate.choice.explanation);
+            }, 1200);
+          }
+        }
+      }
+    }
+
+    // Update falling crates
+    for (let crate of crates) {
+      if (crate.state === 'falling') {
+        crate.fallY += 300 * dt;
+        if (crate.fallY > H + 50) {
+          crate.state = 'sunk';
+        }
+      }
+      // Shake animation
+      if (crate.shake > 0) {
+        crate.shake -= dt * 5;
+      }
+    }
+
+    // Crevasse animation
+    if (crevasse.targetWidth > crevasse.width) {
+      crevasse.width += 200 * dt;
+      if (crevasse.width > crevasse.targetWidth) crevasse.width = crevasse.targetWidth;
+    }
+
+    // Update snow
+    for (let snow of snowParticles) {
+      snow.y += snow.speed * dt;
+      snow.x += snow.drift * dt;
+      if (snow.y > H) {
+        snow.y = -5;
+        snow.x = Math.random() * W;
+      }
+      if (snow.x < 0) snow.x = W;
+      if (snow.x > W) snow.x = 0;
+    }
+  }
+
+  function drawGame() {
+    // Arctic sky gradient
+    const skyGrad = ctx.createLinearGradient(0, 0, 0, H);
+    skyGrad.addColorStop(0, '#1a2a4a');
+    skyGrad.addColorStop(0.4, '#2d4a6a');
+    skyGrad.addColorStop(1, '#4a6a8a');
+    ctx.fillStyle = skyGrad;
+    ctx.fillRect(0, 0, W, H);
+
+    // Aurora borealis effect
+    ctx.save();
+    ctx.globalAlpha = 0.15 + Math.sin(animationTime * 0.5) * 0.05;
+    const auroraGrad = ctx.createLinearGradient(0, 0, W, 100);
+    auroraGrad.addColorStop(0, '#4ECDC4');
+    auroraGrad.addColorStop(0.5, '#6BBF59');
+    auroraGrad.addColorStop(1, '#4ECDC4');
+    ctx.fillStyle = auroraGrad;
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    for (let x = 0; x <= W; x += 20) {
+      ctx.lineTo(x, 30 + Math.sin(x * 0.02 + animationTime) * 15);
+    }
+    ctx.lineTo(W, 0);
+    ctx.fill();
+    ctx.restore();
+
+    // Draw gantry structure
+    drawGantry();
+
+    // Draw signal lights
+    for (let light of signalLights) {
+      const intensity = 0.5 + Math.sin(animationTime * 3 + light.phase) * 0.5;
+      ctx.save();
+      ctx.globalAlpha = intensity * 0.3;
+      ctx.fillStyle = '#E87A3E';
+      ctx.beginPath();
+      ctx.arc(light.x, light.y, 15, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.globalAlpha = intensity;
+      ctx.fillStyle = '#F5A742';
+      ctx.beginPath();
+      ctx.arc(light.x, light.y, 6, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+
+    // Ice platform
+    const iceGrad = ctx.createLinearGradient(0, 420, 0, H);
+    iceGrad.addColorStop(0, '#e8f4f8');
+    iceGrad.addColorStop(0.3, '#d0e8f0');
+    iceGrad.addColorStop(1, '#a8d0e0');
+    ctx.fillStyle = iceGrad;
+    ctx.fillRect(0, 420, W, H - 420);
+
+    // Ice cracks
+    ctx.strokeStyle = '#89b8cc';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(100, 430);
+    ctx.lineTo(150, 480);
+    ctx.lineTo(180, 460);
+    ctx.moveTo(400, 440);
+    ctx.lineTo(450, 500);
+    ctx.moveTo(550, 435);
+    ctx.lineTo(600, 470);
+    ctx.lineTo(580, 520);
+    ctx.stroke();
+
+    // Draw crevasse if opening
+    if (crevasse.width > 0 && crevasse.crateIndex >= 0) {
+      const crate = crates[crevasse.crateIndex];
+      const cx = crate.x + crate.width / 2;
+      ctx.fillStyle = '#1a3a5a';
+      ctx.beginPath();
+      ctx.moveTo(cx - crevasse.width / 2, 420);
+      ctx.lineTo(cx + crevasse.width / 2, 420);
+      ctx.lineTo(cx + crevasse.width / 3, H);
+      ctx.lineTo(cx - crevasse.width / 3, H);
+      ctx.fill();
+
+      // Crevasse edges
+      ctx.strokeStyle = '#5a9ab8';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(cx - crevasse.width / 2, 420);
+      ctx.lineTo(cx - crevasse.width / 3, H);
+      ctx.moveTo(cx + crevasse.width / 2, 420);
+      ctx.lineTo(cx + crevasse.width / 3, H);
+      ctx.stroke();
+    }
+
+    // Draw docks (ice platforms for crates)
+    for (let i = 0; i < crates.length; i++) {
+      const crate = crates[i];
+      if (crate.state !== 'falling' && crate.state !== 'sunk') {
+        ctx.fillStyle = '#c8e0e8';
+        ctx.fillRect(crate.x - 10, 400, crate.width + 20, 25);
+        ctx.strokeStyle = '#89b8cc';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(crate.x - 10, 400, crate.width + 20, 25);
+      }
+    }
+
+    // Draw crates with entrance animation
+    for (let crate of crates) {
+      if (crate.state === 'sunk') continue;
+
+      const entranceProgress = Math.max(0, Math.min(1, (entranceAnim - crate.entranceDelay) * 2));
+      const bounce = entranceProgress < 1 ? easeOutBounce(entranceProgress) : 1;
+
+      let x = crate.x;
+      let y = crate.state === 'grabbed' ? crane.y + crane.hookY - 20 :
+              crate.state === 'falling' ? crate.fallY : crate.y;
+
+      // Apply entrance animation
+      if (entranceProgress < 1) {
+        y = y - 200 * (1 - bounce);
+      }
+
+      // Apply shake
+      if (crate.shake > 0) {
+        x += Math.sin(animationTime * 50) * crate.shake * 5;
+      }
+
+      ctx.save();
+      ctx.translate(x + crate.width / 2, y + crate.height / 2);
+
+      // Crate body - insulated cargo container look
+      ctx.fillStyle = '#3a5a7a';
+      ctx.fillRect(-crate.width / 2, -crate.height / 2, crate.width, crate.height);
+
+      // Frost effect on edges
+      ctx.strokeStyle = '#a8d0e0';
+      ctx.lineWidth = 3;
+      ctx.strokeRect(-crate.width / 2, -crate.height / 2, crate.width, crate.height);
+
+      // Metal bands
+      ctx.fillStyle = '#5a7a9a';
+      ctx.fillRect(-crate.width / 2, -crate.height / 2 + 10, crate.width, 8);
+      ctx.fillRect(-crate.width / 2, crate.height / 2 - 18, crate.width, 8);
+
+      // Expedition marking label
+      ctx.fillStyle = '#d8e8f0';
+      ctx.fillRect(-crate.width / 2 + 8, -crate.height / 2 + 22, crate.width - 16, crate.height - 44);
+
+      // Answer text - wrap to fit
+      ctx.fillStyle = '#2B2B28';
+      ctx.font = '600 14px "Nunito", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+
+      const maxWidth = crate.width - 20;
+      const text = crate.choice.text;
+      const words = text.split(' ');
+      let lines = [];
+      let currentLine = '';
+
+      for (let word of words) {
+        const testLine = currentLine ? currentLine + ' ' + word : word;
+        if (ctx.measureText(testLine).width > maxWidth) {
+          if (currentLine) lines.push(currentLine);
+          currentLine = word;
+        } else {
+          currentLine = testLine;
+        }
+      }
+      if (currentLine) lines.push(currentLine);
+
+      // Draw lines
+      const lineHeight = 16;
+      const startY = -((lines.length - 1) * lineHeight) / 2;
+      for (let i = 0; i < lines.length; i++) {
+        ctx.fillText(lines[i], 0, startY + i * lineHeight);
+      }
+
+      ctx.restore();
+
+      // Chain/mooring line to crane if grabbed
+      if (crate.state === 'grabbed' && crane.grabbedCrate === crate) {
+        ctx.strokeStyle = '#8a9aaa';
+        ctx.lineWidth = 3;
+        ctx.setLineDash([8, 4]);
+        ctx.beginPath();
+        ctx.moveTo(crane.x, crane.y + crane.hookY);
+        ctx.lineTo(x + crate.width / 2, y);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
+    }
+
+    // Draw crane
+    drawCrane();
+
+    // Snow particles
+    ctx.fillStyle = '#ffffff';
+    for (let snow of snowParticles) {
+      ctx.globalAlpha = 0.6 + Math.random() * 0.4;
+      ctx.beginPath();
+      ctx.arc(snow.x, snow.y, snow.size, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  function drawGantry() {
+    // Main gantry structure
+    ctx.fillStyle = '#4a5a6a';
+
+    // Left tower
+    ctx.fillRect(50, 20, 20, 400);
+    ctx.fillRect(30, 20, 60, 30);
+
+    // Right tower
+    ctx.fillRect(650, 20, 20, 400);
+    ctx.fillRect(630, 20, 60, 30);
+
+    // Top rail
+    ctx.fillRect(50, 50, 620, 15);
+
+    // Cross braces
+    ctx.strokeStyle = '#5a6a7a';
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    // Left tower braces
+    ctx.moveTo(50, 100);
+    ctx.lineTo(70, 200);
+    ctx.moveTo(70, 100);
+    ctx.lineTo(50, 200);
+    ctx.moveTo(50, 250);
+    ctx.lineTo(70, 350);
+    ctx.moveTo(70, 250);
+    ctx.lineTo(50, 350);
+    // Right tower braces
+    ctx.moveTo(650, 100);
+    ctx.lineTo(670, 200);
+    ctx.moveTo(670, 100);
+    ctx.lineTo(650, 200);
+    ctx.moveTo(650, 250);
+    ctx.lineTo(670, 350);
+    ctx.moveTo(670, 250);
+    ctx.lineTo(650, 350);
+    ctx.stroke();
+
+    // Frost on gantry
+    ctx.strokeStyle = 'rgba(200, 230, 245, 0.5)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(50, 50);
+    ctx.lineTo(670, 50);
+    ctx.stroke();
+  }
+
+  function drawCrane() {
+    // Crane carriage
+    ctx.fillStyle = '#E87A3E';
+    ctx.fillRect(crane.x - 30, crane.y - 15, 60, 30);
+
+    // Carriage details
+    ctx.fillStyle = '#c65a2e';
+    ctx.fillRect(crane.x - 25, crane.y - 10, 50, 5);
+    ctx.fillRect(crane.x - 25, crane.y + 5, 50, 5);
+
+    // Wheels
+    ctx.fillStyle = '#2B2B28';
+    ctx.beginPath();
+    ctx.arc(crane.x - 20, crane.y + 17, 8, 0, Math.PI * 2);
+    ctx.arc(crane.x + 20, crane.y + 17, 8, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Hook cable
+    ctx.strokeStyle = '#8a9aaa';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(crane.x, crane.y + 15);
+    ctx.lineTo(crane.x, crane.y + crane.hookY);
+    ctx.stroke();
+
+    // Hook
+    ctx.fillStyle = '#5a6a7a';
+    ctx.beginPath();
+    ctx.moveTo(crane.x - 15, crane.y + crane.hookY);
+    ctx.lineTo(crane.x + 15, crane.y + crane.hookY);
+    ctx.lineTo(crane.x + 10, crane.y + crane.hookY + 20);
+    ctx.lineTo(crane.x, crane.y + crane.hookY + 25);
+    ctx.lineTo(crane.x - 10, crane.y + crane.hookY + 20);
+    ctx.closePath();
+    ctx.fill();
+
+    // Hook highlight
+    ctx.strokeStyle = '#7a8a9a';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    // Position indicator
+    ctx.fillStyle = '#4ECDC4';
+    ctx.globalAlpha = 0.5 + Math.sin(animationTime * 4) * 0.3;
+    ctx.beginPath();
+    ctx.arc(crane.x, crane.y + crane.hookY + 35, 5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+  }
+
+  function easeOutBounce(t) {
+    if (t < 1 / 2.75) {
+      return 7.5625 * t * t;
+    } else if (t < 2 / 2.75) {
+      t -= 1.5 / 2.75;
+      return 7.5625 * t * t + 0.75;
+    } else if (t < 2.5 / 2.75) {
+      t -= 2.25 / 2.75;
+      return 7.5625 * t * t + 0.9375;
+    } else {
+      t -= 2.625 / 2.75;
+      return 7.5625 * t * t + 0.984375;
+    }
+  }
+
+  function handleInput(e) {
+    if (gameState !== 'playing') return;
+    if (crane.hookState !== 'up') return; // Can't move while hook is busy
+
+    initAudio();
+
+    // Movement
+    if (e.code === 'ArrowLeft' || e.code === 'KeyA') {
+      // Move to previous crate position
+      const positions = crates.filter(c => c.state === 'docked').map(c => c.x + c.width / 2);
+      positions.sort((a, b) => a - b);
+      const current = crane.targetX;
+      let target = positions[0];
+      for (let i = positions.length - 1; i >= 0; i--) {
+        if (positions[i] < current - 10) {
+          target = positions[i];
+          break;
+        }
+      }
+      crane.targetX = target;
+      playSound('click');
+      e.preventDefault();
+    } else if (e.code === 'ArrowRight' || e.code === 'KeyD') {
+      // Move to next crate position
+      const positions = crates.filter(c => c.state === 'docked').map(c => c.x + c.width / 2);
+      positions.sort((a, b) => a - b);
+      const current = crane.targetX;
+      let target = positions[positions.length - 1];
+      for (let i = 0; i < positions.length; i++) {
+        if (positions[i] > current + 10) {
+          target = positions[i];
+          break;
+        }
+      }
+      crane.targetX = target;
+      playSound('click');
+      e.preventDefault();
+    } else if (e.code === 'Space' || e.code === 'Enter') {
+      // Lower hook to grab
+      crane.hookState = 'lowering';
+      playSound('click');
+      e.preventDefault();
+    }
+  }
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 4: GAME LOOP - DO NOT MODIFY                                      ║
+  // ║  Standard loop with responsive scaling and DPR support.                    ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  let lastTime = performance.now();
+
+  function gameLoop(now) {
+    const dt = Math.min((now - lastTime) / 1000, 0.05); // Cap at 50ms
+    lastTime = now;
+
+    // Apply transform for logical coordinate system
+    ctx.setTransform(scale * dpr, 0, 0, scale * dpr, 0, 0);
+
+    if (gameState === 'playing') {
+      updateGame(dt);
+      drawGame();
+    } else {
+      drawGame(); // Draw game state behind overlay
+      drawEndScreen(dt);
+    }
+
+    // Reset transform for next frame
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+    requestAnimationFrame(gameLoop);
+  }
+
+  // Input handlers
+  document.addEventListener('keydown', (e) => {
+    if (gameState === 'ended' && (e.code === 'KeyR')) {
+      // Restart game
+      gameState = 'playing';
+      gameResult = null;
+      gameExplanation = '';
+      confettiParticles = [];
+      initGame();
+      return;
+    }
+    handleInput(e);
+  });
+
+  document.addEventListener('keyup', (e) => {
+    // Optional: handle key release in your handleInput
+  });
+
+  // Canvas click handler for end screen buttons
+  canvas.addEventListener('click', (e) => {
+    if (gameState !== 'ended') return;
+
+    const { x, y } = screenToLogical(e.clientX, e.clientY);
+
+    if (gameResult) {
+      // Correct answer: check both buttons
+      if (pointInRect(x, y, restartButton)) {
+        gameState = 'playing';
+        gameResult = null;
+        gameExplanation = '';
+        confettiParticles = [];
+        initGame();
+        return;
+      }
+      if (pointInRect(x, y, nextButton)) {
+        // Notify parent to go to next question
+        if (window.parent && window.parent !== window) {
+          window.parent.postMessage({ type: 'quiz-next' }, '*');
+        }
+        return;
+      }
+    } else {
+      // Wrong answer: check centered restart button
+      const centeredRestart = { x: W / 2 - 75, y: H / 2 + 60, w: 150, h: 48 };
+      if (pointInRect(x, y, centeredRestart)) {
+        gameState = 'playing';
+        gameResult = null;
+        gameExplanation = '';
+        confettiParticles = [];
+        initGame();
+        return;
+      }
+    }
+  });
+
+  // Handle resize
+  window.addEventListener('resize', resizeCanvas);
+
+  // Initialize
+  resizeCanvas();
+  initGame();
+  requestAnimationFrame(gameLoop);
+  </script>
+</body>
+</html>

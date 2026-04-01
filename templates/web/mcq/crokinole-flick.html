@@ -1,0 +1,1001 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Crokinole Flick</title>
+  <link href="https://fonts.googleapis.com/css2?family=Belanosima:wght@400;600;700&family=Nunito+Sans:wght@400;500;600;700&family=Nunito:wght@400;500;600&display=swap" rel="stylesheet">
+  <!--
+  ╔══════════════════════════════════════════════════════════════════════════════╗
+  ║  GAME FACTORY TEMPLATE                                                        ║
+  ║  This template enforces critical invariants. Follow the section markers.      ║
+  ╚══════════════════════════════════════════════════════════════════════════════╝
+  -->
+  <style>
+    /* ═══════════════════════════════════════════════════════════════════════════
+       BASE STYLES - Can be extended, not removed
+       ═══════════════════════════════════════════════════════════════════════════ */
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+    }
+    body {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      background: #1C1C1A;
+      font-family: 'Nunito Sans', system-ui, -apple-system, sans-serif;
+    }
+    #gameCanvas {
+      background: #2A2A27;
+      border-radius: 8px;
+      display: block;
+    }
+  </style>
+</head>
+<body>
+  <!-- ═══════════════════════════════════════════════════════════════════════════
+       CANVAS - Sized dynamically to fill available space
+       ═══════════════════════════════════════════════════════════════════════════ -->
+  <canvas id="gameCanvas"></canvas>
+
+  <script>
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 1: QUESTION PLACEHOLDER - DO NOT MODIFY FORMAT                    ║
+  // ║  Platform replaces this at runtime. Use these exact 60-char answers.       ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  const QUESTION = {
+    type: "mcq",
+    prompt: "Sample question text",
+    choices: [
+      { text: "This is sample answer A which is long enough to test text overflow", is_correct: true, explanation: "Why A is correct" },
+      { text: "This is sample answer B which is long enough to test text overflow", is_correct: false, explanation: "Why B is wrong" },
+      { text: "This is sample answer C which is long enough to test text overflow", is_correct: false, explanation: "Why C is wrong" },
+      { text: "This is sample answer D which is long enough to test text overflow", is_correct: false, explanation: "Why D is wrong" }
+    ],
+    isLastQuestion: false
+  };
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 2: ENGINE CORE - DO NOT MODIFY                                    ║
+  // ║  Standard engine interface and end screen. This is sacred.                 ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  const canvas = document.getElementById('gameCanvas');
+  const ctx = canvas.getContext('2d');
+
+  // Logical dimensions (game code works in this coordinate space)
+  const W = 720, H = 540;
+
+  // Scaling state (computed on resize)
+  let scale = 1;
+  let dpr = 1;
+
+  let gameState = 'playing'; // 'playing' | 'ended'
+  let gameResult = null;     // true (correct) | false (wrong)
+  let gameExplanation = '';
+  let endScreenTime = 0;
+  let confettiParticles = [];
+
+  // End screen button bounds (logical coordinates)
+  const restartButton = { x: W / 2 - 170, y: H / 2 + 60, w: 150, h: 48 };
+  const nextButton = { x: W / 2 + 20, y: H / 2 + 60, w: 150, h: 48 };
+
+  /** Check if point is inside rectangle */
+  function pointInRect(px, py, rect) {
+    return px >= rect.x && px <= rect.x + rect.w &&
+           py >= rect.y && py <= rect.y + rect.h;
+  }
+
+  /** Draw a styled button */
+  function drawButton(rect, label, color, pulse) {
+    const p = pulse ? 1 + Math.sin(endScreenTime * 4) * 0.03 : 1;
+    ctx.save();
+    ctx.translate(rect.x + rect.w / 2, rect.y + rect.h / 2);
+    ctx.scale(p, p);
+    ctx.translate(-(rect.x + rect.w / 2), -(rect.y + rect.h / 2));
+
+    // Button background
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.roundRect(rect.x, rect.y, rect.w, rect.h, 12);
+    ctx.fill();
+
+    // Button text
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = 'bold 18px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, rect.x + rect.w / 2, rect.y + rect.h / 2);
+
+    ctx.restore();
+  }
+
+  /**
+   * Resize canvas to fill available space with proper DPR scaling.
+   * Maintains logical coordinate system (720×540).
+   */
+  function resizeCanvas() {
+    dpr = window.devicePixelRatio || 1;
+
+    // Get available space
+    const availW = window.innerWidth;
+    const availH = window.innerHeight;
+
+    // Calculate scale to fit logical space (720×540) in available space
+    const scaleX = availW / W;
+    const scaleY = availH / H;
+    scale = Math.min(scaleX, scaleY);
+
+    // Physical canvas buffer (DPR-scaled for crisp rendering)
+    canvas.width = W * scale * dpr;
+    canvas.height = H * scale * dpr;
+
+    // CSS display size
+    canvas.style.width = (W * scale) + 'px';
+    canvas.style.height = (H * scale) + 'px';
+  }
+
+  /**
+   * Convert screen coordinates to logical coordinates.
+   * Use this for mouse/click events to get positions in 720×540 space.
+   */
+  function screenToLogical(screenX, screenY) {
+    const rect = canvas.getBoundingClientRect();
+    return {
+      x: (screenX - rect.left) * (W / rect.width),
+      y: (screenY - rect.top) * (H / rect.height)
+    };
+  }
+
+  const engine = {
+    /** Call this to end the game. DO NOT draw your own end screen. */
+    end(isCorrect, explanation) {
+      if (gameState === 'ended') return;
+      gameState = 'ended';
+      gameResult = isCorrect;
+      gameExplanation = explanation || '';
+      endScreenTime = 0;
+
+      // Spawn confetti for correct answers
+      if (isCorrect) {
+        for (let i = 0; i < 50; i++) {
+          confettiParticles.push({
+            x: W / 2,
+            y: H / 2,
+            vx: (Math.random() - 0.5) * 600,
+            vy: -Math.random() * 400 - 100,
+            size: 4 + Math.random() * 6,
+            color: ['#FFD700', '#FF6B6B', '#4ECDC4', '#95E1D3', '#F38181'][Math.floor(Math.random() * 5)],
+            rotation: Math.random() * Math.PI * 2,
+            rotationSpeed: (Math.random() - 0.5) * 10
+          });
+        }
+      }
+
+      // Notify parent frame
+      if (window.parent && window.parent !== window) {
+        window.parent.postMessage({
+          type: 'quiz-end',
+          isCorrect: isCorrect,
+          explanation: explanation || ''
+        }, '*');
+      }
+    }
+  };
+
+  /** STANDARD END SCREEN - DO NOT MODIFY */
+  function drawEndScreen(dt) {
+    endScreenTime += dt;
+
+    // Update confetti
+    confettiParticles = confettiParticles.filter(p => {
+      p.vy += 800 * dt; // gravity
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.rotation += p.rotationSpeed * dt;
+      p.vx *= 0.99;
+      return p.y < H + 50;
+    });
+
+    // Dark overlay
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
+    ctx.fillRect(0, 0, W, H);
+
+    // Draw confetti
+    confettiParticles.forEach(p => {
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rotation);
+      ctx.fillStyle = p.color;
+      ctx.fillRect(-p.size / 2, -p.size / 4, p.size, p.size / 2);
+      ctx.restore();
+    });
+
+    // Result emoji
+    ctx.font = '72px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(gameResult ? '🎉' : '😢', W / 2, H / 2 - 50);
+
+    // Result text
+    ctx.fillStyle = gameResult ? '#4ADE80' : '#F87171';
+    ctx.font = 'bold 36px system-ui, sans-serif';
+    ctx.fillText(gameResult ? 'Correct!' : 'Wrong!', W / 2, H / 2 + 20);
+
+    // Buttons
+    if (gameResult) {
+      // Correct: show both Restart and Next/Finish
+      drawButton(restartButton, 'Restart', '#E87A3E', true);
+      const nextLabel = QUESTION.isLastQuestion ? 'Finish' : 'Next';
+      drawButton(nextButton, nextLabel, '#4ECDC4', true);
+    } else {
+      // Wrong: show only centered Restart button
+      const centeredRestart = { x: W / 2 - 75, y: H / 2 + 60, w: 150, h: 48 };
+      drawButton(centeredRestart, 'Restart', '#E87A3E', true);
+    }
+  }
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 3: YOUR GAME CODE - IMPLEMENT THESE FUNCTIONS                     ║
+  // ║  This is where your game logic goes. See requirements below.               ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+
+  // Colors from styleguide
+  const COLORS = {
+    bgPrimary: '#FAFAF7',
+    bgSurface: '#FFFFFF',
+    textPrimary: '#2B2B28',
+    textSecondary: '#5A5A54',
+    orange: '#E87A3E',
+    orangeHover: '#D66B31',
+    amber: '#F5A742',
+    cyan: '#4ECDC4',
+    success: '#6BBF59',
+    error: '#E85D4A',
+    borderSubtle: '#E6E6E0',
+    borderStrong: '#D4D4CC',
+    woodLight: '#D4A574',
+    woodMid: '#B8956D',
+    woodDark: '#8B6914',
+    woodRing: '#C49A6C'
+  };
+
+  // Board constants
+  const BOARD_CENTER_X = W / 2;
+  const BOARD_CENTER_Y = H / 2 - 20;
+  const BOARD_RADIUS = 220;
+  const INNER_RINGS = [180, 140, 100, 50]; // Scoring rings
+  const HOLE_RADIUS = 20; // Center hole
+
+  // Disc physics
+  let disc = null;
+  let flickStart = null;
+  let flickState = 'waiting'; // 'waiting' | 'aiming' | 'sliding' | 'stopped'
+
+  // Answer zones (4 quadrants in inner rings)
+  let answerZones = [];
+
+  // Animation state
+  let entranceTime = 0;
+  let gameParticles = [];
+  let selectedZone = null;
+  let celebrateTime = 0;
+
+  // Audio context for sounds
+  let audioCtx = null;
+
+  function initAudio() {
+    if (!audioCtx) {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    }
+  }
+
+  function playSound(type) {
+    if (!audioCtx) return;
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+
+    if (type === 'flick') {
+      osc.frequency.value = 220;
+      osc.type = 'sine';
+      gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
+      gain.gain.exponentialDecayTo && gain.gain.exponentialDecayTo(0.01, audioCtx.currentTime + 0.15);
+      gain.gain.linearRampToValueAtTime(0.01, audioCtx.currentTime + 0.15);
+      osc.start();
+      osc.stop(audioCtx.currentTime + 0.15);
+    } else if (type === 'correct') {
+      osc.frequency.value = 523;
+      osc.type = 'sine';
+      gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
+      gain.gain.linearRampToValueAtTime(0.01, audioCtx.currentTime + 0.3);
+      osc.start();
+      setTimeout(() => {
+        const osc2 = audioCtx.createOscillator();
+        const gain2 = audioCtx.createGain();
+        osc2.connect(gain2);
+        gain2.connect(audioCtx.destination);
+        osc2.frequency.value = 659;
+        osc2.type = 'sine';
+        gain2.gain.setValueAtTime(0.3, audioCtx.currentTime);
+        gain2.gain.linearRampToValueAtTime(0.01, audioCtx.currentTime + 0.3);
+        osc2.start();
+        osc2.stop(audioCtx.currentTime + 0.3);
+      }, 100);
+      osc.stop(audioCtx.currentTime + 0.2);
+    } else if (type === 'wrong') {
+      osc.frequency.value = 200;
+      osc.type = 'sawtooth';
+      gain.gain.setValueAtTime(0.2, audioCtx.currentTime);
+      gain.gain.linearRampToValueAtTime(0.01, audioCtx.currentTime + 0.3);
+      osc.start();
+      osc.stop(audioCtx.currentTime + 0.3);
+    } else if (type === 'slide') {
+      osc.frequency.value = 150;
+      osc.type = 'sine';
+      gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
+      gain.gain.linearRampToValueAtTime(0.01, audioCtx.currentTime + 0.1);
+      osc.start();
+      osc.stop(audioCtx.currentTime + 0.1);
+    }
+  }
+
+  function initGame() {
+    entranceTime = 0;
+    gameParticles = [];
+    selectedZone = null;
+    celebrateTime = 0;
+    flickState = 'waiting';
+    flickStart = null;
+
+    // Initialize disc at bottom area of board
+    disc = {
+      x: BOARD_CENTER_X,
+      y: BOARD_CENTER_Y + 160,
+      vx: 0,
+      vy: 0,
+      radius: 18,
+      scale: 0,
+      alpha: 0
+    };
+
+    // Create 4 answer zones in quadrants
+    // Positioned in the 2nd ring (between 100 and 140 radius)
+    const zoneRadius = 45;
+    const zoneDistance = 115;
+    const angles = [-Math.PI/4, -3*Math.PI/4, 3*Math.PI/4, Math.PI/4]; // Quadrants
+
+    answerZones = QUESTION.choices.map((choice, i) => {
+      const angle = angles[i];
+      return {
+        x: BOARD_CENTER_X + Math.cos(angle) * zoneDistance,
+        y: BOARD_CENTER_Y + Math.sin(angle) * zoneDistance,
+        radius: zoneRadius,
+        choice: choice,
+        index: i,
+        scale: 0,
+        alpha: 0,
+        hovered: false
+      };
+    });
+  }
+
+  function updateGame(dt) {
+    if (gameState !== 'playing') return;
+
+    // Entrance animation
+    entranceTime += dt;
+
+    // Animate disc entrance
+    if (disc.scale < 1) {
+      disc.scale = Math.min(1, entranceTime * 3);
+      disc.alpha = disc.scale;
+    }
+
+    // Animate zone entrances with stagger
+    answerZones.forEach((zone, i) => {
+      const delay = 0.1 + i * 0.08;
+      if (entranceTime > delay && zone.scale < 1) {
+        const t = (entranceTime - delay) * 2.5;
+        const spring = 1 + Math.sin(t * Math.PI * 2) * 0.15 * Math.max(0, 1 - t);
+        zone.scale = Math.min(1, t) * spring;
+        zone.alpha = Math.min(1, t);
+      }
+    });
+
+    // Handle disc physics when sliding
+    if (flickState === 'sliding') {
+      const friction = 0.98;
+      disc.vx *= friction;
+      disc.vy *= friction;
+      disc.x += disc.vx * dt;
+      disc.y += disc.vy * dt;
+
+      // Board boundary collision
+      const distFromCenter = Math.sqrt(
+        Math.pow(disc.x - BOARD_CENTER_X, 2) +
+        Math.pow(disc.y - BOARD_CENTER_Y, 2)
+      );
+
+      if (distFromCenter > BOARD_RADIUS - disc.radius) {
+        // Bounce off edge
+        const angle = Math.atan2(disc.y - BOARD_CENTER_Y, disc.x - BOARD_CENTER_X);
+        disc.x = BOARD_CENTER_X + Math.cos(angle) * (BOARD_RADIUS - disc.radius);
+        disc.y = BOARD_CENTER_Y + Math.sin(angle) * (BOARD_RADIUS - disc.radius);
+
+        // Reflect velocity
+        const nx = Math.cos(angle);
+        const ny = Math.sin(angle);
+        const dot = disc.vx * nx + disc.vy * ny;
+        disc.vx -= 2 * dot * nx * 0.6;
+        disc.vy -= 2 * dot * ny * 0.6;
+        playSound('slide');
+      }
+
+      // Check if disc stopped
+      const speed = Math.sqrt(disc.vx * disc.vx + disc.vy * disc.vy);
+      if (speed < 5) {
+        flickState = 'stopped';
+        checkDiscPosition();
+      }
+
+      // Check collision with center hole (falls in = reset)
+      if (distFromCenter < HOLE_RADIUS) {
+        // Disc fell in center - reset position
+        disc.x = BOARD_CENTER_X;
+        disc.y = BOARD_CENTER_Y + 160;
+        disc.vx = 0;
+        disc.vy = 0;
+        flickState = 'waiting';
+      }
+    }
+
+    // Update particles
+    gameParticles = gameParticles.filter(p => {
+      p.vy += 400 * dt;
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.rotation += p.rotationSpeed * dt;
+      p.life -= dt;
+      return p.life > 0;
+    });
+
+    // Celebration animation
+    if (selectedZone !== null) {
+      celebrateTime += dt;
+    }
+  }
+
+  function checkDiscPosition() {
+    // Check which zone the disc landed in
+    for (const zone of answerZones) {
+      const dist = Math.sqrt(
+        Math.pow(disc.x - zone.x, 2) +
+        Math.pow(disc.y - zone.y, 2)
+      );
+
+      if (dist < zone.radius + disc.radius * 0.5) {
+        selectedZone = zone.index;
+
+        // Spawn particles
+        spawnParticles(zone.x, zone.y, zone.choice.is_correct);
+
+        if (zone.choice.is_correct) {
+          playSound('correct');
+        } else {
+          playSound('wrong');
+        }
+
+        // Delay before showing end screen
+        setTimeout(() => {
+          engine.end(zone.choice.is_correct, zone.choice.explanation);
+        }, 600);
+        return;
+      }
+    }
+
+    // Disc didn't land in any zone - reset to try again
+    setTimeout(() => {
+      disc.x = BOARD_CENTER_X;
+      disc.y = BOARD_CENTER_Y + 160;
+      disc.vx = 0;
+      disc.vy = 0;
+      flickState = 'waiting';
+    }, 500);
+  }
+
+  function spawnParticles(x, y, isCorrect) {
+    const colors = isCorrect
+      ? [COLORS.success, COLORS.cyan, COLORS.amber]
+      : [COLORS.error, COLORS.orange];
+
+    for (let i = 0; i < 20; i++) {
+      gameParticles.push({
+        x: x,
+        y: y,
+        vx: (Math.random() - 0.5) * 300,
+        vy: -Math.random() * 200 - 50,
+        size: 4 + Math.random() * 4,
+        color: colors[Math.floor(Math.random() * colors.length)],
+        rotation: Math.random() * Math.PI * 2,
+        rotationSpeed: (Math.random() - 0.5) * 8,
+        life: 1.5
+      });
+    }
+  }
+
+  function drawGame() {
+    // Clear canvas with warm background
+    ctx.fillStyle = '#2A2A27';
+    ctx.fillRect(0, 0, W, H);
+
+    // Draw crokinole board
+    drawBoard();
+
+    // Draw answer zones
+    answerZones.forEach((zone, i) => {
+      drawAnswerZone(zone, i);
+    });
+
+    // Draw disc
+    if (disc && disc.alpha > 0) {
+      drawDisc();
+    }
+
+    // Draw aiming line when aiming
+    if (flickState === 'aiming' && flickStart) {
+      drawAimLine();
+    }
+
+    // Draw particles
+    gameParticles.forEach(p => {
+      ctx.save();
+      ctx.globalAlpha = p.life;
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rotation);
+      ctx.fillStyle = p.color;
+      ctx.fillRect(-p.size/2, -p.size/4, p.size, p.size/2);
+      ctx.restore();
+    });
+  }
+
+  function drawBoard() {
+    // Outer board shadow
+    ctx.save();
+    ctx.shadowColor = 'rgba(0,0,0,0.3)';
+    ctx.shadowBlur = 20;
+    ctx.shadowOffsetY = 5;
+
+    // Main board circle
+    ctx.beginPath();
+    ctx.arc(BOARD_CENTER_X, BOARD_CENTER_Y, BOARD_RADIUS, 0, Math.PI * 2);
+    ctx.fillStyle = COLORS.woodLight;
+    ctx.fill();
+    ctx.restore();
+
+    // Wood grain lines
+    ctx.strokeStyle = COLORS.woodMid;
+    ctx.lineWidth = 1;
+    ctx.globalAlpha = 0.3;
+    for (let i = 0; i < 8; i++) {
+      const offset = (i - 4) * 30;
+      ctx.beginPath();
+      ctx.moveTo(BOARD_CENTER_X - BOARD_RADIUS + 20, BOARD_CENTER_Y + offset);
+      ctx.bezierCurveTo(
+        BOARD_CENTER_X - 100, BOARD_CENTER_Y + offset + 10,
+        BOARD_CENTER_X + 100, BOARD_CENTER_Y + offset - 10,
+        BOARD_CENTER_X + BOARD_RADIUS - 20, BOARD_CENTER_Y + offset
+      );
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+
+    // Concentric scoring rings
+    INNER_RINGS.forEach((radius, i) => {
+      ctx.beginPath();
+      ctx.arc(BOARD_CENTER_X, BOARD_CENTER_Y, radius, 0, Math.PI * 2);
+      ctx.strokeStyle = COLORS.woodRing;
+      ctx.lineWidth = 2;
+      ctx.stroke();
+    });
+
+    // Quadrant dividing lines
+    ctx.strokeStyle = COLORS.woodRing;
+    ctx.lineWidth = 1.5;
+    for (let angle = Math.PI/4; angle < Math.PI * 2; angle += Math.PI/2) {
+      ctx.beginPath();
+      ctx.moveTo(
+        BOARD_CENTER_X + Math.cos(angle) * 50,
+        BOARD_CENTER_Y + Math.sin(angle) * 50
+      );
+      ctx.lineTo(
+        BOARD_CENTER_X + Math.cos(angle) * BOARD_RADIUS,
+        BOARD_CENTER_Y + Math.sin(angle) * BOARD_RADIUS
+      );
+      ctx.stroke();
+    }
+
+    // Center hole (20 points)
+    ctx.beginPath();
+    ctx.arc(BOARD_CENTER_X, BOARD_CENTER_Y, HOLE_RADIUS, 0, Math.PI * 2);
+    ctx.fillStyle = '#1C1C1A';
+    ctx.fill();
+    ctx.strokeStyle = '#8B6914';
+    ctx.lineWidth = 3;
+    ctx.stroke();
+
+    // Board outer rim
+    ctx.beginPath();
+    ctx.arc(BOARD_CENTER_X, BOARD_CENTER_Y, BOARD_RADIUS, 0, Math.PI * 2);
+    ctx.strokeStyle = '#8B6914';
+    ctx.lineWidth = 6;
+    ctx.stroke();
+  }
+
+  function drawAnswerZone(zone, index) {
+    if (zone.alpha === 0) return;
+
+    ctx.save();
+    ctx.globalAlpha = zone.alpha;
+    ctx.translate(zone.x, zone.y);
+    ctx.scale(zone.scale, zone.scale);
+
+    // Zone colors based on state
+    let bgColor = COLORS.bgSurface;
+    let borderColor = COLORS.borderStrong;
+
+    if (selectedZone === index) {
+      if (zone.choice.is_correct) {
+        bgColor = '#E8F8E5';
+        borderColor = COLORS.success;
+      } else {
+        bgColor = '#FDECEB';
+        borderColor = COLORS.error;
+      }
+    }
+
+    // Draw zone circle
+    ctx.beginPath();
+    ctx.arc(0, 0, zone.radius, 0, Math.PI * 2);
+    ctx.fillStyle = bgColor;
+    ctx.fill();
+    ctx.strokeStyle = borderColor;
+    ctx.lineWidth = 3;
+    ctx.stroke();
+
+    // Draw answer text with wrapping - clip to circle
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(0, 0, zone.radius - 4, 0, Math.PI * 2);
+    ctx.clip();
+
+    ctx.fillStyle = COLORS.textPrimary;
+    ctx.font = "500 14px 'Nunito', sans-serif";
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+
+    // Wrap text to fit in zone
+    const maxWidth = zone.radius * 1.4;
+    const words = zone.choice.text.split(' ');
+    const lines = [];
+    let currentLine = '';
+
+    words.forEach(word => {
+      const testLine = currentLine ? currentLine + ' ' + word : word;
+      const metrics = ctx.measureText(testLine);
+      if (metrics.width > maxWidth && currentLine) {
+        lines.push(currentLine);
+        currentLine = word;
+      } else {
+        currentLine = testLine;
+      }
+    });
+    if (currentLine) lines.push(currentLine);
+
+    // Limit lines to fit in zone and draw
+    const lineHeight = 15;
+    const maxLines = Math.floor((zone.radius * 1.4) / lineHeight);
+    const displayLines = lines.slice(0, maxLines);
+    const startY = -((displayLines.length - 1) * lineHeight) / 2;
+    displayLines.forEach((line, i) => {
+      ctx.fillText(line, 0, startY + i * lineHeight);
+    });
+    ctx.restore();
+
+    // Letter label (A, B, C, D)
+    const letters = ['A', 'B', 'C', 'D'];
+    ctx.font = "700 16px 'Nunito Sans', sans-serif";
+    ctx.fillStyle = COLORS.orange;
+    ctx.fillText(letters[index], 0, -zone.radius + 12);
+
+    ctx.restore();
+  }
+
+  function drawDisc() {
+    ctx.save();
+    ctx.translate(disc.x, disc.y);
+    ctx.scale(disc.scale, disc.scale);
+    ctx.globalAlpha = disc.alpha;
+
+    // Disc shadow
+    ctx.shadowColor = 'rgba(0,0,0,0.3)';
+    ctx.shadowBlur = 8;
+    ctx.shadowOffsetY = 3;
+
+    // Main disc
+    ctx.beginPath();
+    ctx.arc(0, 0, disc.radius, 0, Math.PI * 2);
+    const gradient = ctx.createRadialGradient(
+      -disc.radius * 0.3, -disc.radius * 0.3, 0,
+      0, 0, disc.radius
+    );
+    gradient.addColorStop(0, '#FFE4C9');
+    gradient.addColorStop(0.7, COLORS.orange);
+    gradient.addColorStop(1, COLORS.orangeHover);
+    ctx.fillStyle = gradient;
+    ctx.fill();
+
+    // Disc rim
+    ctx.strokeStyle = COLORS.orangeHover;
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    // Center dot
+    ctx.beginPath();
+    ctx.arc(0, 0, 4, 0, Math.PI * 2);
+    ctx.fillStyle = COLORS.orangeHover;
+    ctx.fill();
+
+    ctx.restore();
+  }
+
+  function drawAimLine() {
+    const dx = flickStart.x - disc.x;
+    const dy = flickStart.y - disc.y;
+    const length = Math.sqrt(dx * dx + dy * dy);
+    const maxLength = 150;
+    const clampedLength = Math.min(length, maxLength);
+    const power = clampedLength / maxLength;
+
+    // Arrow direction (opposite of drag)
+    const angle = Math.atan2(-dy, -dx);
+    const arrowLength = 50 + power * 80;
+
+    ctx.save();
+    ctx.translate(disc.x, disc.y);
+    ctx.rotate(angle);
+
+    // Power indicator gradient
+    const gradient = ctx.createLinearGradient(0, 0, arrowLength, 0);
+    gradient.addColorStop(0, COLORS.cyan);
+    gradient.addColorStop(1, power > 0.7 ? COLORS.orange : COLORS.amber);
+
+    // Arrow line
+    ctx.beginPath();
+    ctx.moveTo(disc.radius + 5, 0);
+    ctx.lineTo(disc.radius + arrowLength, 0);
+    ctx.strokeStyle = gradient;
+    ctx.lineWidth = 4;
+    ctx.lineCap = 'round';
+    ctx.stroke();
+
+    // Arrow head
+    ctx.beginPath();
+    ctx.moveTo(disc.radius + arrowLength, 0);
+    ctx.lineTo(disc.radius + arrowLength - 12, -8);
+    ctx.lineTo(disc.radius + arrowLength - 12, 8);
+    ctx.closePath();
+    ctx.fillStyle = power > 0.7 ? COLORS.orange : COLORS.amber;
+    ctx.fill();
+
+    // Power dots
+    const dotCount = Math.floor(power * 5);
+    for (let i = 0; i < dotCount; i++) {
+      const dotX = disc.radius + 20 + i * 15;
+      ctx.beginPath();
+      ctx.arc(dotX, 0, 3, 0, Math.PI * 2);
+      ctx.fillStyle = COLORS.cyan;
+      ctx.fill();
+    }
+
+    ctx.restore();
+  }
+
+  function handleInput(e) {
+    if (gameState !== 'playing') return;
+    // Keyboard not used for this game - mouse/click only
+  }
+
+  // Mouse/touch handlers for flicking
+  canvas.addEventListener('mousedown', (e) => {
+    if (gameState !== 'playing' || flickState !== 'waiting') return;
+
+    initAudio();
+    const pos = screenToLogical(e.clientX, e.clientY);
+
+    // Check if clicking on disc
+    const dist = Math.sqrt(
+      Math.pow(pos.x - disc.x, 2) +
+      Math.pow(pos.y - disc.y, 2)
+    );
+
+    if (dist < disc.radius + 20) {
+      flickState = 'aiming';
+      flickStart = pos;
+    }
+  });
+
+  canvas.addEventListener('mousemove', (e) => {
+    if (flickState !== 'aiming') return;
+    flickStart = screenToLogical(e.clientX, e.clientY);
+  });
+
+  canvas.addEventListener('mouseup', (e) => {
+    if (flickState !== 'aiming') return;
+
+    const pos = screenToLogical(e.clientX, e.clientY);
+    const dx = flickStart.x - disc.x;
+    const dy = flickStart.y - disc.y;
+    const length = Math.sqrt(dx * dx + dy * dy);
+
+    if (length > 10) {
+      // Calculate velocity (opposite direction of drag)
+      const power = Math.min(length / 150, 1) * 800;
+      const angle = Math.atan2(-dy, -dx);
+
+      disc.vx = Math.cos(angle) * power;
+      disc.vy = Math.sin(angle) * power;
+      flickState = 'sliding';
+      playSound('flick');
+    } else {
+      flickState = 'waiting';
+    }
+
+    flickStart = null;
+  });
+
+  // Touch support
+  canvas.addEventListener('touchstart', (e) => {
+    e.preventDefault();
+    if (gameState !== 'playing' || flickState !== 'waiting') return;
+
+    initAudio();
+    const touch = e.touches[0];
+    const pos = screenToLogical(touch.clientX, touch.clientY);
+
+    const dist = Math.sqrt(
+      Math.pow(pos.x - disc.x, 2) +
+      Math.pow(pos.y - disc.y, 2)
+    );
+
+    if (dist < disc.radius + 30) {
+      flickState = 'aiming';
+      flickStart = pos;
+    }
+  });
+
+  canvas.addEventListener('touchmove', (e) => {
+    e.preventDefault();
+    if (flickState !== 'aiming') return;
+    const touch = e.touches[0];
+    flickStart = screenToLogical(touch.clientX, touch.clientY);
+  });
+
+  canvas.addEventListener('touchend', (e) => {
+    e.preventDefault();
+    if (flickState !== 'aiming' || !flickStart) return;
+
+    const dx = flickStart.x - disc.x;
+    const dy = flickStart.y - disc.y;
+    const length = Math.sqrt(dx * dx + dy * dy);
+
+    if (length > 10) {
+      const power = Math.min(length / 150, 1) * 800;
+      const angle = Math.atan2(-dy, -dx);
+
+      disc.vx = Math.cos(angle) * power;
+      disc.vy = Math.sin(angle) * power;
+      flickState = 'sliding';
+      playSound('flick');
+    } else {
+      flickState = 'waiting';
+    }
+
+    flickStart = null;
+  });
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 4: GAME LOOP - DO NOT MODIFY                                      ║
+  // ║  Standard loop with responsive scaling and DPR support.                    ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  let lastTime = performance.now();
+
+  function gameLoop(now) {
+    const dt = Math.min((now - lastTime) / 1000, 0.05); // Cap at 50ms
+    lastTime = now;
+
+    // Apply transform for logical coordinate system
+    ctx.setTransform(scale * dpr, 0, 0, scale * dpr, 0, 0);
+
+    if (gameState === 'playing') {
+      updateGame(dt);
+      drawGame();
+    } else {
+      drawGame(); // Draw game state behind overlay
+      drawEndScreen(dt);
+    }
+
+    // Reset transform for next frame
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+    requestAnimationFrame(gameLoop);
+  }
+
+  // Input handlers
+  document.addEventListener('keydown', (e) => {
+    if (gameState === 'ended' && (e.code === 'KeyR')) {
+      // Restart game
+      gameState = 'playing';
+      gameResult = null;
+      gameExplanation = '';
+      confettiParticles = [];
+      initGame();
+      return;
+    }
+    handleInput(e);
+  });
+
+  document.addEventListener('keyup', (e) => {
+    // Optional: handle key release in your handleInput
+  });
+
+  // Canvas click handler for end screen buttons
+  canvas.addEventListener('click', (e) => {
+    if (gameState !== 'ended') return;
+
+    const { x, y } = screenToLogical(e.clientX, e.clientY);
+
+    if (gameResult) {
+      // Correct answer: check both buttons
+      if (pointInRect(x, y, restartButton)) {
+        gameState = 'playing';
+        gameResult = null;
+        gameExplanation = '';
+        confettiParticles = [];
+        initGame();
+        return;
+      }
+      if (pointInRect(x, y, nextButton)) {
+        // Notify parent to go to next question
+        if (window.parent && window.parent !== window) {
+          window.parent.postMessage({ type: 'quiz-next' }, '*');
+        }
+        return;
+      }
+    } else {
+      // Wrong answer: check centered restart button
+      const centeredRestart = { x: W / 2 - 75, y: H / 2 + 60, w: 150, h: 48 };
+      if (pointInRect(x, y, centeredRestart)) {
+        gameState = 'playing';
+        gameResult = null;
+        gameExplanation = '';
+        confettiParticles = [];
+        initGame();
+        return;
+      }
+    }
+  });
+
+  // Handle resize
+  window.addEventListener('resize', resizeCanvas);
+
+  // Initialize
+  resizeCanvas();
+  initGame();
+  requestAnimationFrame(gameLoop);
+  </script>
+</body>
+</html>

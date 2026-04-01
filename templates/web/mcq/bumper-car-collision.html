@@ -1,0 +1,955 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Bumper Car Collision</title>
+  <link href="https://fonts.googleapis.com/css2?family=Belanosima:wght@400;600;700&family=Nunito+Sans:wght@400;500;600;700&family=Nunito:wght@400;500;600&display=swap" rel="stylesheet">
+  <!--
+  ╔══════════════════════════════════════════════════════════════════════════════╗
+  ║  GAME FACTORY TEMPLATE                                                        ║
+  ║  This template enforces critical invariants. Follow the section markers.      ║
+  ╚══════════════════════════════════════════════════════════════════════════════╝
+  -->
+  <style>
+    /* ═══════════════════════════════════════════════════════════════════════════
+       BASE STYLES - Can be extended, not removed
+       ═══════════════════════════════════════════════════════════════════════════ */
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+    }
+    body {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      background: #1a1a2e;
+      font-family: 'Nunito Sans', system-ui, -apple-system, sans-serif;
+    }
+    #gameCanvas {
+      background: #16213e;
+      border-radius: 8px;
+      display: block;
+    }
+  </style>
+</head>
+<body>
+  <!-- ═══════════════════════════════════════════════════════════════════════════
+       CANVAS - Sized dynamically to fill available space
+       ═══════════════════════════════════════════════════════════════════════════ -->
+  <canvas id="gameCanvas"></canvas>
+
+  <script>
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 1: QUESTION PLACEHOLDER - DO NOT MODIFY FORMAT                    ║
+  // ║  Platform replaces this at runtime. Use these exact 60-char answers.       ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  const QUESTION = {
+    type: "mcq",
+    prompt: "Sample question text",
+    choices: [
+      { text: "This is sample answer A which is long enough to test text overflow", is_correct: true, explanation: "Why A is correct" },
+      { text: "This is sample answer B which is long enough to test text overflow", is_correct: false, explanation: "Why B is wrong" },
+      { text: "This is sample answer C which is long enough to test text overflow", is_correct: false, explanation: "Why C is wrong" },
+      { text: "This is sample answer D which is long enough to test text overflow", is_correct: false, explanation: "Why D is wrong" }
+    ],
+    isLastQuestion: false
+  };
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 2: ENGINE CORE - DO NOT MODIFY                                    ║
+  // ║  Standard engine interface and end screen. This is sacred.                 ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  const canvas = document.getElementById('gameCanvas');
+  const ctx = canvas.getContext('2d');
+
+  // Logical dimensions (game code works in this coordinate space)
+  const W = 720, H = 540;
+
+  // Scaling state (computed on resize)
+  let scale = 1;
+  let dpr = 1;
+
+  let gameState = 'playing'; // 'playing' | 'ended'
+  let gameResult = null;     // true (correct) | false (wrong)
+  let gameExplanation = '';
+  let endScreenTime = 0;
+  let confettiParticles = [];
+
+  // End screen button bounds (logical coordinates)
+  const restartButton = { x: W / 2 - 170, y: H / 2 + 60, w: 150, h: 48 };
+  const nextButton = { x: W / 2 + 20, y: H / 2 + 60, w: 150, h: 48 };
+
+  /** Check if point is inside rectangle */
+  function pointInRect(px, py, rect) {
+    return px >= rect.x && px <= rect.x + rect.w &&
+           py >= rect.y && py <= rect.y + rect.h;
+  }
+
+  /** Draw a styled button */
+  function drawButton(rect, label, color, pulse) {
+    const p = pulse ? 1 + Math.sin(endScreenTime * 4) * 0.03 : 1;
+    ctx.save();
+    ctx.translate(rect.x + rect.w / 2, rect.y + rect.h / 2);
+    ctx.scale(p, p);
+    ctx.translate(-(rect.x + rect.w / 2), -(rect.y + rect.h / 2));
+
+    // Button background
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.roundRect(rect.x, rect.y, rect.w, rect.h, 12);
+    ctx.fill();
+
+    // Button text
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = 'bold 18px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, rect.x + rect.w / 2, rect.y + rect.h / 2);
+
+    ctx.restore();
+  }
+
+  /**
+   * Resize canvas to fill available space with proper DPR scaling.
+   * Maintains logical coordinate system (720×540).
+   */
+  function resizeCanvas() {
+    dpr = window.devicePixelRatio || 1;
+
+    // Get available space
+    const availW = window.innerWidth;
+    const availH = window.innerHeight;
+
+    // Calculate scale to fit logical space (720×540) in available space
+    const scaleX = availW / W;
+    const scaleY = availH / H;
+    scale = Math.min(scaleX, scaleY);
+
+    // Physical canvas buffer (DPR-scaled for crisp rendering)
+    canvas.width = W * scale * dpr;
+    canvas.height = H * scale * dpr;
+
+    // CSS display size
+    canvas.style.width = (W * scale) + 'px';
+    canvas.style.height = (H * scale) + 'px';
+  }
+
+  /**
+   * Convert screen coordinates to logical coordinates.
+   * Use this for mouse/click events to get positions in 720×540 space.
+   */
+  function screenToLogical(screenX, screenY) {
+    const rect = canvas.getBoundingClientRect();
+    return {
+      x: (screenX - rect.left) * (W / rect.width),
+      y: (screenY - rect.top) * (H / rect.height)
+    };
+  }
+
+  const engine = {
+    /** Call this to end the game. DO NOT draw your own end screen. */
+    end(isCorrect, explanation) {
+      if (gameState === 'ended') return;
+      gameState = 'ended';
+      gameResult = isCorrect;
+      gameExplanation = explanation || '';
+      endScreenTime = 0;
+
+      // Spawn confetti for correct answers
+      if (isCorrect) {
+        for (let i = 0; i < 50; i++) {
+          confettiParticles.push({
+            x: W / 2,
+            y: H / 2,
+            vx: (Math.random() - 0.5) * 600,
+            vy: -Math.random() * 400 - 100,
+            size: 4 + Math.random() * 6,
+            color: ['#FFD700', '#FF6B6B', '#4ECDC4', '#95E1D3', '#F38181'][Math.floor(Math.random() * 5)],
+            rotation: Math.random() * Math.PI * 2,
+            rotationSpeed: (Math.random() - 0.5) * 10
+          });
+        }
+      }
+
+      // Notify parent frame
+      if (window.parent && window.parent !== window) {
+        window.parent.postMessage({
+          type: 'quiz-end',
+          isCorrect: isCorrect,
+          explanation: explanation || ''
+        }, '*');
+      }
+    }
+  };
+
+  /** STANDARD END SCREEN - DO NOT MODIFY */
+  function drawEndScreen(dt) {
+    endScreenTime += dt;
+
+    // Update confetti
+    confettiParticles = confettiParticles.filter(p => {
+      p.vy += 800 * dt; // gravity
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.rotation += p.rotationSpeed * dt;
+      p.vx *= 0.99;
+      return p.y < H + 50;
+    });
+
+    // Dark overlay
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
+    ctx.fillRect(0, 0, W, H);
+
+    // Draw confetti
+    confettiParticles.forEach(p => {
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rotation);
+      ctx.fillStyle = p.color;
+      ctx.fillRect(-p.size / 2, -p.size / 4, p.size, p.size / 2);
+      ctx.restore();
+    });
+
+    // Result emoji
+    ctx.font = '72px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(gameResult ? '🎉' : '😢', W / 2, H / 2 - 50);
+
+    // Result text
+    ctx.fillStyle = gameResult ? '#4ADE80' : '#F87171';
+    ctx.font = 'bold 36px system-ui, sans-serif';
+    ctx.fillText(gameResult ? 'Correct!' : 'Wrong!', W / 2, H / 2 + 20);
+
+    // Buttons
+    if (gameResult) {
+      // Correct: show both Restart and Next/Finish
+      drawButton(restartButton, 'Restart', '#E87A3E', true);
+      const nextLabel = QUESTION.isLastQuestion ? 'Finish' : 'Next';
+      drawButton(nextButton, nextLabel, '#4ECDC4', true);
+    } else {
+      // Wrong: show only centered Restart button
+      const centeredRestart = { x: W / 2 - 75, y: H / 2 + 60, w: 150, h: 48 };
+      drawButton(centeredRestart, 'Restart', '#E87A3E', true);
+    }
+  }
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 3: YOUR GAME CODE - IMPLEMENT THESE FUNCTIONS                     ║
+  // ║  This is where your game logic goes. See requirements below.               ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+
+  // === GAME CONSTANTS ===
+  const ARENA_PADDING = 30;
+  const ARENA_X = ARENA_PADDING;
+  const ARENA_Y = ARENA_PADDING;
+  const ARENA_W = W - ARENA_PADDING * 2;
+  const ARENA_H = H - ARENA_PADDING * 2 - 100; // Leave space for answer labels at bottom
+  const CAR_WIDTH = 50;
+  const CAR_HEIGHT = 35;
+  const PLAYER_SPEED = 250;
+  const ANSWER_CAR_SPEED = 80;
+  const FRICTION = 0.92;
+  const COLLISION_BOUNCE = 0.6;
+
+  // Colors
+  const ORANGE_PRIMARY = '#E87A3E';
+  const AMBER = '#F5A742';
+  const CYAN = '#4ECDC4';
+  const SUCCESS_GREEN = '#6BBF59';
+  const ERROR_RED = '#E85D4A';
+  const TEXT_COLOR = '#2B2B28';
+  const BG_COLOR = '#FAFAF7';
+
+  const ANSWER_COLORS = [ORANGE_PRIMARY, CYAN, AMBER, SUCCESS_GREEN];
+
+  // === GAME STATE ===
+  let player = null;
+  let answerCars = [];
+  let sparks = [];
+  let collisionCooldown = 0;
+  let selectedAnswer = null;
+  let keys = { up: false, down: false, left: false, right: false };
+  let entranceAnimTime = 0;
+  let shakeTime = 0;
+  let shakeIntensity = 0;
+
+  // Audio context for sound effects
+  let audioCtx = null;
+
+  function initAudio() {
+    if (!audioCtx) {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    }
+  }
+
+  function playSound(type) {
+    if (!audioCtx) return;
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+
+    if (type === 'collision') {
+      osc.type = 'square';
+      osc.frequency.setValueAtTime(150, audioCtx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(50, audioCtx.currentTime + 0.15);
+      gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.15);
+      osc.start();
+      osc.stop(audioCtx.currentTime + 0.15);
+    } else if (type === 'correct') {
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(523, audioCtx.currentTime);
+      osc.frequency.setValueAtTime(659, audioCtx.currentTime + 0.1);
+      osc.frequency.setValueAtTime(784, audioCtx.currentTime + 0.2);
+      gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.4);
+      osc.start();
+      osc.stop(audioCtx.currentTime + 0.4);
+    } else if (type === 'wrong') {
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(200, audioCtx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(100, audioCtx.currentTime + 0.3);
+      gain.gain.setValueAtTime(0.2, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.3);
+      osc.start();
+      osc.stop(audioCtx.currentTime + 0.3);
+    }
+  }
+
+  function initGame() {
+    // Player car starts in center
+    player = {
+      x: ARENA_X + ARENA_W / 2,
+      y: ARENA_Y + ARENA_H / 2,
+      vx: 0,
+      vy: 0,
+      angle: 0,
+      color: '#555566'
+    };
+
+    // Position answer cars in corners
+    const positions = [
+      { x: ARENA_X + 80, y: ARENA_Y + 60, angle: Math.PI * 0.25 },
+      { x: ARENA_X + ARENA_W - 80, y: ARENA_Y + 60, angle: Math.PI * 0.75 },
+      { x: ARENA_X + 80, y: ARENA_Y + ARENA_H - 60, angle: -Math.PI * 0.25 },
+      { x: ARENA_X + ARENA_W - 80, y: ARENA_Y + ARENA_H - 60, angle: -Math.PI * 0.75 }
+    ];
+
+    answerCars = QUESTION.choices.map((choice, i) => ({
+      x: positions[i].x,
+      y: positions[i].y,
+      vx: 0,
+      vy: 0,
+      angle: positions[i].angle,
+      targetAngle: positions[i].angle,
+      choice: choice,
+      index: i,
+      color: ANSWER_COLORS[i],
+      moveTimer: Math.random() * 2,
+      patternPhase: Math.random() * Math.PI * 2
+    }));
+
+    sparks = [];
+    collisionCooldown = 0;
+    selectedAnswer = null;
+    keys = { up: false, down: false, left: false, right: false };
+    entranceAnimTime = 0;
+    shakeTime = 0;
+    shakeIntensity = 0;
+  }
+
+  function spawnSparks(x, y, count) {
+    for (let i = 0; i < count; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const speed = 100 + Math.random() * 200;
+      sparks.push({
+        x: x,
+        y: y,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed,
+        life: 0.4 + Math.random() * 0.3,
+        maxLife: 0.4 + Math.random() * 0.3,
+        color: Math.random() > 0.5 ? AMBER : ORANGE_PRIMARY,
+        size: 2 + Math.random() * 4
+      });
+    }
+  }
+
+  function checkCollision(car1, car2) {
+    const dx = car2.x - car1.x;
+    const dy = car2.y - car1.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    return dist < CAR_WIDTH * 0.8;
+  }
+
+  function handleCarCollision(car1, car2) {
+    const dx = car2.x - car1.x;
+    const dy = car2.y - car1.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+
+    if (dist === 0) return;
+
+    const nx = dx / dist;
+    const ny = dy / dist;
+
+    // Relative velocity
+    const dvx = car1.vx - car2.vx;
+    const dvy = car1.vy - car2.vy;
+    const dvn = dvx * nx + dvy * ny;
+
+    // Only handle if approaching
+    if (dvn > 0) {
+      const impulse = dvn * COLLISION_BOUNCE;
+      car1.vx -= impulse * nx;
+      car1.vy -= impulse * ny;
+      car2.vx += impulse * nx * 0.5;
+      car2.vy += impulse * ny * 0.5;
+    }
+
+    // Separate overlapping cars
+    const overlap = CAR_WIDTH * 0.8 - dist;
+    if (overlap > 0) {
+      car1.x -= nx * overlap * 0.5;
+      car1.y -= ny * overlap * 0.5;
+      car2.x += nx * overlap * 0.5;
+      car2.y += ny * overlap * 0.5;
+    }
+
+    // Spawn sparks at collision point
+    const cx = (car1.x + car2.x) / 2;
+    const cy = (car1.y + car2.y) / 2;
+    spawnSparks(cx, cy, 12);
+
+    // Screen shake
+    shakeIntensity = 8;
+    shakeTime = 0.2;
+
+    return true;
+  }
+
+  function updateGame(dt) {
+    if (gameState !== 'playing') return;
+
+    entranceAnimTime += dt;
+
+    // Update screen shake
+    if (shakeTime > 0) {
+      shakeTime -= dt;
+    }
+
+    // Player input
+    let ax = 0, ay = 0;
+    if (keys.up) ay = -1;
+    if (keys.down) ay = 1;
+    if (keys.left) ax = -1;
+    if (keys.right) ax = 1;
+
+    // Normalize diagonal movement
+    if (ax !== 0 && ay !== 0) {
+      const mag = Math.sqrt(ax * ax + ay * ay);
+      ax /= mag;
+      ay /= mag;
+    }
+
+    // Apply acceleration
+    player.vx += ax * PLAYER_SPEED * 3 * dt;
+    player.vy += ay * PLAYER_SPEED * 3 * dt;
+
+    // Apply friction
+    player.vx *= Math.pow(FRICTION, dt * 60);
+    player.vy *= Math.pow(FRICTION, dt * 60);
+
+    // Update player position
+    player.x += player.vx * dt;
+    player.y += player.vy * dt;
+
+    // Update player angle based on velocity
+    if (Math.abs(player.vx) > 10 || Math.abs(player.vy) > 10) {
+      player.angle = Math.atan2(player.vy, player.vx);
+    }
+
+    // Keep player in arena
+    player.x = Math.max(ARENA_X + CAR_WIDTH / 2, Math.min(ARENA_X + ARENA_W - CAR_WIDTH / 2, player.x));
+    player.y = Math.max(ARENA_Y + CAR_HEIGHT / 2, Math.min(ARENA_Y + ARENA_H - CAR_HEIGHT / 2, player.y));
+
+    // Bounce off walls
+    if (player.x <= ARENA_X + CAR_WIDTH / 2 || player.x >= ARENA_X + ARENA_W - CAR_WIDTH / 2) {
+      player.vx *= -0.5;
+    }
+    if (player.y <= ARENA_Y + CAR_HEIGHT / 2 || player.y >= ARENA_Y + ARENA_H - CAR_HEIGHT / 2) {
+      player.vy *= -0.5;
+    }
+
+    // Update answer cars with movement patterns
+    answerCars.forEach((car, i) => {
+      car.moveTimer += dt;
+      car.patternPhase += dt * 0.8;
+
+      // Each car has a different movement pattern
+      let targetX, targetY;
+      const centerX = ARENA_X + ARENA_W / 2;
+      const centerY = ARENA_Y + ARENA_H / 2;
+      const radius = 120;
+
+      switch (i) {
+        case 0: // Circular pattern
+          targetX = centerX - 100 + Math.cos(car.patternPhase) * radius;
+          targetY = centerY - 50 + Math.sin(car.patternPhase) * radius * 0.6;
+          break;
+        case 1: // Figure-8 pattern
+          targetX = centerX + 100 + Math.sin(car.patternPhase) * radius;
+          targetY = centerY - 50 + Math.sin(car.patternPhase * 2) * 60;
+          break;
+        case 2: // Horizontal patrol
+          targetX = centerX - 100 + Math.sin(car.patternPhase * 0.7) * 150;
+          targetY = centerY + 80;
+          break;
+        case 3: // Vertical patrol
+          targetX = centerX + 100;
+          targetY = centerY + Math.sin(car.patternPhase * 0.6) * 100;
+          break;
+      }
+
+      // Move towards target
+      const dx = targetX - car.x;
+      const dy = targetY - car.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+
+      if (dist > 5) {
+        car.vx += (dx / dist) * ANSWER_CAR_SPEED * dt * 5;
+        car.vy += (dy / dist) * ANSWER_CAR_SPEED * dt * 5;
+        car.angle = Math.atan2(car.vy, car.vx);
+      }
+
+      // Apply friction
+      car.vx *= Math.pow(0.95, dt * 60);
+      car.vy *= Math.pow(0.95, dt * 60);
+
+      // Update position
+      car.x += car.vx * dt;
+      car.y += car.vy * dt;
+
+      // Keep in arena
+      car.x = Math.max(ARENA_X + CAR_WIDTH / 2, Math.min(ARENA_X + ARENA_W - CAR_WIDTH / 2, car.x));
+      car.y = Math.max(ARENA_Y + CAR_HEIGHT / 2, Math.min(ARENA_Y + ARENA_H - CAR_HEIGHT / 2, car.y));
+    });
+
+    // Update collision cooldown
+    if (collisionCooldown > 0) {
+      collisionCooldown -= dt;
+    }
+
+    // Check player collision with answer cars
+    if (collisionCooldown <= 0) {
+      for (const car of answerCars) {
+        if (checkCollision(player, car)) {
+          handleCarCollision(player, car);
+          initAudio();
+          playSound('collision');
+
+          // Check if collision was hard enough to select answer
+          const speed = Math.sqrt(player.vx * player.vx + player.vy * player.vy);
+          if (speed > 100) {
+            selectedAnswer = car;
+            collisionCooldown = 0.5;
+
+            // Delay end to show collision effect
+            setTimeout(() => {
+              if (car.choice.is_correct) {
+                playSound('correct');
+              } else {
+                playSound('wrong');
+              }
+              engine.end(car.choice.is_correct, car.choice.explanation);
+            }, 300);
+            return;
+          }
+
+          collisionCooldown = 0.1;
+        }
+      }
+    }
+
+    // Check answer car collisions with each other
+    for (let i = 0; i < answerCars.length; i++) {
+      for (let j = i + 1; j < answerCars.length; j++) {
+        if (checkCollision(answerCars[i], answerCars[j])) {
+          handleCarCollision(answerCars[i], answerCars[j]);
+        }
+      }
+    }
+
+    // Update sparks
+    sparks = sparks.filter(spark => {
+      spark.x += spark.vx * dt;
+      spark.y += spark.vy * dt;
+      spark.vy += 300 * dt; // gravity
+      spark.life -= dt;
+      return spark.life > 0;
+    });
+  }
+
+  function drawBumperCar(x, y, angle, color, label, index) {
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(angle);
+
+    // Entrance animation
+    const entryDelay = index !== undefined ? index * 0.1 : 0;
+    const entryProgress = Math.min(1, Math.max(0, (entranceAnimTime - entryDelay) * 3));
+    const bounceScale = entryProgress < 1 ?
+      1 + Math.sin(entryProgress * Math.PI) * 0.3 : 1;
+    ctx.scale(bounceScale, bounceScale);
+
+    // Car body shadow
+    ctx.fillStyle = 'rgba(0,0,0,0.3)';
+    ctx.beginPath();
+    ctx.ellipse(3, 3, CAR_WIDTH / 2, CAR_HEIGHT / 2, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Bumper ring
+    ctx.strokeStyle = '#333';
+    ctx.lineWidth = 6;
+    ctx.beginPath();
+    ctx.ellipse(0, 0, CAR_WIDTH / 2 + 3, CAR_HEIGHT / 2 + 3, 0, 0, Math.PI * 2);
+    ctx.stroke();
+
+    // Rubber bumper
+    ctx.strokeStyle = '#666';
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.ellipse(0, 0, CAR_WIDTH / 2, CAR_HEIGHT / 2, 0, 0, Math.PI * 2);
+    ctx.stroke();
+
+    // Car body
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.ellipse(0, 0, CAR_WIDTH / 2 - 3, CAR_HEIGHT / 2 - 3, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Highlight
+    ctx.fillStyle = 'rgba(255,255,255,0.3)';
+    ctx.beginPath();
+    ctx.ellipse(-5, -5, CAR_WIDTH / 4, CAR_HEIGHT / 4, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Driver seat
+    ctx.fillStyle = '#333';
+    ctx.beginPath();
+    ctx.arc(0, 0, 8, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Direction indicator (front of car)
+    ctx.fillStyle = '#fff';
+    ctx.beginPath();
+    ctx.arc(15, 0, 4, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.restore();
+
+    // Draw label letter above car (not rotated)
+    if (label !== undefined) {
+      ctx.save();
+      ctx.fillStyle = color;
+      ctx.strokeStyle = '#fff';
+      ctx.lineWidth = 3;
+      ctx.font = "bold 18px 'Belanosima', sans-serif";
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      const labelY = y - CAR_HEIGHT / 2 - 15;
+      ctx.strokeText(label, x, labelY);
+      ctx.fillText(label, x, labelY);
+      ctx.restore();
+    }
+  }
+
+  function drawArena() {
+    // Arena floor
+    ctx.fillStyle = '#2a2a3a';
+    ctx.beginPath();
+    ctx.roundRect(ARENA_X, ARENA_Y, ARENA_W, ARENA_H, 20);
+    ctx.fill();
+
+    // Arena grid lines
+    ctx.strokeStyle = 'rgba(255,255,255,0.1)';
+    ctx.lineWidth = 1;
+    for (let i = 0; i <= 10; i++) {
+      const x = ARENA_X + (ARENA_W / 10) * i;
+      ctx.beginPath();
+      ctx.moveTo(x, ARENA_Y);
+      ctx.lineTo(x, ARENA_Y + ARENA_H);
+      ctx.stroke();
+    }
+    for (let i = 0; i <= 8; i++) {
+      const y = ARENA_Y + (ARENA_H / 8) * i;
+      ctx.beginPath();
+      ctx.moveTo(ARENA_X, y);
+      ctx.lineTo(ARENA_X + ARENA_W, y);
+      ctx.stroke();
+    }
+
+    // Arena border
+    ctx.strokeStyle = CYAN;
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.roundRect(ARENA_X, ARENA_Y, ARENA_W, ARENA_H, 20);
+    ctx.stroke();
+
+    // Corner decorations
+    const cornerSize = 15;
+    ctx.fillStyle = ORANGE_PRIMARY;
+    [
+      [ARENA_X, ARENA_Y],
+      [ARENA_X + ARENA_W - cornerSize, ARENA_Y],
+      [ARENA_X, ARENA_Y + ARENA_H - cornerSize],
+      [ARENA_X + ARENA_W - cornerSize, ARENA_Y + ARENA_H - cornerSize]
+    ].forEach(([cx, cy]) => {
+      ctx.fillRect(cx, cy, cornerSize, cornerSize);
+    });
+  }
+
+  function wrapText(text, maxWidth) {
+    const words = text.split(' ');
+    const lines = [];
+    let currentLine = '';
+
+    for (const word of words) {
+      const testLine = currentLine ? currentLine + ' ' + word : word;
+      const metrics = ctx.measureText(testLine);
+
+      if (metrics.width > maxWidth && currentLine) {
+        lines.push(currentLine);
+        currentLine = word;
+      } else {
+        currentLine = testLine;
+      }
+    }
+    if (currentLine) {
+      lines.push(currentLine);
+    }
+    return lines;
+  }
+
+  function drawAnswerLabels() {
+    const labelY = ARENA_Y + ARENA_H + 15;
+    const labelWidth = 165;
+    const labelHeight = 80;
+    const spacing = 8;
+    const totalWidth = labelWidth * 4 + spacing * 3;
+    const startX = (W - totalWidth) / 2;
+
+    const labels = ['A', 'B', 'C', 'D'];
+
+    answerCars.forEach((car, i) => {
+      const x = startX + i * (labelWidth + spacing);
+
+      // Background
+      ctx.fillStyle = car.color;
+      ctx.globalAlpha = 0.9;
+      ctx.beginPath();
+      ctx.roundRect(x, labelY, labelWidth, labelHeight, 8);
+      ctx.fill();
+      ctx.globalAlpha = 1;
+
+      // Border
+      ctx.strokeStyle = '#fff';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.roundRect(x, labelY, labelWidth, labelHeight, 8);
+      ctx.stroke();
+
+      // Label letter
+      ctx.fillStyle = '#fff';
+      ctx.font = "bold 14px 'Belanosima', sans-serif";
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'top';
+      ctx.fillText(labels[i] + ':', x + 6, labelY + 4);
+
+      // Answer text - wrapped
+      ctx.font = "14px 'Nunito', sans-serif";
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'top';
+
+      const lines = wrapText(car.choice.text, labelWidth - 12);
+      const lineHeight = 15;
+      const maxLines = 4;
+
+      lines.slice(0, maxLines).forEach((line, lineIndex) => {
+        ctx.fillText(line, x + 6, labelY + 20 + lineIndex * lineHeight);
+      });
+    });
+  }
+
+  function drawSparks() {
+    sparks.forEach(spark => {
+      const alpha = spark.life / spark.maxLife;
+      ctx.fillStyle = spark.color;
+      ctx.globalAlpha = alpha;
+      ctx.beginPath();
+      ctx.arc(spark.x, spark.y, spark.size * alpha, 0, Math.PI * 2);
+      ctx.fill();
+    });
+    ctx.globalAlpha = 1;
+  }
+
+  function drawGame() {
+    // Apply screen shake
+    ctx.save();
+    if (shakeTime > 0) {
+      const shakeX = (Math.random() - 0.5) * shakeIntensity;
+      const shakeY = (Math.random() - 0.5) * shakeIntensity;
+      ctx.translate(shakeX, shakeY);
+    }
+
+    // Background
+    ctx.fillStyle = BG_COLOR;
+    ctx.fillRect(0, 0, W, H);
+
+    // Draw arena
+    drawArena();
+
+    // Draw sparks
+    drawSparks();
+
+    // Draw answer cars
+    const labels = ['A', 'B', 'C', 'D'];
+    answerCars.forEach((car, i) => {
+      drawBumperCar(car.x, car.y, car.angle, car.color, labels[i], i);
+    });
+
+    // Draw player car
+    drawBumperCar(player.x, player.y, player.angle, player.color, undefined, 4);
+
+    // Draw answer labels at bottom
+    drawAnswerLabels();
+
+    ctx.restore();
+  }
+
+  function handleInput(e) {
+    if (gameState !== 'playing') return;
+
+    const isKeyDown = e.type === 'keydown';
+
+    switch (e.code) {
+      case 'ArrowUp':
+      case 'KeyW':
+        keys.up = isKeyDown;
+        e.preventDefault();
+        break;
+      case 'ArrowDown':
+      case 'KeyS':
+        keys.down = isKeyDown;
+        e.preventDefault();
+        break;
+      case 'ArrowLeft':
+      case 'KeyA':
+        keys.left = isKeyDown;
+        e.preventDefault();
+        break;
+      case 'ArrowRight':
+      case 'KeyD':
+        keys.right = isKeyDown;
+        e.preventDefault();
+        break;
+    }
+  }
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 4: GAME LOOP - DO NOT MODIFY                                      ║
+  // ║  Standard loop with responsive scaling and DPR support.                    ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  let lastTime = performance.now();
+
+  function gameLoop(now) {
+    const dt = Math.min((now - lastTime) / 1000, 0.05); // Cap at 50ms
+    lastTime = now;
+
+    // Apply transform for logical coordinate system
+    ctx.setTransform(scale * dpr, 0, 0, scale * dpr, 0, 0);
+
+    if (gameState === 'playing') {
+      updateGame(dt);
+      drawGame();
+    } else {
+      drawGame(); // Draw game state behind overlay
+      drawEndScreen(dt);
+    }
+
+    // Reset transform for next frame
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+    requestAnimationFrame(gameLoop);
+  }
+
+  // Input handlers
+  document.addEventListener('keydown', (e) => {
+    if (gameState === 'ended' && (e.code === 'KeyR')) {
+      // Restart game
+      gameState = 'playing';
+      gameResult = null;
+      gameExplanation = '';
+      confettiParticles = [];
+      initGame();
+      return;
+    }
+    handleInput(e);
+  });
+
+  document.addEventListener('keyup', (e) => {
+    // Handle key release
+    handleInput(e);
+  });
+
+  // Canvas click handler for end screen buttons
+  canvas.addEventListener('click', (e) => {
+    if (gameState !== 'ended') return;
+
+    const { x, y } = screenToLogical(e.clientX, e.clientY);
+
+    if (gameResult) {
+      // Correct answer: check both buttons
+      if (pointInRect(x, y, restartButton)) {
+        gameState = 'playing';
+        gameResult = null;
+        gameExplanation = '';
+        confettiParticles = [];
+        initGame();
+        return;
+      }
+      if (pointInRect(x, y, nextButton)) {
+        // Notify parent to go to next question
+        if (window.parent && window.parent !== window) {
+          window.parent.postMessage({ type: 'quiz-next' }, '*');
+        }
+        return;
+      }
+    } else {
+      // Wrong answer: check centered restart button
+      const centeredRestart = { x: W / 2 - 75, y: H / 2 + 60, w: 150, h: 48 };
+      if (pointInRect(x, y, centeredRestart)) {
+        gameState = 'playing';
+        gameResult = null;
+        gameExplanation = '';
+        confettiParticles = [];
+        initGame();
+        return;
+      }
+    }
+  });
+
+  // Handle resize
+  window.addEventListener('resize', resizeCanvas);
+
+  // Initialize
+  resizeCanvas();
+  initGame();
+  requestAnimationFrame(gameLoop);
+  </script>
+</body>
+</html>

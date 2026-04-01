@@ -1,0 +1,969 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <title>Labyrinth Marble Tilt</title>
+  <link href="https://fonts.googleapis.com/css2?family=Belanosima:wght@400;600;700&family=Nunito+Sans:wght@400;500;600;700&family=Nunito:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      touch-action: none;
+      -webkit-touch-callout: none;
+      -webkit-user-select: none;
+      user-select: none;
+    }
+    body {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      background: #1a1a2e;
+      font-family: 'Nunito Sans', system-ui, -apple-system, sans-serif;
+    }
+    #gameCanvas {
+      background: #16213e;
+      width: 100vw;
+      height: 100vh;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="gameCanvas"></canvas>
+
+  <script>
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 1: QUESTION PLACEHOLDER - DO NOT MODIFY FORMAT                    ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  const QUESTION = {
+    type: "mcq",
+    prompt: "Sample question text",
+    choices: [
+      { text: "This is sample answer A which is long enough to test text overflow", is_correct: true, explanation: "Why A is correct" },
+      { text: "This is sample answer B which is long enough to test text overflow", is_correct: false, explanation: "Why B is wrong" },
+      { text: "This is sample answer C which is long enough to test text overflow", is_correct: false, explanation: "Why C is wrong" },
+      { text: "This is sample answer D which is long enough to test text overflow", is_correct: false, explanation: "Why D is wrong" }
+    ],
+    isLastQuestion: false
+  };
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 2: ENGINE CORE (MOBILE) - DO NOT MODIFY                           ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  const canvas = document.getElementById('gameCanvas');
+  const ctx = canvas.getContext('2d');
+
+  const W = 360, H = 640;
+
+  let scaleX = 1;
+  let scaleY = 1;
+  let aspectRatio = 1;
+
+  let gameState = 'playing';
+  let gameResult = null;
+  let gameExplanation = '';
+  let endScreenTime = 0;
+  let confettiParticles = [];
+
+  const restartButton = { x: 20, y: H / 2 + 50, w: 155, h: 56 };
+  const nextButton = { x: 185, y: H / 2 + 50, w: 155, h: 56 };
+  const centeredRestartButton = { x: W / 2 - 100, y: H / 2 + 50, w: 200, h: 56 };
+
+  function drawMobileButton(rect, label, color, pulse) {
+    const textAdj = getTextScaleAdjustment();
+    const p = pulse ? 1 + Math.sin(endScreenTime * 4) * 0.03 : 1;
+
+    ctx.save();
+    ctx.translate(rect.x + rect.w / 2, rect.y + rect.h / 2);
+    ctx.scale(p, p);
+    ctx.translate(-(rect.x + rect.w / 2), -(rect.y + rect.h / 2));
+
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.roundRect(rect.x, rect.y, rect.w, rect.h, 12);
+    ctx.fill();
+
+    ctx.save();
+    ctx.translate(rect.x + rect.w / 2, rect.y + rect.h / 2);
+    ctx.scale(textAdj / aspectRatio, textAdj);
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = "bold 18px 'Nunito Sans', sans-serif";
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, 0, 0);
+    ctx.restore();
+
+    ctx.restore();
+  }
+
+  function resizeCanvas() {
+    const dpr = window.devicePixelRatio || 1;
+
+    canvas.width = window.innerWidth * dpr;
+    canvas.height = window.innerHeight * dpr;
+
+    canvas.style.width = window.innerWidth + 'px';
+    canvas.style.height = window.innerHeight + 'px';
+
+    scaleX = canvas.width / W;
+    scaleY = canvas.height / H;
+
+    aspectRatio = scaleX / scaleY;
+
+    if (typeof recalculateTextSizing === 'function') {
+      recalculateTextSizing();
+    }
+  }
+
+  const TEXT_SCALE_MIN = 0.75;
+  const TEXT_SCALE_MAX = 1.4;
+
+  function getTextScaleAdjustment() {
+    const baseScale = window.innerHeight / H;
+    const clampedScale = Math.min(TEXT_SCALE_MAX, Math.max(TEXT_SCALE_MIN, baseScale));
+    return clampedScale / baseScale;
+  }
+
+  function drawText(text, x, y, options = {}) {
+    const { font = "500 16px 'Nunito', sans-serif", color = '#F5F5F0', align = 'center', baseline = 'middle', maxWidth = null } = options;
+    ctx.save();
+    ctx.translate(x, y);
+    const adj = getTextScaleAdjustment();
+    ctx.scale(adj / aspectRatio, adj);
+    ctx.font = font;
+    ctx.fillStyle = color;
+    ctx.textAlign = align;
+    ctx.textBaseline = baseline;
+    if (maxWidth) {
+      ctx.fillText(text, 0, 0, maxWidth * aspectRatio / adj);
+    } else {
+      ctx.fillText(text, 0, 0);
+    }
+    ctx.restore();
+  }
+
+  function screenToLogical(screenX, screenY) {
+    const dpr = window.devicePixelRatio || 1;
+    const rect = canvas.getBoundingClientRect();
+    const canvasX = (screenX - rect.left) * dpr;
+    const canvasY = (screenY - rect.top) * dpr;
+    return {
+      x: canvasX / scaleX,
+      y: canvasY / scaleY
+    };
+  }
+
+  function pointInRect(px, py, rect) {
+    return px >= rect.x && px <= rect.x + rect.w &&
+           py >= rect.y && py <= rect.y + rect.h;
+  }
+
+  function wrapText(text, maxWidth, font, maxLines = 3) {
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.font = font;
+    const adj = getTextScaleAdjustment();
+    const maxRawWidth = maxWidth * aspectRatio / adj;
+    const words = text.split(' ');
+    const lines = [];
+    let currentLine = '';
+    words.forEach(word => {
+      const testLine = currentLine ? currentLine + ' ' + word : word;
+      if (ctx.measureText(testLine).width > maxRawWidth && currentLine) {
+        lines.push(currentLine);
+        currentLine = word;
+      } else {
+        currentLine = testLine;
+      }
+    });
+    if (currentLine) lines.push(currentLine);
+    ctx.restore();
+    return lines.slice(0, maxLines);
+  }
+
+  function findOptimalFontSize(options) {
+    const {
+      texts,
+      maxWidth,
+      availableHeight,
+      minFont = 12,
+      maxFont = 18,
+      itemPadding = 4,
+      fontFamily = "'Nunito', sans-serif"
+    } = options;
+
+    let bestFontSize = minFont;
+    let bestWrappedTexts = [];
+
+    for (let fontSize = maxFont; fontSize >= minFont; fontSize -= 0.5) {
+      const font = `${fontSize}px ${fontFamily}`;
+      const lineHeight = fontSize + 2;
+
+      let totalHeight = 0;
+      const wrappedTexts = [];
+
+      for (const text of texts) {
+        const lines = wrapText(text, maxWidth, font);
+        wrappedTexts.push(lines);
+        totalHeight += itemPadding + lines.length * lineHeight;
+      }
+
+      if (totalHeight <= availableHeight) {
+        bestFontSize = fontSize;
+        bestWrappedTexts = wrappedTexts;
+        break;
+      }
+
+      bestWrappedTexts = wrappedTexts;
+    }
+
+    return { fontSize: bestFontSize, wrappedTexts: bestWrappedTexts };
+  }
+
+  const engine = {
+    end(isCorrect, explanation) {
+      if (gameState === 'ended') return;
+      gameState = 'ended';
+      gameResult = isCorrect;
+      gameExplanation = explanation || '';
+      endScreenTime = 0;
+
+      if (isCorrect) {
+        for (let i = 0; i < 50; i++) {
+          confettiParticles.push({
+            x: W / 2,
+            y: H / 2,
+            vx: (Math.random() - 0.5) * 400,
+            vy: -Math.random() * 300 - 80,
+            size: 4 + Math.random() * 6,
+            color: ['#E87A3E', '#F5A742', '#4ECDC4', '#6BBF59', '#FFB89D'][Math.floor(Math.random() * 5)],
+            rotation: Math.random() * Math.PI * 2,
+            rotationSpeed: (Math.random() - 0.5) * 10
+          });
+        }
+        playSound('correct');
+      } else {
+        playSound('wrong');
+      }
+
+      if (window.parent && window.parent !== window) {
+        window.parent.postMessage({
+          type: 'quiz-end',
+          isCorrect: isCorrect,
+          explanation: explanation || ''
+        }, '*');
+      }
+    }
+  };
+
+  function drawEndScreen(dt) {
+    endScreenTime += dt;
+
+    confettiParticles = confettiParticles.filter(p => {
+      p.vy += 600 * dt;
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.rotation += p.rotationSpeed * dt;
+      p.vx *= 0.99;
+      return p.y < H + 50;
+    });
+
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
+    ctx.fillRect(0, 0, W, H);
+
+    confettiParticles.forEach(p => {
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rotation);
+      ctx.fillStyle = p.color;
+      ctx.fillRect(-p.size / 2, -p.size / 4, p.size, p.size / 2);
+      ctx.restore();
+    });
+
+    const textAdj = getTextScaleAdjustment();
+    ctx.save();
+    ctx.translate(W / 2, H / 2 - 80);
+    ctx.scale(textAdj / aspectRatio, textAdj);
+    ctx.font = '64px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(gameResult ? '🎉' : '😢', 0, 0);
+    ctx.restore();
+
+    ctx.save();
+    ctx.translate(W / 2, H / 2 - 10);
+    ctx.scale(textAdj / aspectRatio, textAdj);
+    ctx.fillStyle = gameResult ? '#4ADE80' : '#F87171';
+    ctx.font = "bold 32px 'Nunito Sans', sans-serif";
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(gameResult ? 'Correct!' : 'Wrong!', 0, 0);
+    ctx.restore();
+
+    if (gameResult) {
+      drawMobileButton(restartButton, 'Restart', '#E87A3E', true);
+      const nextLabel = QUESTION.isLastQuestion ? 'Finish' : 'Next';
+      drawMobileButton(nextButton, nextLabel, '#4ECDC4', true);
+    } else {
+      drawMobileButton(centeredRestartButton, 'Restart', '#E87A3E', true);
+    }
+  }
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 3: YOUR GAME CODE - LABYRINTH MARBLE TILT                         ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+
+  // === COLORS ===
+  const COLORS = {
+    bgPrimary: '#FAFAF7',
+    wood: '#A67C52',
+    woodDark: '#8B6541',
+    woodLight: '#C4A47A',
+    woodGrain: '#7A5B3A',
+    marble: '#B8C4D0',
+    marbleHighlight: '#E8EEF4',
+    marbleShadow: '#6B7D8F',
+    hole: '#1C1C1A',
+    holeRim: '#363633',
+    orange: '#E87A3E',
+    amber: '#F5A742',
+    cyan: '#4ECDC4',
+    success: '#6BBF59',
+    textPrimary: '#2B2B28',
+    textLight: '#F5F5F0'
+  };
+
+  // === AUDIO ===
+  let audioCtx = null;
+
+  function initAudio() {
+    if (!audioCtx) {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    }
+  }
+
+  function playSound(type) {
+    if (!audioCtx) return;
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+
+    if (type === 'correct') {
+      osc.frequency.setValueAtTime(523, audioCtx.currentTime);
+      osc.frequency.setValueAtTime(659, audioCtx.currentTime + 0.1);
+      osc.frequency.setValueAtTime(784, audioCtx.currentTime + 0.2);
+      gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
+      gain.gain.exponentialDecayTo && gain.gain.exponentialDecayTo(0.01, audioCtx.currentTime + 0.4);
+      osc.start();
+      osc.stop(audioCtx.currentTime + 0.4);
+    } else if (type === 'wrong') {
+      osc.frequency.setValueAtTime(200, audioCtx.currentTime);
+      osc.frequency.setValueAtTime(150, audioCtx.currentTime + 0.15);
+      gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
+      osc.start();
+      osc.stop(audioCtx.currentTime + 0.3);
+    } else if (type === 'roll') {
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(80 + Math.random() * 40, audioCtx.currentTime);
+      gain.gain.setValueAtTime(0.05, audioCtx.currentTime);
+      osc.start();
+      osc.stop(audioCtx.currentTime + 0.05);
+    } else if (type === 'hole') {
+      osc.frequency.setValueAtTime(300, audioCtx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(100, audioCtx.currentTime + 0.3);
+      gain.gain.setValueAtTime(0.2, audioCtx.currentTime);
+      osc.start();
+      osc.stop(audioCtx.currentTime + 0.3);
+    }
+  }
+
+  // === GAME STATE ===
+  let marble = { x: 0, y: 0, vx: 0, vy: 0, radius: 12 };
+  let tilt = { x: 0, y: 0 }; // -1 to 1 range
+  let answerHoles = [];
+  let walls = [];
+  let entranceAnimProgress = 0;
+  let touchStartPos = null;
+  let rollSoundTimer = 0;
+
+  // Board dimensions
+  const BOARD_MARGIN = 20;
+  const BOARD_X = BOARD_MARGIN;
+  const BOARD_Y = 60;
+  const BOARD_W = W - BOARD_MARGIN * 2;
+  const BOARD_H = 400;
+  const BOARD_RIM = 8;
+
+  // Physics
+  const GRAVITY = 400;
+  const FRICTION = 0.97;
+  const BOUNCE = 0.4;
+  const MAX_TILT = 0.5;
+
+  function recalculateTextSizing() {
+    if (!answerHoles || answerHoles.length === 0) return;
+
+    // 2x2 grid: each column is (W - 20) / 2 = 170, minus letter circle + padding = ~120 usable
+    const colWidth = (W - 20) / 2;
+    const { fontSize, wrappedTexts } = findOptimalFontSize({
+      texts: QUESTION.choices.map(c => c.text),
+      maxWidth: colWidth - 50, // Account for letter circle and padding
+      availableHeight: 60,
+      minFont: 14,
+      maxFont: 16,
+      fontFamily: "'Nunito', sans-serif"
+    });
+
+    answerHoles.forEach((hole, i) => {
+      hole.wrappedText = wrappedTexts[i];
+      hole.fontSize = fontSize;
+    });
+  }
+
+  function initGame() {
+    initAudio();
+
+    // Reset marble to center-top
+    marble = {
+      x: W / 2,
+      y: BOARD_Y + 50,
+      vx: 0,
+      vy: 0,
+      radius: 12
+    };
+
+    tilt = { x: 0, y: 0 };
+    entranceAnimProgress = 0;
+
+    // Create 4 answer holes at different positions around the board edges
+    const holeRadius = 20;
+    const labelOffset = 50;
+
+    answerHoles = [
+      // Top-left area
+      {
+        x: BOARD_X + 50,
+        y: BOARD_Y + BOARD_H - 60,
+        radius: holeRadius,
+        labelX: BOARD_X + 50,
+        labelY: BOARD_Y + BOARD_H + 30,
+        choice: QUESTION.choices[0],
+        scale: 0,
+        labelAlign: 'center'
+      },
+      // Top-right area
+      {
+        x: BOARD_X + BOARD_W - 50,
+        y: BOARD_Y + BOARD_H - 60,
+        radius: holeRadius,
+        labelX: BOARD_X + BOARD_W - 50,
+        labelY: BOARD_Y + BOARD_H + 30,
+        choice: QUESTION.choices[1],
+        scale: 0,
+        labelAlign: 'center'
+      },
+      // Bottom-left
+      {
+        x: BOARD_X + 50,
+        y: BOARD_Y + BOARD_H / 2,
+        radius: holeRadius,
+        labelX: BOARD_X + 50,
+        labelY: BOARD_Y + BOARD_H + 70,
+        choice: QUESTION.choices[2],
+        scale: 0,
+        labelAlign: 'center'
+      },
+      // Bottom-right
+      {
+        x: BOARD_X + BOARD_W - 50,
+        y: BOARD_Y + BOARD_H / 2,
+        radius: holeRadius,
+        labelX: BOARD_X + BOARD_W - 50,
+        labelY: BOARD_Y + BOARD_H + 70,
+        choice: QUESTION.choices[3],
+        scale: 0,
+        labelAlign: 'center'
+      }
+    ];
+
+    // Create maze walls
+    walls = [
+      // Horizontal walls
+      { x: BOARD_X + 80, y: BOARD_Y + 100, w: 100, h: 10 },
+      { x: BOARD_X + BOARD_W - 180, y: BOARD_Y + 100, w: 100, h: 10 },
+      { x: BOARD_X + 100, y: BOARD_Y + 180, w: 120, h: 10 },
+      { x: BOARD_X + BOARD_W - 220, y: BOARD_Y + 180, w: 120, h: 10 },
+      { x: BOARD_X + 60, y: BOARD_Y + 260, w: 80, h: 10 },
+      { x: BOARD_X + BOARD_W - 140, y: BOARD_Y + 260, w: 80, h: 10 },
+      { x: BOARD_X + 130, y: BOARD_Y + 320, w: 60, h: 10 },
+      { x: BOARD_X + BOARD_W - 190, y: BOARD_Y + 320, w: 60, h: 10 },
+
+      // Vertical walls
+      { x: BOARD_X + 160, y: BOARD_Y + 120, w: 10, h: 60 },
+      { x: BOARD_X + BOARD_W - 170, y: BOARD_Y + 120, w: 10, h: 60 },
+      { x: BOARD_X + W/2 - BOARD_MARGIN - 5, y: BOARD_Y + 200, w: 10, h: 80 },
+    ];
+
+    recalculateTextSizing();
+  }
+
+  function updateGame(dt) {
+    if (gameState !== 'playing') return;
+
+    // Entrance animation
+    if (entranceAnimProgress < 1) {
+      entranceAnimProgress += dt * 2;
+      answerHoles.forEach((hole, i) => {
+        const delay = i * 0.1;
+        const t = Math.max(0, Math.min(1, (entranceAnimProgress - delay) / 0.3));
+        // Spring easing
+        const spring = 1 + Math.sin(t * Math.PI * 2) * 0.2 * (1 - t);
+        hole.scale = t * spring;
+      });
+    }
+
+    // Apply tilt gravity to marble
+    marble.vx += tilt.x * GRAVITY * dt;
+    marble.vy += tilt.y * GRAVITY * dt;
+
+    // Apply friction
+    marble.vx *= FRICTION;
+    marble.vy *= FRICTION;
+
+    // Update position
+    marble.x += marble.vx * dt;
+    marble.y += marble.vy * dt;
+
+    // Rolling sound
+    const speed = Math.sqrt(marble.vx * marble.vx + marble.vy * marble.vy);
+    rollSoundTimer -= dt;
+    if (speed > 30 && rollSoundTimer <= 0) {
+      playSound('roll');
+      rollSoundTimer = 0.1;
+    }
+
+    // Board boundary collision
+    const leftBound = BOARD_X + BOARD_RIM + marble.radius;
+    const rightBound = BOARD_X + BOARD_W - BOARD_RIM - marble.radius;
+    const topBound = BOARD_Y + BOARD_RIM + marble.radius;
+    const bottomBound = BOARD_Y + BOARD_H - BOARD_RIM - marble.radius;
+
+    if (marble.x < leftBound) {
+      marble.x = leftBound;
+      marble.vx = -marble.vx * BOUNCE;
+    }
+    if (marble.x > rightBound) {
+      marble.x = rightBound;
+      marble.vx = -marble.vx * BOUNCE;
+    }
+    if (marble.y < topBound) {
+      marble.y = topBound;
+      marble.vy = -marble.vy * BOUNCE;
+    }
+    if (marble.y > bottomBound) {
+      marble.y = bottomBound;
+      marble.vy = -marble.vy * BOUNCE;
+    }
+
+    // Wall collisions
+    walls.forEach(wall => {
+      const closestX = Math.max(wall.x, Math.min(marble.x, wall.x + wall.w));
+      const closestY = Math.max(wall.y, Math.min(marble.y, wall.y + wall.h));
+      const dx = marble.x - closestX;
+      const dy = marble.y - closestY;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+
+      if (dist < marble.radius) {
+        // Push marble out
+        const overlap = marble.radius - dist;
+        const nx = dx / dist || 0;
+        const ny = dy / dist || 0;
+        marble.x += nx * overlap;
+        marble.y += ny * overlap;
+
+        // Reflect velocity
+        const dot = marble.vx * nx + marble.vy * ny;
+        marble.vx -= 2 * dot * nx * (1 - BOUNCE);
+        marble.vy -= 2 * dot * ny * (1 - BOUNCE);
+      }
+    });
+
+    // Check if marble falls into any hole
+    answerHoles.forEach(hole => {
+      const dx = marble.x - hole.x;
+      const dy = marble.y - hole.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+
+      if (dist < hole.radius - 2) {
+        playSound('hole');
+        engine.end(hole.choice.is_correct, hole.choice.explanation);
+      }
+    });
+  }
+
+  function drawGame() {
+    // Background
+    ctx.fillStyle = COLORS.bgPrimary;
+    ctx.fillRect(0, 0, W, H);
+
+    // Draw wooden board
+    drawBoard();
+
+    // Draw walls
+    walls.forEach(wall => {
+      // Wall shadow
+      ctx.fillStyle = 'rgba(0,0,0,0.3)';
+      ctx.fillRect(wall.x + 2, wall.y + 2, wall.w, wall.h);
+
+      // Wall body
+      ctx.fillStyle = COLORS.woodDark;
+      ctx.fillRect(wall.x, wall.y, wall.w, wall.h);
+
+      // Wall highlight
+      ctx.fillStyle = COLORS.woodLight;
+      ctx.fillRect(wall.x, wall.y, wall.w, 2);
+    });
+
+    // Draw answer holes
+    answerHoles.forEach((hole, i) => {
+      const scale = hole.scale || 1;
+
+      ctx.save();
+      ctx.translate(hole.x, hole.y);
+      ctx.scale(scale, scale * aspectRatio);
+
+      // Hole shadow
+      ctx.beginPath();
+      ctx.arc(0, 0, hole.radius + 4, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(0,0,0,0.4)';
+      ctx.fill();
+
+      // Hole rim
+      ctx.beginPath();
+      ctx.arc(0, 0, hole.radius + 2, 0, Math.PI * 2);
+      ctx.fillStyle = COLORS.holeRim;
+      ctx.fill();
+
+      // Hole interior
+      ctx.beginPath();
+      ctx.arc(0, 0, hole.radius, 0, Math.PI * 2);
+      ctx.fillStyle = COLORS.hole;
+      ctx.fill();
+
+      // Letter label inside hole
+      ctx.restore();
+
+      const letter = String.fromCharCode(65 + i); // A, B, C, D
+      drawText(letter, hole.x, hole.y, {
+        font: "bold 18px 'Belanosima', sans-serif",
+        color: COLORS.textLight,
+        align: 'center',
+        baseline: 'middle'
+      });
+    });
+
+    // Draw marble (aspect-ratio aware)
+    ctx.save();
+    ctx.translate(marble.x, marble.y);
+    ctx.scale(1, aspectRatio);
+
+    // Marble shadow
+    ctx.beginPath();
+    ctx.arc(3, 3, marble.radius, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(0,0,0,0.3)';
+    ctx.fill();
+
+    // Marble body
+    const gradient = ctx.createRadialGradient(
+      -marble.radius * 0.3, -marble.radius * 0.3, 0,
+      0, 0, marble.radius
+    );
+    gradient.addColorStop(0, COLORS.marbleHighlight);
+    gradient.addColorStop(0.5, COLORS.marble);
+    gradient.addColorStop(1, COLORS.marbleShadow);
+
+    ctx.beginPath();
+    ctx.arc(0, 0, marble.radius, 0, Math.PI * 2);
+    ctx.fillStyle = gradient;
+    ctx.fill();
+
+    // Marble shine
+    ctx.beginPath();
+    ctx.arc(-marble.radius * 0.3, -marble.radius * 0.3, marble.radius * 0.25, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(255,255,255,0.7)';
+    ctx.fill();
+
+    ctx.restore();
+
+    // Draw answer labels below board
+    drawAnswerLabels();
+
+    // Draw tilt indicator
+    drawTiltIndicator();
+  }
+
+  function drawBoard() {
+    // Board shadow
+    ctx.fillStyle = 'rgba(0,0,0,0.2)';
+    ctx.beginPath();
+    ctx.roundRect(BOARD_X + 5, BOARD_Y + 5, BOARD_W, BOARD_H, 8);
+    ctx.fill();
+
+    // Board outer rim (dark wood)
+    ctx.fillStyle = COLORS.woodDark;
+    ctx.beginPath();
+    ctx.roundRect(BOARD_X, BOARD_Y, BOARD_W, BOARD_H, 8);
+    ctx.fill();
+
+    // Board inner surface (lighter wood)
+    ctx.fillStyle = COLORS.wood;
+    ctx.beginPath();
+    ctx.roundRect(
+      BOARD_X + BOARD_RIM,
+      BOARD_Y + BOARD_RIM,
+      BOARD_W - BOARD_RIM * 2,
+      BOARD_H - BOARD_RIM * 2,
+      4
+    );
+    ctx.fill();
+
+    // Wood grain lines
+    ctx.strokeStyle = COLORS.woodGrain;
+    ctx.lineWidth = 0.5;
+    for (let i = 0; i < 8; i++) {
+      const y = BOARD_Y + BOARD_RIM + 20 + i * 45;
+      ctx.beginPath();
+      ctx.moveTo(BOARD_X + BOARD_RIM + 10, y);
+      ctx.bezierCurveTo(
+        BOARD_X + BOARD_W / 3, y + (Math.random() - 0.5) * 10,
+        BOARD_X + BOARD_W * 2/3, y + (Math.random() - 0.5) * 10,
+        BOARD_X + BOARD_W - BOARD_RIM - 10, y
+      );
+      ctx.stroke();
+    }
+  }
+
+  function drawAnswerLabels() {
+    // 2x2 grid layout for answer labels below board
+    const gridStartY = BOARD_Y + BOARD_H + 20;
+    const colWidth = (W - 20) / 2; // Two columns
+    const rowHeight = 75;
+
+    QUESTION.choices.forEach((choice, i) => {
+      const col = i % 2;
+      const row = Math.floor(i / 2);
+      const x = 10 + col * colWidth + colWidth / 2;
+      const y = gridStartY + row * rowHeight;
+
+      const letter = String.fromCharCode(65 + i);
+      const hole = answerHoles[i];
+      const lines = hole.wrappedText || [choice.text];
+      const fontSize = hole.fontSize || 14;
+
+      // Letter circle
+      ctx.save();
+      ctx.translate(x - 60, y + 15);
+      ctx.scale(1, aspectRatio);
+      ctx.beginPath();
+      ctx.arc(0, 0, 12, 0, Math.PI * 2);
+      ctx.fillStyle = [COLORS.orange, COLORS.amber, COLORS.cyan, COLORS.success][i];
+      ctx.fill();
+      ctx.restore();
+
+      drawText(letter, x - 60, y + 15, {
+        font: "bold 14px 'Nunito Sans', sans-serif",
+        color: '#FFFFFF',
+        align: 'center',
+        baseline: 'middle'
+      });
+
+      // Answer text (wrapped, right of letter)
+      const lineHeight = fontSize + 2;
+      const textStartX = x - 40;
+      const textStartY = y + 8;
+      lines.forEach((line, lineIdx) => {
+        drawText(line, textStartX, textStartY + lineIdx * lineHeight, {
+          font: `${fontSize}px 'Nunito', sans-serif`,
+          color: COLORS.textPrimary,
+          align: 'left',
+          baseline: 'top',
+          maxWidth: colWidth - 40
+        });
+      });
+    });
+  }
+
+  function drawTiltIndicator() {
+    // Small tilt direction indicator at top
+    const indicatorX = W / 2;
+    const indicatorY = 30;
+    const indicatorSize = 20;
+
+    // Draw crosshair background
+    ctx.save();
+    ctx.translate(indicatorX, indicatorY);
+    ctx.scale(1, aspectRatio);
+
+    ctx.beginPath();
+    ctx.arc(0, 0, indicatorSize, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(0,0,0,0.1)';
+    ctx.fill();
+    ctx.strokeStyle = COLORS.woodDark;
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    // Draw tilt direction dot
+    ctx.beginPath();
+    ctx.arc(tilt.x * indicatorSize * 0.7, tilt.y * indicatorSize * 0.7, 5, 0, Math.PI * 2);
+    ctx.fillStyle = COLORS.orange;
+    ctx.fill();
+
+    ctx.restore();
+  }
+
+  function handleTouch(e, type) {
+    if (gameState !== 'playing') return;
+
+    const touch = e.touches[0] || e.changedTouches[0];
+    if (!touch) return;
+
+    const pos = screenToLogical(touch.clientX, touch.clientY);
+
+    if (type === 'start') {
+      initAudio();
+      touchStartPos = { x: pos.x, y: pos.y };
+    } else if (type === 'move' && touchStartPos) {
+      // Calculate tilt based on drag from start position
+      const dx = (pos.x - touchStartPos.x) / 100;
+      const dy = (pos.y - touchStartPos.y) / 100;
+
+      tilt.x = Math.max(-MAX_TILT, Math.min(MAX_TILT, dx));
+      tilt.y = Math.max(-MAX_TILT, Math.min(MAX_TILT, dy));
+    } else if (type === 'end') {
+      // Gradually return tilt to center
+      touchStartPos = null;
+    }
+  }
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 4: GAME LOOP - DO NOT MODIFY                                      ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  let lastTime = performance.now();
+
+  function gameLoop(now) {
+    const dt = Math.min((now - lastTime) / 1000, 0.05);
+    lastTime = now;
+
+    ctx.setTransform(scaleX, 0, 0, scaleY, 0, 0);
+
+    if (gameState === 'playing') {
+      updateGame(dt);
+      drawGame();
+    } else {
+      drawGame();
+      drawEndScreen(dt);
+    }
+
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+    requestAnimationFrame(gameLoop);
+  }
+
+  function onTouchStart(e) {
+    e.preventDefault();
+    if (gameState === 'ended') {
+      const touch = e.touches[0];
+      const { x, y } = screenToLogical(touch.clientX, touch.clientY);
+
+      if (gameResult) {
+        if (pointInRect(x, y, restartButton)) {
+          gameState = 'playing';
+          gameResult = null;
+          gameExplanation = '';
+          confettiParticles = [];
+          initGame();
+          return;
+        }
+        if (pointInRect(x, y, nextButton)) {
+          if (window.parent && window.parent !== window) {
+            window.parent.postMessage({ type: 'quiz-next' }, '*');
+          }
+          return;
+        }
+      } else {
+        if (pointInRect(x, y, centeredRestartButton)) {
+          gameState = 'playing';
+          gameResult = null;
+          gameExplanation = '';
+          confettiParticles = [];
+          initGame();
+          return;
+        }
+      }
+    }
+    handleTouch(e, 'start');
+  }
+
+  function onTouchMove(e) {
+    e.preventDefault();
+    handleTouch(e, 'move');
+  }
+
+  function onTouchEnd(e) {
+    e.preventDefault();
+    handleTouch(e, 'end');
+    // Smoothly return tilt to center
+    const returnToCenter = () => {
+      if (touchStartPos === null && gameState === 'playing') {
+        tilt.x *= 0.9;
+        tilt.y *= 0.9;
+        if (Math.abs(tilt.x) > 0.01 || Math.abs(tilt.y) > 0.01) {
+          requestAnimationFrame(returnToCenter);
+        } else {
+          tilt.x = 0;
+          tilt.y = 0;
+        }
+      }
+    };
+    returnToCenter();
+  }
+
+  canvas.addEventListener('touchstart', onTouchStart, { passive: false });
+  canvas.addEventListener('touchmove', onTouchMove, { passive: false });
+  canvas.addEventListener('touchend', onTouchEnd, { passive: false });
+
+  canvas.addEventListener('mousedown', (e) => {
+    const fakeTouch = { preventDefault: () => {}, touches: [{ clientX: e.clientX, clientY: e.clientY }], changedTouches: [{ clientX: e.clientX, clientY: e.clientY }] };
+    onTouchStart(fakeTouch);
+  });
+
+  canvas.addEventListener('mousemove', (e) => {
+    if (touchStartPos) {
+      const fakeTouch = { preventDefault: () => {}, touches: [{ clientX: e.clientX, clientY: e.clientY }], changedTouches: [{ clientX: e.clientX, clientY: e.clientY }] };
+      onTouchMove(fakeTouch);
+    }
+  });
+
+  canvas.addEventListener('mouseup', (e) => {
+    const fakeTouch = { preventDefault: () => {}, touches: [], changedTouches: [{ clientX: e.clientX, clientY: e.clientY }] };
+    onTouchEnd(fakeTouch);
+  });
+
+  window.addEventListener('resize', resizeCanvas);
+  window.addEventListener('orientationchange', () => {
+    setTimeout(resizeCanvas, 100);
+  });
+
+  document.body.addEventListener('touchmove', (e) => e.preventDefault(), { passive: false });
+
+  resizeCanvas();
+  initGame();
+  requestAnimationFrame(gameLoop);
+  </script>
+</body>
+</html>

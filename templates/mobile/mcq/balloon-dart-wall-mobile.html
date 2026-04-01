@@ -1,0 +1,916 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <title>Balloon Dart Wall</title>
+  <link href="https://fonts.googleapis.com/css2?family=Belanosima:wght@400;600;700&family=Nunito+Sans:wght@400;500;600;700&family=Nunito:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      touch-action: none;
+      -webkit-touch-callout: none;
+      -webkit-user-select: none;
+      user-select: none;
+    }
+    body {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      background: #1a1a2e;
+      font-family: 'Nunito', system-ui, -apple-system, sans-serif;
+    }
+    #gameCanvas {
+      background: #16213e;
+      width: 100vw;
+      height: 100vh;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="gameCanvas"></canvas>
+
+  <script>
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 1: QUESTION PLACEHOLDER - DO NOT MODIFY FORMAT                    ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  const QUESTION = {
+    type: "mcq",
+    prompt: "Sample question text",
+    choices: [
+      { text: "This is sample answer A which is long enough to test text overflow", is_correct: true, explanation: "Why A is correct" },
+      { text: "This is sample answer B which is long enough to test text overflow", is_correct: false, explanation: "Why B is wrong" },
+      { text: "This is sample answer C which is long enough to test text overflow", is_correct: false, explanation: "Why C is wrong" },
+      { text: "This is sample answer D which is long enough to test text overflow", is_correct: false, explanation: "Why D is wrong" }
+    ],
+    isLastQuestion: false
+  };
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 2: ENGINE CORE (MOBILE) - DO NOT MODIFY                           ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  const canvas = document.getElementById('gameCanvas');
+  const ctx = canvas.getContext('2d');
+
+  const W = 360, H = 640;
+
+  let scaleX = 1;
+  let scaleY = 1;
+  let aspectRatio = 1;
+
+  let gameState = 'playing';
+  let gameResult = null;
+  let gameExplanation = '';
+  let endScreenTime = 0;
+  let confettiParticles = [];
+
+  const restartButton = { x: 20, y: H / 2 + 50, w: 155, h: 56 };
+  const nextButton = { x: 185, y: H / 2 + 50, w: 155, h: 56 };
+  const centeredRestartButton = { x: W / 2 - 100, y: H / 2 + 50, w: 200, h: 56 };
+
+  function drawMobileButton(rect, label, color, pulse) {
+    const textAdj = getTextScaleAdjustment();
+    const p = pulse ? 1 + Math.sin(endScreenTime * 4) * 0.03 : 1;
+
+    ctx.save();
+    ctx.translate(rect.x + rect.w / 2, rect.y + rect.h / 2);
+    ctx.scale(p, p);
+    ctx.translate(-(rect.x + rect.w / 2), -(rect.y + rect.h / 2));
+
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.roundRect(rect.x, rect.y, rect.w, rect.h, 12);
+    ctx.fill();
+
+    ctx.save();
+    ctx.translate(rect.x + rect.w / 2, rect.y + rect.h / 2);
+    ctx.scale(textAdj / aspectRatio, textAdj);
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = "bold 18px 'Nunito Sans', sans-serif";
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, 0, 0);
+    ctx.restore();
+
+    ctx.restore();
+  }
+
+  function resizeCanvas() {
+    const dpr = window.devicePixelRatio || 1;
+
+    canvas.width = window.innerWidth * dpr;
+    canvas.height = window.innerHeight * dpr;
+
+    canvas.style.width = window.innerWidth + 'px';
+    canvas.style.height = window.innerHeight + 'px';
+
+    scaleX = canvas.width / W;
+    scaleY = canvas.height / H;
+
+    aspectRatio = scaleX / scaleY;
+
+    if (typeof recalculateTextSizing === 'function') {
+      recalculateTextSizing();
+    }
+  }
+
+  const TEXT_SCALE_MIN = 0.75;
+  const TEXT_SCALE_MAX = 1.4;
+
+  function getTextScaleAdjustment() {
+    const baseScale = window.innerHeight / H;
+    const clampedScale = Math.min(TEXT_SCALE_MAX, Math.max(TEXT_SCALE_MIN, baseScale));
+    return clampedScale / baseScale;
+  }
+
+  function drawText(text, x, y, options = {}) {
+    const { font = "500 16px 'Nunito', sans-serif", color = '#F5F5F0', align = 'center', baseline = 'middle' } = options;
+    ctx.save();
+    ctx.translate(x, y);
+    const adj = getTextScaleAdjustment();
+    ctx.scale(adj / aspectRatio, adj);
+    ctx.font = font;
+    ctx.fillStyle = color;
+    ctx.textAlign = align;
+    ctx.textBaseline = baseline;
+    ctx.fillText(text, 0, 0);
+    ctx.restore();
+  }
+
+  function screenToLogical(screenX, screenY) {
+    const dpr = window.devicePixelRatio || 1;
+    const rect = canvas.getBoundingClientRect();
+    const canvasX = (screenX - rect.left) * dpr;
+    const canvasY = (screenY - rect.top) * dpr;
+    return {
+      x: canvasX / scaleX,
+      y: canvasY / scaleY
+    };
+  }
+
+  function pointInRect(px, py, rect) {
+    return px >= rect.x && px <= rect.x + rect.w &&
+           py >= rect.y && py <= rect.y + rect.h;
+  }
+
+  function wrapText(text, maxWidth, font, maxLines = 3) {
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.font = font;
+    const adj = getTextScaleAdjustment();
+    const maxRawWidth = maxWidth * aspectRatio / adj;
+    const words = text.split(' ');
+    const lines = [];
+    let currentLine = '';
+    words.forEach(word => {
+      const testLine = currentLine ? currentLine + ' ' + word : word;
+      if (ctx.measureText(testLine).width > maxRawWidth && currentLine) {
+        lines.push(currentLine);
+        currentLine = word;
+      } else {
+        currentLine = testLine;
+      }
+    });
+    if (currentLine) lines.push(currentLine);
+    ctx.restore();
+    return lines.slice(0, maxLines);
+  }
+
+  function findOptimalFontSize(options) {
+    const {
+      texts,
+      maxWidth,
+      availableHeight,
+      minFont = 12,
+      maxFont = 18,
+      itemPadding = 4,
+      fontFamily = "'Nunito', sans-serif"
+    } = options;
+
+    let bestFontSize = minFont;
+    let bestWrappedTexts = [];
+
+    for (let fontSize = maxFont; fontSize >= minFont; fontSize -= 0.5) {
+      const font = `${fontSize}px ${fontFamily}`;
+      const lineHeight = fontSize + 2;
+
+      let totalHeight = 0;
+      const wrappedTexts = [];
+
+      for (const text of texts) {
+        const lines = wrapText(text, maxWidth, font);
+        wrappedTexts.push(lines);
+        totalHeight += itemPadding + lines.length * lineHeight;
+      }
+
+      if (totalHeight <= availableHeight) {
+        bestFontSize = fontSize;
+        bestWrappedTexts = wrappedTexts;
+        break;
+      }
+
+      bestWrappedTexts = wrappedTexts;
+    }
+
+    return { fontSize: bestFontSize, wrappedTexts: bestWrappedTexts };
+  }
+
+  const engine = {
+    end(isCorrect, explanation) {
+      if (gameState === 'ended') return;
+      gameState = 'ended';
+      gameResult = isCorrect;
+      gameExplanation = explanation || '';
+      endScreenTime = 0;
+
+      if (isCorrect) {
+        for (let i = 0; i < 50; i++) {
+          confettiParticles.push({
+            x: W / 2,
+            y: H / 2,
+            vx: (Math.random() - 0.5) * 400,
+            vy: -Math.random() * 300 - 80,
+            size: 4 + Math.random() * 6,
+            color: ['#FFD700', '#FF6B6B', '#4ECDC4', '#95E1D3', '#F38181'][Math.floor(Math.random() * 5)],
+            rotation: Math.random() * Math.PI * 2,
+            rotationSpeed: (Math.random() - 0.5) * 10
+          });
+        }
+      }
+
+      if (window.parent && window.parent !== window) {
+        window.parent.postMessage({
+          type: 'quiz-end',
+          isCorrect: isCorrect,
+          explanation: explanation || ''
+        }, '*');
+      }
+    }
+  };
+
+  function drawEndScreen(dt) {
+    endScreenTime += dt;
+
+    confettiParticles = confettiParticles.filter(p => {
+      p.vy += 600 * dt;
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.rotation += p.rotationSpeed * dt;
+      p.vx *= 0.99;
+      return p.y < H + 50;
+    });
+
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
+    ctx.fillRect(0, 0, W, H);
+
+    confettiParticles.forEach(p => {
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rotation);
+      ctx.fillStyle = p.color;
+      ctx.fillRect(-p.size / 2, -p.size / 4, p.size, p.size / 2);
+      ctx.restore();
+    });
+
+    const textAdj = getTextScaleAdjustment();
+    ctx.save();
+    ctx.translate(W / 2, H / 2 - 80);
+    ctx.scale(textAdj / aspectRatio, textAdj);
+    ctx.font = '64px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(gameResult ? '🎉' : '😢', 0, 0);
+    ctx.restore();
+
+    ctx.save();
+    ctx.translate(W / 2, H / 2 - 10);
+    ctx.scale(textAdj / aspectRatio, textAdj);
+    ctx.fillStyle = gameResult ? '#4ADE80' : '#F87171';
+    ctx.font = "bold 32px 'Nunito Sans', sans-serif";
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(gameResult ? 'Correct!' : 'Wrong!', 0, 0);
+    ctx.restore();
+
+    if (gameResult) {
+      drawMobileButton(restartButton, 'Restart', '#E87A3E', true);
+      const nextLabel = QUESTION.isLastQuestion ? 'Finish' : 'Next';
+      drawMobileButton(nextButton, nextLabel, '#4ECDC4', true);
+    } else {
+      drawMobileButton(centeredRestartButton, 'Restart', '#E87A3E', true);
+    }
+  }
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 3: YOUR GAME CODE - IMPLEMENT THESE FUNCTIONS                     ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+
+  // Color palette
+  const COLORS = {
+    bgPrimary: '#FAFAF7',
+    cork: '#C9A66B',
+    corkDark: '#A68B5B',
+    orange: '#E87A3E',
+    amber: '#F5A742',
+    cyan: '#4ECDC4',
+    success: '#6BBF59',
+    error: '#E85D4A',
+    textPrimary: '#2B2B28',
+    white: '#FFFFFF'
+  };
+
+  // Balloon colors for decorative balloons
+  const BALLOON_COLORS = ['#E85D4A', '#4ECDC4', '#F5A742', '#6BBF59', '#E87A3E', '#9B59B6', '#3498DB'];
+
+  // Game state
+  let crosshair = { x: W / 2, y: H - 120 };
+  let dart = null;
+  let answerBalloons = [];
+  let decorativeBalloons = [];
+  let popParticles = [];
+  let gameTime = 0;
+  let entranceProgress = 0;
+  let selectedBalloon = null;
+  let audioCtx = null;
+
+  // Sound effects
+  function initAudio() {
+    if (!audioCtx) {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    }
+  }
+
+  function playSound(type) {
+    if (!audioCtx) return;
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+
+    if (type === 'throw') {
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(300, audioCtx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(150, audioCtx.currentTime + 0.1);
+      gain.gain.setValueAtTime(0.2, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.1);
+      osc.start();
+      osc.stop(audioCtx.currentTime + 0.1);
+    } else if (type === 'pop') {
+      osc.type = 'square';
+      osc.frequency.setValueAtTime(600, audioCtx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(100, audioCtx.currentTime + 0.08);
+      gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.08);
+      osc.start();
+      osc.stop(audioCtx.currentTime + 0.08);
+    } else if (type === 'correct') {
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(523, audioCtx.currentTime);
+      osc.frequency.setValueAtTime(659, audioCtx.currentTime + 0.1);
+      osc.frequency.setValueAtTime(784, audioCtx.currentTime + 0.2);
+      gain.gain.setValueAtTime(0.2, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.3);
+      osc.start();
+      osc.stop(audioCtx.currentTime + 0.3);
+    } else if (type === 'wrong') {
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(200, audioCtx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(100, audioCtx.currentTime + 0.3);
+      gain.gain.setValueAtTime(0.15, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.3);
+      osc.start();
+      osc.stop(audioCtx.currentTime + 0.3);
+    }
+  }
+
+  // Spawn pop particles
+  function spawnPopParticles(x, y, color) {
+    for (let i = 0; i < 12; i++) {
+      const angle = (Math.PI * 2 / 12) * i + Math.random() * 0.3;
+      const speed = 100 + Math.random() * 150;
+      popParticles.push({
+        x: x,
+        y: y,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed,
+        color: color,
+        size: 3 + Math.random() * 4,
+        life: 1
+      });
+    }
+  }
+
+  // Check collision between dart and balloon
+  function checkDartBalloonCollision(d, b) {
+    const dartTipX = d.x;
+    const dartTipY = d.y - 15;
+    const dx = dartTipX - b.x;
+    const dy = (dartTipY - b.y) / aspectRatio;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    return dist < b.radius;
+  }
+
+  function recalculateTextSizing() {
+    if (!answerBalloons || answerBalloons.length === 0) return;
+
+    const { fontSize, wrappedTexts } = findOptimalFontSize({
+      texts: QUESTION.choices.map(c => c.text),
+      maxWidth: 140,
+      availableHeight: 200,
+      minFont: 14,
+      maxFont: 16,
+      fontFamily: "'Nunito', sans-serif"
+    });
+
+    answerBalloons.forEach((b, i) => {
+      b.wrappedText = wrappedTexts[i];
+      b.fontSize = fontSize;
+    });
+  }
+
+  function initGame() {
+    gameTime = 0;
+    entranceProgress = 0;
+    crosshair = { x: W / 2, y: H - 120 };
+    dart = null;
+    popParticles = [];
+    selectedBalloon = null;
+
+    // Position answer balloons in a 2x2 grid in the upper portion
+    const balloonColors = [COLORS.error, COLORS.cyan, COLORS.amber, COLORS.success];
+    const positions = [
+      { x: 90, y: 130 },   // Top-left
+      { x: 270, y: 130 },  // Top-right
+      { x: 90, y: 290 },   // Bottom-left
+      { x: 270, y: 290 }   // Bottom-right
+    ];
+
+    answerBalloons = QUESTION.choices.map((choice, i) => ({
+      x: positions[i].x,
+      y: positions[i].y,
+      radius: 55,
+      color: balloonColors[i],
+      choice: choice,
+      wobble: Math.random() * Math.PI * 2,
+      wobbleSpeed: 1.5 + Math.random() * 0.5,
+      popped: false,
+      scale: 0,
+      targetScale: 1,
+      wrappedText: [choice.text],
+      fontSize: 14
+    }));
+
+    // Create decorative balloons around the edges
+    decorativeBalloons = [];
+    const decorPositions = [
+      { x: 30, y: 60 }, { x: 180, y: 40 }, { x: 330, y: 70 },
+      { x: 45, y: 210 }, { x: 315, y: 200 },
+      { x: 40, y: 380 }, { x: 320, y: 370 },
+      { x: 180, y: 210 }
+    ];
+    decorPositions.forEach((pos, i) => {
+      decorativeBalloons.push({
+        x: pos.x,
+        y: pos.y,
+        radius: 20 + Math.random() * 15,
+        color: BALLOON_COLORS[i % BALLOON_COLORS.length],
+        wobble: Math.random() * Math.PI * 2,
+        wobbleSpeed: 1 + Math.random() * 0.5,
+        scale: 0,
+        targetScale: 1
+      });
+    });
+
+    recalculateTextSizing();
+  }
+
+  function updateGame(dt) {
+    if (gameState !== 'playing') return;
+
+    gameTime += dt;
+    entranceProgress = Math.min(1, gameTime / 0.6);
+
+    // Update answer balloon entrance animation with stagger
+    answerBalloons.forEach((b, i) => {
+      const staggerDelay = i * 0.1;
+      const progress = Math.max(0, Math.min(1, (gameTime - staggerDelay) / 0.35));
+      const spring = 1 + Math.sin(progress * Math.PI * 2) * 0.2 * (1 - progress);
+      b.scale = progress * spring;
+      if (progress >= 1) b.scale = 1;
+      b.wobble += b.wobbleSpeed * dt;
+    });
+
+    // Update decorative balloon entrance
+    decorativeBalloons.forEach((b, i) => {
+      const staggerDelay = i * 0.05;
+      const progress = Math.max(0, Math.min(1, (gameTime - staggerDelay) / 0.3));
+      b.scale = progress;
+      b.wobble += b.wobbleSpeed * dt;
+    });
+
+    // Update dart physics
+    if (dart && !dart.hit) {
+      dart.vy += 200 * dt; // Gravity
+      dart.x += dart.vx * dt;
+      dart.y += dart.vy * dt;
+
+      // Check collision with answer balloons
+      for (const balloon of answerBalloons) {
+        if (!balloon.popped && checkDartBalloonCollision(dart, balloon)) {
+          balloon.popped = true;
+          dart.hit = true;
+          selectedBalloon = balloon;
+          playSound('pop');
+          spawnPopParticles(balloon.x, balloon.y, balloon.color);
+
+          // Delay end slightly for visual feedback
+          setTimeout(() => {
+            if (balloon.choice.is_correct) {
+              playSound('correct');
+            } else {
+              playSound('wrong');
+            }
+            engine.end(balloon.choice.is_correct, balloon.choice.explanation);
+          }, 300);
+          break;
+        }
+      }
+
+      // Dart missed all balloons - went off screen
+      if (dart.y < -50 || dart.x < -50 || dart.x > W + 50 || dart.y > H + 50) {
+        dart = null;
+      }
+    }
+
+    // Update pop particles
+    popParticles = popParticles.filter(p => {
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.vy += 300 * dt; // Gravity
+      p.life -= dt * 2;
+      return p.life > 0;
+    });
+  }
+
+  function drawGame() {
+    // Draw cork wall background
+    ctx.fillStyle = COLORS.cork;
+    ctx.fillRect(0, 0, W, H);
+
+    // Cork texture dots
+    ctx.fillStyle = COLORS.corkDark;
+    for (let i = 0; i < 150; i++) {
+      const x = (i * 73) % W;
+      const y = ((i * 37) % H);
+      ctx.beginPath();
+      ctx.arc(x, y, 1.5, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Draw decorative balloons
+    decorativeBalloons.forEach(b => {
+      if (b.scale <= 0) return;
+      const wobbleX = Math.sin(b.wobble) * 2;
+      const wobbleY = Math.cos(b.wobble * 0.7) * 1.5;
+
+      ctx.save();
+      ctx.translate(b.x + wobbleX, b.y + wobbleY);
+      ctx.scale(b.scale, b.scale);
+
+      // Balloon body
+      ctx.fillStyle = b.color;
+      ctx.beginPath();
+      ctx.ellipse(0, 0, b.radius, b.radius * aspectRatio, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Balloon shine
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
+      ctx.beginPath();
+      ctx.ellipse(-b.radius * 0.3, -b.radius * aspectRatio * 0.3, b.radius * 0.25, b.radius * 0.25 * aspectRatio, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Balloon knot
+      ctx.fillStyle = b.color;
+      ctx.beginPath();
+      ctx.moveTo(-4, b.radius * aspectRatio);
+      ctx.lineTo(4, b.radius * aspectRatio);
+      ctx.lineTo(0, b.radius * aspectRatio + 8);
+      ctx.closePath();
+      ctx.fill();
+
+      // String
+      ctx.strokeStyle = '#8B7355';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(0, b.radius * aspectRatio + 8);
+      ctx.lineTo(0, b.radius * aspectRatio + 30);
+      ctx.stroke();
+
+      ctx.restore();
+    });
+
+    // Draw answer balloons
+    answerBalloons.forEach(b => {
+      if (b.popped || b.scale <= 0) return;
+
+      const wobbleX = Math.sin(b.wobble) * 3;
+      const wobbleY = Math.cos(b.wobble * 0.7) * 2;
+
+      ctx.save();
+      ctx.translate(b.x + wobbleX, b.y + wobbleY);
+      ctx.scale(b.scale, b.scale);
+
+      // Balloon body
+      ctx.fillStyle = b.color;
+      ctx.beginPath();
+      ctx.ellipse(0, 0, b.radius, b.radius * aspectRatio, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Balloon shine
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
+      ctx.beginPath();
+      ctx.ellipse(-b.radius * 0.35, -b.radius * aspectRatio * 0.35, b.radius * 0.3, b.radius * 0.3 * aspectRatio, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Balloon knot
+      ctx.fillStyle = b.color;
+      ctx.beginPath();
+      ctx.moveTo(-5, b.radius * aspectRatio);
+      ctx.lineTo(5, b.radius * aspectRatio);
+      ctx.lineTo(0, b.radius * aspectRatio + 10);
+      ctx.closePath();
+      ctx.fill();
+
+      // String with pin
+      ctx.strokeStyle = '#8B7355';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(0, b.radius * aspectRatio + 10);
+      ctx.lineTo(0, b.radius * aspectRatio + 25);
+      ctx.stroke();
+
+      // Pin
+      ctx.fillStyle = '#888';
+      ctx.beginPath();
+      ctx.arc(0, b.radius * aspectRatio + 28, 4, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.restore();
+
+      // Draw text on balloon (outside scale transform for proper text rendering)
+      const lines = b.wrappedText || [b.choice.text];
+      const fontSize = b.fontSize || 14;
+      const lineHeight = fontSize + 2;
+      const startY = b.y + wobbleY - ((lines.length - 1) * lineHeight) / 2;
+
+      lines.forEach((line, i) => {
+        drawText(line, b.x + wobbleX, startY + i * lineHeight, {
+          font: `600 ${fontSize}px 'Nunito', sans-serif`,
+          color: COLORS.white,
+          align: 'center',
+          baseline: 'middle'
+        });
+      });
+    });
+
+    // Draw pop particles
+    popParticles.forEach(p => {
+      ctx.save();
+      ctx.globalAlpha = p.life;
+      ctx.fillStyle = p.color;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.size * p.life, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    });
+
+    // Draw dart in flight
+    if (dart && !dart.hit) {
+      ctx.save();
+      ctx.translate(dart.x, dart.y);
+
+      // Calculate rotation from velocity
+      const angle = Math.atan2(dart.vy, dart.vx);
+      ctx.rotate(angle + Math.PI / 2);
+
+      // Dart body
+      ctx.fillStyle = '#8B4513';
+      ctx.beginPath();
+      ctx.moveTo(0, -15);
+      ctx.lineTo(-4, 15);
+      ctx.lineTo(4, 15);
+      ctx.closePath();
+      ctx.fill();
+
+      // Dart tip
+      ctx.fillStyle = '#C0C0C0';
+      ctx.beginPath();
+      ctx.moveTo(0, -25);
+      ctx.lineTo(-3, -15);
+      ctx.lineTo(3, -15);
+      ctx.closePath();
+      ctx.fill();
+
+      // Dart fins
+      ctx.fillStyle = COLORS.orange;
+      ctx.beginPath();
+      ctx.moveTo(-4, 15);
+      ctx.lineTo(-12, 20);
+      ctx.lineTo(-4, 5);
+      ctx.closePath();
+      ctx.fill();
+
+      ctx.beginPath();
+      ctx.moveTo(4, 15);
+      ctx.lineTo(12, 20);
+      ctx.lineTo(4, 5);
+      ctx.closePath();
+      ctx.fill();
+
+      ctx.restore();
+    }
+
+    // Draw crosshair if no dart in flight
+    if (!dart) {
+      ctx.save();
+      ctx.translate(crosshair.x, crosshair.y);
+
+      // Outer ring
+      ctx.strokeStyle = COLORS.orange;
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.ellipse(0, 0, 20, 20 * aspectRatio, 0, 0, Math.PI * 2);
+      ctx.stroke();
+
+      // Inner dot
+      ctx.fillStyle = COLORS.orange;
+      ctx.beginPath();
+      ctx.ellipse(0, 0, 5, 5 * aspectRatio, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Crosshair lines
+      ctx.strokeStyle = COLORS.orange;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(-30, 0);
+      ctx.lineTo(-22, 0);
+      ctx.moveTo(22, 0);
+      ctx.lineTo(30, 0);
+      ctx.moveTo(0, -30 * aspectRatio);
+      ctx.lineTo(0, -22 * aspectRatio);
+      ctx.moveTo(0, 22 * aspectRatio);
+      ctx.lineTo(0, 30 * aspectRatio);
+      ctx.stroke();
+
+      ctx.restore();
+    }
+  }
+
+  function handleTouch(e, type) {
+    if (gameState !== 'playing') return;
+
+    const touch = e.touches[0] || e.changedTouches[0];
+    const { x, y } = screenToLogical(touch.clientX, touch.clientY);
+
+    if (type === 'start') {
+      initAudio();
+    }
+
+    if (type === 'move') {
+      // Move crosshair with touch
+      if (!dart) {
+        crosshair.x = Math.max(30, Math.min(W - 30, x));
+        crosshair.y = Math.max(30, Math.min(H - 30, y));
+      }
+    }
+
+    if (type === 'end' && !dart) {
+      // Throw dart from bottom center towards crosshair
+      const startX = W / 2;
+      const startY = H - 50;
+
+      const dx = crosshair.x - startX;
+      const dy = crosshair.y - startY;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      const speed = 500;
+
+      dart = {
+        x: startX,
+        y: startY,
+        vx: (dx / dist) * speed,
+        vy: (dy / dist) * speed,
+        hit: false
+      };
+
+      playSound('throw');
+    }
+  }
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 4: GAME LOOP - DO NOT MODIFY                                      ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  let lastTime = performance.now();
+
+  function gameLoop(now) {
+    const dt = Math.min((now - lastTime) / 1000, 0.05);
+    lastTime = now;
+
+    ctx.setTransform(scaleX, 0, 0, scaleY, 0, 0);
+
+    if (gameState === 'playing') {
+      updateGame(dt);
+      drawGame();
+    } else {
+      drawGame();
+      drawEndScreen(dt);
+    }
+
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+    requestAnimationFrame(gameLoop);
+  }
+
+  function onTouchStart(e) {
+    e.preventDefault();
+    if (gameState === 'ended') {
+      const touch = e.touches[0];
+      const { x, y } = screenToLogical(touch.clientX, touch.clientY);
+
+      if (gameResult) {
+        if (pointInRect(x, y, restartButton)) {
+          gameState = 'playing';
+          gameResult = null;
+          gameExplanation = '';
+          confettiParticles = [];
+          initGame();
+          return;
+        }
+        if (pointInRect(x, y, nextButton)) {
+          if (window.parent && window.parent !== window) {
+            window.parent.postMessage({ type: 'quiz-next' }, '*');
+          }
+          return;
+        }
+      } else {
+        if (pointInRect(x, y, centeredRestartButton)) {
+          gameState = 'playing';
+          gameResult = null;
+          gameExplanation = '';
+          confettiParticles = [];
+          initGame();
+          return;
+        }
+      }
+    }
+    handleTouch(e, 'start');
+  }
+
+  function onTouchMove(e) {
+    e.preventDefault();
+    handleTouch(e, 'move');
+  }
+
+  function onTouchEnd(e) {
+    e.preventDefault();
+    handleTouch(e, 'end');
+  }
+
+  canvas.addEventListener('touchstart', onTouchStart, { passive: false });
+  canvas.addEventListener('touchmove', onTouchMove, { passive: false });
+  canvas.addEventListener('touchend', onTouchEnd, { passive: false });
+
+  canvas.addEventListener('mousedown', (e) => {
+    const fakeTouch = { touches: [{ clientX: e.clientX, clientY: e.clientY }], changedTouches: [{ clientX: e.clientX, clientY: e.clientY }] };
+    onTouchStart(fakeTouch);
+  });
+
+  canvas.addEventListener('mousemove', (e) => {
+    if (e.buttons === 1) {
+      const fakeTouch = { touches: [{ clientX: e.clientX, clientY: e.clientY }], changedTouches: [{ clientX: e.clientX, clientY: e.clientY }] };
+      onTouchMove(fakeTouch);
+    }
+  });
+
+  canvas.addEventListener('mouseup', (e) => {
+    const fakeTouch = { touches: [], changedTouches: [{ clientX: e.clientX, clientY: e.clientY }] };
+    onTouchEnd(fakeTouch);
+  });
+
+  window.addEventListener('resize', resizeCanvas);
+  window.addEventListener('orientationchange', () => {
+    setTimeout(resizeCanvas, 100);
+  });
+
+  document.body.addEventListener('touchmove', (e) => e.preventDefault(), { passive: false });
+
+  resizeCanvas();
+  initGame();
+  requestAnimationFrame(gameLoop);
+  </script>
+</body>
+</html>

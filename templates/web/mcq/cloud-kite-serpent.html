@@ -1,0 +1,1097 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Cloud Kite Serpent</title>
+  <link href="https://fonts.googleapis.com/css2?family=Belanosima:wght@400;600;700&family=Nunito+Sans:wght@400;500;600;700&family=Nunito:wght@400;500;600&display=swap" rel="stylesheet">
+  <!--
+  ╔══════════════════════════════════════════════════════════════════════════════╗
+  ║  GAME FACTORY TEMPLATE                                                        ║
+  ║  This template enforces critical invariants. Follow the section markers.      ║
+  ╚══════════════════════════════════════════════════════════════════════════════╝
+  -->
+  <style>
+    /* ═══════════════════════════════════════════════════════════════════════════
+       BASE STYLES - Can be extended, not removed
+       ═══════════════════════════════════════════════════════════════════════════ */
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+    }
+    body {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      background: #1a1a2e;
+      font-family: 'Nunito Sans', system-ui, -apple-system, sans-serif;
+    }
+    #gameCanvas {
+      background: #B8D4E3;
+      border-radius: 8px;
+      display: block;
+    }
+  </style>
+</head>
+<body>
+  <!-- ═══════════════════════════════════════════════════════════════════════════
+       CANVAS - Sized dynamically to fill available space
+       ═══════════════════════════════════════════════════════════════════════════ -->
+  <canvas id="gameCanvas"></canvas>
+
+  <script>
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 1: QUESTION PLACEHOLDER - DO NOT MODIFY FORMAT                    ║
+  // ║  Platform replaces this at runtime. Use these exact 60-char answers.       ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  const QUESTION = {
+    type: "mcq",
+    prompt: "Sample question text",
+    choices: [
+      { text: "This is sample answer A which is long enough to test text overflow", is_correct: true, explanation: "Why A is correct" },
+      { text: "This is sample answer B which is long enough to test text overflow", is_correct: false, explanation: "Why B is wrong" },
+      { text: "This is sample answer C which is long enough to test text overflow", is_correct: false, explanation: "Why C is wrong" },
+      { text: "This is sample answer D which is long enough to test text overflow", is_correct: false, explanation: "Why D is wrong" }
+    ],
+    isLastQuestion: false
+  };
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 2: ENGINE CORE - DO NOT MODIFY                                    ║
+  // ║  Standard engine interface and end screen. This is sacred.                 ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  const canvas = document.getElementById('gameCanvas');
+  const ctx = canvas.getContext('2d');
+
+  // Logical dimensions (game code works in this coordinate space)
+  const W = 720, H = 540;
+
+  // Scaling state (computed on resize)
+  let scale = 1;
+  let dpr = 1;
+
+  let gameState = 'playing'; // 'playing' | 'ended'
+  let gameResult = null;     // true (correct) | false (wrong)
+  let gameExplanation = '';
+  let endScreenTime = 0;
+  let confettiParticles = [];
+
+  // End screen button bounds (logical coordinates)
+  const restartButton = { x: W / 2 - 170, y: H / 2 + 60, w: 150, h: 48 };
+  const nextButton = { x: W / 2 + 20, y: H / 2 + 60, w: 150, h: 48 };
+
+  /** Check if point is inside rectangle */
+  function pointInRect(px, py, rect) {
+    return px >= rect.x && px <= rect.x + rect.w &&
+           py >= rect.y && py <= rect.y + rect.h;
+  }
+
+  /** Draw a styled button */
+  function drawButton(rect, label, color, pulse) {
+    const p = pulse ? 1 + Math.sin(endScreenTime * 4) * 0.03 : 1;
+    ctx.save();
+    ctx.translate(rect.x + rect.w / 2, rect.y + rect.h / 2);
+    ctx.scale(p, p);
+    ctx.translate(-(rect.x + rect.w / 2), -(rect.y + rect.h / 2));
+
+    // Button background
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.roundRect(rect.x, rect.y, rect.w, rect.h, 12);
+    ctx.fill();
+
+    // Button text
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = "bold 18px 'Nunito Sans', sans-serif";
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, rect.x + rect.w / 2, rect.y + rect.h / 2);
+
+    ctx.restore();
+  }
+
+  /**
+   * Resize canvas to fill available space with proper DPR scaling.
+   * Maintains logical coordinate system (720×540).
+   */
+  function resizeCanvas() {
+    dpr = window.devicePixelRatio || 1;
+
+    // Get available space
+    const availW = window.innerWidth;
+    const availH = window.innerHeight;
+
+    // Calculate scale to fit logical space (720×540) in available space
+    const scaleX = availW / W;
+    const scaleY = availH / H;
+    scale = Math.min(scaleX, scaleY);
+
+    // Physical canvas buffer (DPR-scaled for crisp rendering)
+    canvas.width = W * scale * dpr;
+    canvas.height = H * scale * dpr;
+
+    // CSS display size
+    canvas.style.width = (W * scale) + 'px';
+    canvas.style.height = (H * scale) + 'px';
+  }
+
+  /**
+   * Convert screen coordinates to logical coordinates.
+   * Use this for mouse/click events to get positions in 720×540 space.
+   */
+  function screenToLogical(screenX, screenY) {
+    const rect = canvas.getBoundingClientRect();
+    return {
+      x: (screenX - rect.left) * (W / rect.width),
+      y: (screenY - rect.top) * (H / rect.height)
+    };
+  }
+
+  const engine = {
+    /** Call this to end the game. DO NOT draw your own end screen. */
+    end(isCorrect, explanation) {
+      if (gameState === 'ended') return;
+      gameState = 'ended';
+      gameResult = isCorrect;
+      gameExplanation = explanation || '';
+      endScreenTime = 0;
+
+      // Spawn confetti for correct answers
+      if (isCorrect) {
+        for (let i = 0; i < 50; i++) {
+          confettiParticles.push({
+            x: W / 2,
+            y: H / 2,
+            vx: (Math.random() - 0.5) * 600,
+            vy: -Math.random() * 400 - 100,
+            size: 4 + Math.random() * 6,
+            color: ['#FFD700', '#FF6B6B', '#4ECDC4', '#95E1D3', '#F38181'][Math.floor(Math.random() * 5)],
+            rotation: Math.random() * Math.PI * 2,
+            rotationSpeed: (Math.random() - 0.5) * 10
+          });
+        }
+      }
+
+      // Notify parent frame
+      if (window.parent && window.parent !== window) {
+        window.parent.postMessage({
+          type: 'quiz-end',
+          isCorrect: isCorrect,
+          explanation: explanation || ''
+        }, '*');
+      }
+    }
+  };
+
+  /** STANDARD END SCREEN - DO NOT MODIFY */
+  function drawEndScreen(dt) {
+    endScreenTime += dt;
+
+    // Update confetti
+    confettiParticles = confettiParticles.filter(p => {
+      p.vy += 800 * dt; // gravity
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.rotation += p.rotationSpeed * dt;
+      p.vx *= 0.99;
+      return p.y < H + 50;
+    });
+
+    // Dark overlay
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
+    ctx.fillRect(0, 0, W, H);
+
+    // Draw confetti
+    confettiParticles.forEach(p => {
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rotation);
+      ctx.fillStyle = p.color;
+      ctx.fillRect(-p.size / 2, -p.size / 4, p.size, p.size / 2);
+      ctx.restore();
+    });
+
+    // Result emoji
+    ctx.font = '72px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(gameResult ? '🎉' : '😢', W / 2, H / 2 - 50);
+
+    // Result text
+    ctx.fillStyle = gameResult ? '#4ADE80' : '#F87171';
+    ctx.font = "bold 36px 'Nunito Sans', sans-serif";
+    ctx.fillText(gameResult ? 'Correct!' : 'Wrong!', W / 2, H / 2 + 20);
+
+    // Buttons
+    if (gameResult) {
+      // Correct: show both Restart and Next/Finish
+      drawButton(restartButton, 'Restart', '#E87A3E', true);
+      const nextLabel = QUESTION.isLastQuestion ? 'Finish' : 'Next';
+      drawButton(nextButton, nextLabel, '#4ECDC4', true);
+    } else {
+      // Wrong: show only centered Restart button
+      const centeredRestart = { x: W / 2 - 75, y: H / 2 + 60, w: 150, h: 48 };
+      drawButton(centeredRestart, 'Restart', '#E87A3E', true);
+    }
+  }
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 3: YOUR GAME CODE - IMPLEMENT THESE FUNCTIONS                     ║
+  // ║  This is where your game logic goes. See requirements below.               ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+
+  // === COLORS (QuizHP palette) ===
+  const COLORS = {
+    bgPrimary: '#FAFAF7',
+    bgSurface: '#FFFFFF',
+    textPrimary: '#2B2B28',
+    textSecondary: '#5A5A54',
+    orange: '#E87A3E',
+    orangeHover: '#D66B31',
+    amber: '#F5A742',
+    cyan: '#4ECDC4',
+    success: '#6BBF59',
+    error: '#E85D4A',
+    borderSubtle: '#E6E6E0',
+    borderStrong: '#D4D4CC',
+    skyLight: '#C8E6F0',
+    skyMid: '#A8D4E8',
+    cloudWhite: '#F5F8FA',
+    cloudShadow: '#D0E4EF'
+  };
+
+  // === AUDIO SYSTEM ===
+  let audioCtx = null;
+  function initAudio() {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  }
+
+  function playSound(type) {
+    if (!audioCtx) return;
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+
+    if (type === 'correct') {
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(523.25, audioCtx.currentTime);
+      osc.frequency.setValueAtTime(659.25, audioCtx.currentTime + 0.1);
+      osc.frequency.setValueAtTime(783.99, audioCtx.currentTime + 0.2);
+      gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
+      gain.gain.exponentialDecayTo && gain.gain.exponentialDecayTo(0.01, audioCtx.currentTime + 0.4);
+      gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
+      gain.gain.linearRampToValueAtTime(0.01, audioCtx.currentTime + 0.4);
+      osc.start();
+      osc.stop(audioCtx.currentTime + 0.4);
+    } else if (type === 'wrong') {
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(200, audioCtx.currentTime);
+      osc.frequency.linearRampToValueAtTime(100, audioCtx.currentTime + 0.3);
+      gain.gain.setValueAtTime(0.2, audioCtx.currentTime);
+      gain.gain.linearRampToValueAtTime(0.01, audioCtx.currentTime + 0.3);
+      osc.start();
+      osc.stop(audioCtx.currentTime + 0.3);
+    } else if (type === 'dash') {
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(440, audioCtx.currentTime);
+      osc.frequency.linearRampToValueAtTime(880, audioCtx.currentTime + 0.1);
+      gain.gain.setValueAtTime(0.15, audioCtx.currentTime);
+      gain.gain.linearRampToValueAtTime(0.01, audioCtx.currentTime + 0.15);
+      osc.start();
+      osc.stop(audioCtx.currentTime + 0.15);
+    }
+  }
+
+  // === GAME STATE ===
+  let serpent = [];
+  let serpentTarget = { x: 0, y: 0 };
+  let serpentSpeed = 180;
+  let dashCooldown = 0;
+  let isDashing = false;
+  let dashTimer = 0;
+
+  let kites = [];
+  let clouds = [];
+  let winchTowers = [];
+  let stormBirds = [];
+  let gameParticles = [];
+
+  let gameTime = 0;
+  let entranceProgress = 0;
+
+  // Wind lanes Y positions
+  // 2x2 grid arrangement - top row, bottom row alternating
+const LANE_Y = [120, 300, 120, 300];
+  const LANE_HEIGHT = 80;
+
+  // === HELPER FUNCTIONS ===
+  function wrapText(ctx, text, maxWidth) {
+    const words = text.split(' ');
+    const lines = [];
+    let currentLine = '';
+
+    for (const word of words) {
+      const testLine = currentLine ? currentLine + ' ' + word : word;
+      const metrics = ctx.measureText(testLine);
+      if (metrics.width > maxWidth && currentLine) {
+        lines.push(currentLine);
+        currentLine = word;
+      } else {
+        currentLine = testLine;
+      }
+    }
+    if (currentLine) lines.push(currentLine);
+    return lines;
+  }
+
+  function createCloud(x, y, size) {
+    return {
+      x, y, size,
+      speed: 10 + Math.random() * 20,
+      bobOffset: Math.random() * Math.PI * 2,
+      bobSpeed: 0.5 + Math.random() * 0.5
+    };
+  }
+
+  function createWinchTower(x, y) {
+    return {
+      x, y,
+      height: 80 + Math.random() * 40,
+      wobble: Math.random() * Math.PI * 2,
+      wobbleSpeed: 1 + Math.random()
+    };
+  }
+
+  function createStormBird(x, y, vx, vy) {
+    return {
+      x, y, vx, vy,
+      rotation: Math.random() * Math.PI * 2,
+      rotationSpeed: (Math.random() - 0.5) * 8,
+      alpha: 1,
+      size: 15 + Math.random() * 10
+    };
+  }
+
+  function initGame() {
+    initAudio();
+    gameTime = 0;
+    entranceProgress = 0;
+
+    // Initialize serpent (ribbon snake) at left center
+    serpent = [];
+    const startX = 80;
+    const startY = H / 2;
+    for (let i = 0; i < 20; i++) {
+      serpent.push({
+        x: startX - i * 8,
+        y: startY,
+        scale: 1 - i * 0.03
+      });
+    }
+    serpentTarget = { x: startX, y: startY };
+    dashCooldown = 0;
+    isDashing = false;
+    dashTimer = 0;
+
+    // Create parallax clouds
+    clouds = [];
+    for (let i = 0; i < 15; i++) {
+      clouds.push(createCloud(
+        Math.random() * W * 1.5,
+        50 + Math.random() * (H - 100),
+        30 + Math.random() * 60
+      ));
+    }
+
+    // Create winch towers on edges
+    winchTowers = [];
+    for (let i = 0; i < 4; i++) {
+      winchTowers.push(createWinchTower(30, LANE_Y[i]));
+      winchTowers.push(createWinchTower(W - 30, LANE_Y[i]));
+    }
+
+    // Create answer kites in 2x2 grid pattern
+    kites = QUESTION.choices.map((choice, i) => {
+      const kiteWidth = 160;
+      // 2x2 grid: positions are (col, row) where col=i%2, row=Math.floor(i/2)
+      const col = i % 2;
+      const row = Math.floor(i / 2);
+      const xSpacing = 260; // horizontal spacing between columns
+      const yPositions = [100, 270]; // top row, bottom row (fits tails within 540)
+      return {
+        x: 180 + col * xSpacing,
+        y: yPositions[row],
+        width: kiteWidth,
+        height: 100,
+        choice: choice,
+        index: i,
+        bobOffset: Math.random() * Math.PI * 2,
+        hovered: false,
+        caught: false,
+        scale: 0,
+        alpha: 0,
+        shakeX: 0,
+        ropeWobble: Math.random() * Math.PI * 2
+      };
+    });
+
+    stormBirds = [];
+    gameParticles = [];
+  }
+
+  function updateGame(dt) {
+    if (gameState !== 'playing') return;
+
+    gameTime += dt;
+    entranceProgress = Math.min(1, entranceProgress + dt * 2);
+
+    // Update kite entrance animation
+    kites.forEach((kite, i) => {
+      const targetScale = 1;
+      const delay = i * 0.1;
+      const progress = Math.max(0, Math.min(1, (entranceProgress - delay) / 0.3));
+      const spring = 1 + Math.sin(progress * Math.PI * 2) * 0.2 * (1 - progress);
+      kite.scale = progress * spring;
+      kite.alpha = progress;
+    });
+
+    // Update dash
+    if (isDashing) {
+      dashTimer -= dt;
+      if (dashTimer <= 0) {
+        isDashing = false;
+      }
+    }
+    if (dashCooldown > 0) dashCooldown -= dt;
+
+    // Move serpent head toward target
+    const head = serpent[0];
+    const dx = serpentTarget.x - head.x;
+    const dy = serpentTarget.y - head.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+
+    if (dist > 5) {
+      const speed = isDashing ? serpentSpeed * 2.5 : serpentSpeed;
+      head.x += (dx / dist) * speed * dt;
+      head.y += (dy / dist) * speed * dt;
+    }
+
+    // Clamp to bounds
+    head.x = Math.max(30, Math.min(W - 30, head.x));
+    head.y = Math.max(30, Math.min(H - 30, head.y));
+
+    // Update serpent body to follow
+    for (let i = 1; i < serpent.length; i++) {
+      const prev = serpent[i - 1];
+      const curr = serpent[i];
+      const segDx = prev.x - curr.x;
+      const segDy = prev.y - curr.y;
+      const segDist = Math.sqrt(segDx * segDx + segDy * segDy);
+      const targetDist = 8;
+
+      if (segDist > targetDist) {
+        curr.x += (segDx / segDist) * (segDist - targetDist) * 0.5;
+        curr.y += (segDy / segDist) * (segDist - targetDist) * 0.5;
+      }
+    }
+
+    // Update clouds (parallax)
+    clouds.forEach(cloud => {
+      cloud.x -= cloud.speed * dt;
+      if (cloud.x + cloud.size < 0) {
+        cloud.x = W + cloud.size;
+        cloud.y = 50 + Math.random() * (H - 100);
+      }
+    });
+
+    // Update winch tower wobble
+    winchTowers.forEach(tower => {
+      tower.wobble += tower.wobbleSpeed * dt;
+    });
+
+    // Update kites bob and check collision
+    kites.forEach(kite => {
+      if (kite.caught) return;
+
+      kite.bobOffset += dt * 2;
+      kite.ropeWobble += dt * 3;
+
+      // Shake animation
+      if (kite.shakeX !== 0) {
+        kite.shakeX *= 0.9;
+        if (Math.abs(kite.shakeX) < 0.5) kite.shakeX = 0;
+      }
+
+      // Check collision with serpent head
+      const kiteY = kite.y + Math.sin(kite.bobOffset) * 8;
+      const headDist = Math.sqrt(
+        Math.pow(head.x - kite.x, 2) +
+        Math.pow(head.y - kiteY, 2)
+      );
+
+      if (headDist < 50) {
+        kite.caught = true;
+
+        if (kite.choice.is_correct) {
+          playSound('correct');
+          // Spawn celebration particles
+          for (let i = 0; i < 20; i++) {
+            gameParticles.push({
+              x: kite.x,
+              y: kiteY,
+              vx: (Math.random() - 0.5) * 300,
+              vy: (Math.random() - 0.5) * 300,
+              color: [COLORS.orange, COLORS.amber, COLORS.cyan, COLORS.success][Math.floor(Math.random() * 4)],
+              size: 4 + Math.random() * 6,
+              alpha: 1,
+              type: 'confetti'
+            });
+          }
+          setTimeout(() => {
+            engine.end(true, kite.choice.explanation);
+          }, 300);
+        } else {
+          playSound('wrong');
+          // Spawn storm birds
+          for (let i = 0; i < 8; i++) {
+            stormBirds.push(createStormBird(
+              kite.x,
+              kiteY,
+              (Math.random() - 0.5) * 400,
+              (Math.random() - 0.5) * 400
+            ));
+          }
+          // Shake other kites
+          kites.forEach(k => {
+            if (!k.caught) k.shakeX = (Math.random() - 0.5) * 20;
+          });
+          setTimeout(() => {
+            engine.end(false, kite.choice.explanation);
+          }, 500);
+        }
+      }
+    });
+
+    // Update storm birds
+    stormBirds.forEach(bird => {
+      bird.x += bird.vx * dt;
+      bird.y += bird.vy * dt;
+      bird.rotation += bird.rotationSpeed * dt;
+      bird.alpha -= dt * 1.5;
+    });
+    stormBirds = stormBirds.filter(b => b.alpha > 0);
+
+    // Update particles
+    gameParticles.forEach(p => {
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.vy += 400 * dt; // gravity
+      p.alpha -= dt;
+    });
+    gameParticles = gameParticles.filter(p => p.alpha > 0);
+  }
+
+  function drawGame() {
+    // Sky gradient background
+    const skyGrad = ctx.createLinearGradient(0, 0, 0, H);
+    skyGrad.addColorStop(0, '#87CEEB');
+    skyGrad.addColorStop(0.5, '#B8D4E3');
+    skyGrad.addColorStop(1, '#E8D4A8');
+    ctx.fillStyle = skyGrad;
+    ctx.fillRect(0, 0, W, H);
+
+    // Zephyr sunlight rays
+    ctx.save();
+    ctx.globalAlpha = 0.15;
+    for (let i = 0; i < 8; i++) {
+      const angle = (i / 8) * Math.PI * 0.4 - 0.3;
+      ctx.fillStyle = COLORS.amber;
+      ctx.beginPath();
+      ctx.moveTo(W + 50, -50);
+      ctx.lineTo(
+        W + 50 + Math.cos(angle - 0.05) * 800,
+        -50 + Math.sin(angle - 0.05) * 800
+      );
+      ctx.lineTo(
+        W + 50 + Math.cos(angle + 0.05) * 800,
+        -50 + Math.sin(angle + 0.05) * 800
+      );
+      ctx.closePath();
+      ctx.fill();
+    }
+    ctx.restore();
+
+    // Draw back clouds
+    clouds.filter(c => c.size < 45).forEach(cloud => {
+      drawCloud(cloud, 0.5);
+    });
+
+    // Draw wind lanes (subtle)
+    ctx.save();
+    ctx.globalAlpha = 0.1;
+    LANE_Y.forEach((y, i) => {
+      const laneGrad = ctx.createLinearGradient(0, y - LANE_HEIGHT/2, 0, y + LANE_HEIGHT/2);
+      laneGrad.addColorStop(0, 'transparent');
+      laneGrad.addColorStop(0.5, COLORS.cyan);
+      laneGrad.addColorStop(1, 'transparent');
+      ctx.fillStyle = laneGrad;
+      ctx.fillRect(0, y - LANE_HEIGHT/2, W, LANE_HEIGHT);
+    });
+    ctx.restore();
+
+    // Draw winch towers
+    winchTowers.forEach(tower => {
+      drawWinchTower(tower);
+    });
+
+    // Draw front clouds
+    clouds.filter(c => c.size >= 45).forEach(cloud => {
+      drawCloud(cloud, 0.8);
+    });
+
+    // Draw kite tether ropes
+    kites.forEach(kite => {
+      if (kite.alpha < 0.1) return;
+      drawKiteRope(kite);
+    });
+
+    // Draw answer kites
+    kites.forEach(kite => {
+      if (kite.alpha < 0.1) return;
+      drawKite(kite);
+    });
+
+    // Draw serpent
+    drawSerpent();
+
+    // Draw storm birds
+    stormBirds.forEach(bird => {
+      drawStormBird(bird);
+    });
+
+    // Draw particles
+    gameParticles.forEach(p => {
+      ctx.save();
+      ctx.globalAlpha = p.alpha;
+      ctx.fillStyle = p.color;
+      ctx.fillRect(p.x - p.size/2, p.y - p.size/2, p.size, p.size);
+      ctx.restore();
+    });
+  }
+
+  function drawCloud(cloud, alpha) {
+    const bobY = cloud.y + Math.sin(gameTime * cloud.bobSpeed + cloud.bobOffset) * 5;
+
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = COLORS.cloudWhite;
+
+    // Draw puffy cloud shape
+    const s = cloud.size;
+    ctx.beginPath();
+    ctx.arc(cloud.x, bobY, s * 0.5, 0, Math.PI * 2);
+    ctx.arc(cloud.x - s * 0.3, bobY + s * 0.1, s * 0.35, 0, Math.PI * 2);
+    ctx.arc(cloud.x + s * 0.4, bobY + s * 0.05, s * 0.4, 0, Math.PI * 2);
+    ctx.arc(cloud.x + s * 0.1, bobY - s * 0.2, s * 0.3, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Cloud shadow
+    ctx.fillStyle = COLORS.cloudShadow;
+    ctx.globalAlpha = alpha * 0.3;
+    ctx.beginPath();
+    ctx.ellipse(cloud.x, bobY + s * 0.3, s * 0.6, s * 0.15, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.restore();
+  }
+
+  function drawWinchTower(tower) {
+    const wobble = Math.sin(tower.wobble) * 2;
+
+    ctx.save();
+    ctx.translate(tower.x, tower.y);
+
+    // Tower post (brass color)
+    ctx.fillStyle = '#B8860B';
+    ctx.strokeStyle = '#8B6914';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(-8 + wobble, 0);
+    ctx.lineTo(-5 + wobble * 0.5, -tower.height);
+    ctx.lineTo(5 + wobble * 0.5, -tower.height);
+    ctx.lineTo(8 + wobble, 0);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+
+    // Winch wheel
+    ctx.fillStyle = '#CD853F';
+    ctx.strokeStyle = '#8B4513';
+    ctx.beginPath();
+    ctx.arc(wobble * 0.5, -tower.height - 10, 12, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+
+    // Spokes
+    ctx.strokeStyle = '#8B4513';
+    ctx.lineWidth = 2;
+    for (let i = 0; i < 4; i++) {
+      const angle = (i / 4) * Math.PI * 2 + gameTime;
+      ctx.beginPath();
+      ctx.moveTo(wobble * 0.5, -tower.height - 10);
+      ctx.lineTo(
+        wobble * 0.5 + Math.cos(angle) * 10,
+        -tower.height - 10 + Math.sin(angle) * 10
+      );
+      ctx.stroke();
+    }
+
+    ctx.restore();
+  }
+
+  function drawKiteRope(kite) {
+    const kiteY = kite.y + Math.sin(kite.bobOffset) * 8;
+    const nearestTower = winchTowers.reduce((nearest, tower) => {
+      const dist = Math.abs(tower.x - kite.x) + Math.abs(tower.y - kite.y);
+      return dist < nearest.dist ? { tower, dist } : nearest;
+    }, { tower: winchTowers[0], dist: Infinity }).tower;
+
+    ctx.save();
+    ctx.globalAlpha = kite.alpha * 0.7;
+    ctx.strokeStyle = '#8B4513';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([5, 5]);
+
+    // Wavy rope
+    ctx.beginPath();
+    ctx.moveTo(kite.x + kite.shakeX, kiteY + 50);
+
+    const cp1x = (kite.x + nearestTower.x) / 2 + Math.sin(kite.ropeWobble) * 20;
+    const cp1y = (kiteY + nearestTower.y) / 2 + 30;
+
+    ctx.quadraticCurveTo(cp1x, cp1y, nearestTower.x, nearestTower.y - 60);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.restore();
+  }
+
+  function drawKite(kite) {
+    const kiteY = kite.y + Math.sin(kite.bobOffset) * 8;
+    const kiteColors = [COLORS.orange, COLORS.cyan, COLORS.amber, COLORS.success];
+    const baseColor = kiteColors[kite.index % 4];
+
+    ctx.save();
+    ctx.translate(kite.x + kite.shakeX, kiteY);
+    ctx.scale(kite.scale, kite.scale);
+    ctx.globalAlpha = kite.alpha;
+
+    // Kite diamond shape
+    ctx.fillStyle = baseColor;
+    ctx.strokeStyle = COLORS.textPrimary;
+    ctx.lineWidth = 3;
+
+    ctx.beginPath();
+    ctx.moveTo(0, -40);
+    ctx.lineTo(35, 0);
+    ctx.lineTo(0, 50);
+    ctx.lineTo(-35, 0);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+
+    // Cross struts (stitched look)
+    ctx.strokeStyle = '#8B4513';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([3, 3]);
+    ctx.beginPath();
+    ctx.moveTo(0, -40);
+    ctx.lineTo(0, 50);
+    ctx.moveTo(-35, 0);
+    ctx.lineTo(35, 0);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Fabric tail with answer text
+    const tailStartY = 50;
+    ctx.fillStyle = COLORS.bgSurface;
+    ctx.strokeStyle = COLORS.borderStrong;
+    ctx.lineWidth = 2;
+
+    // Tail banner background
+    ctx.beginPath();
+    ctx.roundRect(-75, tailStartY + 5, 150, 70, 8);
+    ctx.fill();
+    ctx.stroke();
+
+    // Sewn edge effect
+    ctx.strokeStyle = baseColor;
+    ctx.lineWidth = 1;
+    ctx.setLineDash([4, 2]);
+    ctx.beginPath();
+    ctx.roundRect(-72, tailStartY + 8, 144, 64, 6);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Answer text on tail
+    ctx.fillStyle = COLORS.textPrimary;
+    ctx.font = "500 16px 'Nunito', sans-serif";
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
+
+    const lines = wrapText(ctx, kite.choice.text, 135);
+    const lineHeight = 18;
+    const textStartY = tailStartY + 12 + (60 - lines.length * lineHeight) / 2;
+
+    lines.forEach((line, i) => {
+      ctx.fillText(line, 0, textStartY + i * lineHeight);
+    });
+
+    // Tail ribbons
+    const ribbonWobble = Math.sin(gameTime * 3 + kite.bobOffset) * 4;
+    ctx.strokeStyle = baseColor;
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(-8, tailStartY + 75);
+    ctx.quadraticCurveTo(-12 + ribbonWobble, tailStartY + 85, -4, tailStartY + 95);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(8, tailStartY + 75);
+    ctx.quadraticCurveTo(12 - ribbonWobble, tailStartY + 85, 4, tailStartY + 95);
+    ctx.stroke();
+
+    ctx.restore();
+  }
+
+  function drawSerpent() {
+    if (serpent.length === 0) return;
+
+    // Ribbon colors
+    const ribbonColors = [COLORS.orange, COLORS.amber, '#FFB89D'];
+
+    // Draw body segments (ribbon effect)
+    for (let i = serpent.length - 1; i >= 0; i--) {
+      const seg = serpent[i];
+      const colorIndex = Math.floor(i / 3) % ribbonColors.length;
+      const alpha = 0.7 + (1 - i / serpent.length) * 0.3;
+      const width = 12 * seg.scale + (isDashing ? 4 : 0);
+
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      ctx.fillStyle = ribbonColors[colorIndex];
+      ctx.strokeStyle = COLORS.orangeHover;
+      ctx.lineWidth = 1;
+
+      // Ribbon segment
+      ctx.beginPath();
+      ctx.ellipse(seg.x, seg.y, width, width * 0.5, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    // Draw head
+    const head = serpent[0];
+    ctx.save();
+
+    // Head body
+    ctx.fillStyle = COLORS.orange;
+    ctx.strokeStyle = COLORS.orangeHover;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.ellipse(head.x, head.y, 18, 12, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+
+    // Eyes
+    ctx.fillStyle = COLORS.bgSurface;
+    ctx.beginPath();
+    ctx.arc(head.x - 6, head.y - 3, 5, 0, Math.PI * 2);
+    ctx.arc(head.x + 6, head.y - 3, 5, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = COLORS.textPrimary;
+    ctx.beginPath();
+    ctx.arc(head.x - 5, head.y - 3, 2, 0, Math.PI * 2);
+    ctx.arc(head.x + 7, head.y - 3, 2, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Forked tongue
+    if (isDashing) {
+      ctx.strokeStyle = '#E85D4A';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(head.x + 18, head.y);
+      ctx.lineTo(head.x + 28, head.y - 4);
+      ctx.moveTo(head.x + 18, head.y);
+      ctx.lineTo(head.x + 28, head.y + 4);
+      ctx.stroke();
+    }
+
+    ctx.restore();
+
+    // Dash trail particles
+    if (isDashing && Math.random() > 0.5) {
+      gameParticles.push({
+        x: head.x - 20,
+        y: head.y + (Math.random() - 0.5) * 10,
+        vx: -100,
+        vy: 0,
+        color: COLORS.amber,
+        size: 4 + Math.random() * 4,
+        alpha: 0.7,
+        type: 'trail'
+      });
+    }
+  }
+
+  function drawStormBird(bird) {
+    ctx.save();
+    ctx.translate(bird.x, bird.y);
+    ctx.rotate(bird.rotation);
+    ctx.globalAlpha = bird.alpha;
+
+    // Paper bird silhouette
+    ctx.fillStyle = '#4A4A48';
+    ctx.beginPath();
+    ctx.moveTo(0, -bird.size * 0.3);
+    ctx.lineTo(bird.size * 0.5, 0);
+    ctx.lineTo(bird.size * 0.3, bird.size * 0.2);
+    ctx.lineTo(0, bird.size * 0.1);
+    ctx.lineTo(-bird.size * 0.3, bird.size * 0.2);
+    ctx.lineTo(-bird.size * 0.5, 0);
+    ctx.closePath();
+    ctx.fill();
+
+    // Wing detail
+    ctx.strokeStyle = '#2B2B28';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(-bird.size * 0.2, 0);
+    ctx.lineTo(bird.size * 0.2, 0);
+    ctx.stroke();
+
+    ctx.restore();
+  }
+
+  function handleInput(e) {
+    if (gameState !== 'playing') return;
+
+    initAudio();
+
+    const moveAmount = 30;
+
+    // Arrow keys or WASD to steer
+    if (e.code === 'ArrowUp' || e.code === 'KeyW') {
+      serpentTarget.y = Math.max(50, serpentTarget.y - moveAmount);
+    } else if (e.code === 'ArrowDown' || e.code === 'KeyS') {
+      serpentTarget.y = Math.min(H - 50, serpentTarget.y + moveAmount);
+    } else if (e.code === 'ArrowLeft' || e.code === 'KeyA') {
+      serpentTarget.x = Math.max(50, serpentTarget.x - moveAmount);
+    } else if (e.code === 'ArrowRight' || e.code === 'KeyD') {
+      serpentTarget.x = Math.min(W - 50, serpentTarget.x + moveAmount);
+    }
+
+    // Space or Enter to dash
+    if ((e.code === 'Space' || e.code === 'Enter') && dashCooldown <= 0) {
+      isDashing = true;
+      dashTimer = 0.25;
+      dashCooldown = 1;
+      playSound('dash');
+    }
+  }
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 4: GAME LOOP - DO NOT MODIFY                                      ║
+  // ║  Standard loop with responsive scaling and DPR support.                    ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  let lastTime = performance.now();
+
+  function gameLoop(now) {
+    const dt = Math.min((now - lastTime) / 1000, 0.05); // Cap at 50ms
+    lastTime = now;
+
+    // Apply transform for logical coordinate system
+    ctx.setTransform(scale * dpr, 0, 0, scale * dpr, 0, 0);
+
+    if (gameState === 'playing') {
+      updateGame(dt);
+      drawGame();
+    } else {
+      drawGame(); // Draw game state behind overlay
+      drawEndScreen(dt);
+    }
+
+    // Reset transform for next frame
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+    requestAnimationFrame(gameLoop);
+  }
+
+  // Input handlers
+  document.addEventListener('keydown', (e) => {
+    if (gameState === 'ended' && (e.code === 'KeyR')) {
+      // Restart game
+      gameState = 'playing';
+      gameResult = null;
+      gameExplanation = '';
+      confettiParticles = [];
+      initGame();
+      return;
+    }
+    handleInput(e);
+  });
+
+  document.addEventListener('keyup', (e) => {
+    // Optional: handle key release in your handleInput
+  });
+
+  // Canvas click handler for end screen buttons
+  canvas.addEventListener('click', (e) => {
+    if (gameState !== 'ended') return;
+
+    const { x, y } = screenToLogical(e.clientX, e.clientY);
+
+    if (gameResult) {
+      // Correct answer: check both buttons
+      if (pointInRect(x, y, restartButton)) {
+        gameState = 'playing';
+        gameResult = null;
+        gameExplanation = '';
+        confettiParticles = [];
+        initGame();
+        return;
+      }
+      if (pointInRect(x, y, nextButton)) {
+        // Notify parent to go to next question
+        if (window.parent && window.parent !== window) {
+          window.parent.postMessage({ type: 'quiz-next' }, '*');
+        }
+        return;
+      }
+    } else {
+      // Wrong answer: check centered restart button
+      const centeredRestart = { x: W / 2 - 75, y: H / 2 + 60, w: 150, h: 48 };
+      if (pointInRect(x, y, centeredRestart)) {
+        gameState = 'playing';
+        gameResult = null;
+        gameExplanation = '';
+        confettiParticles = [];
+        initGame();
+        return;
+      }
+    }
+  });
+
+  // Handle resize
+  window.addEventListener('resize', resizeCanvas);
+
+  // Initialize
+  resizeCanvas();
+  initGame();
+  requestAnimationFrame(gameLoop);
+  </script>
+</body>
+</html>

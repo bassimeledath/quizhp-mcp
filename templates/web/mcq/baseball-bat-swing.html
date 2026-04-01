@@ -1,0 +1,888 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Baseball Bat Swing</title>
+  <link href="https://fonts.googleapis.com/css2?family=Belanosima:wght@400;600;700&family=Nunito+Sans:wght@400;500;600;700&family=Nunito:wght@400;500;600&display=swap" rel="stylesheet">
+  <!--
+  ╔══════════════════════════════════════════════════════════════════════════════╗
+  ║  GAME FACTORY TEMPLATE                                                        ║
+  ║  This template enforces critical invariants. Follow the section markers.      ║
+  ╚══════════════════════════════════════════════════════════════════════════════╝
+  -->
+  <style>
+    /* ═══════════════════════════════════════════════════════════════════════════
+       BASE STYLES - Can be extended, not removed
+       ═══════════════════════════════════════════════════════════════════════════ */
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+    }
+    body {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      background: #1C1C1A;
+      font-family: 'Nunito Sans', system-ui, -apple-system, sans-serif;
+    }
+    #gameCanvas {
+      background: #2A2A27;
+      border-radius: 8px;
+      display: block;
+    }
+  </style>
+</head>
+<body>
+  <!-- ═══════════════════════════════════════════════════════════════════════════
+       CANVAS - Sized dynamically to fill available space
+       ═══════════════════════════════════════════════════════════════════════════ -->
+  <canvas id="gameCanvas"></canvas>
+
+  <script>
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 1: QUESTION PLACEHOLDER - DO NOT MODIFY FORMAT                    ║
+  // ║  Platform replaces this at runtime. Use these exact 60-char answers.       ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  const QUESTION = {
+    type: "mcq",
+    prompt: "Sample question text",
+    choices: [
+      { text: "This is sample answer A which is long enough to test text overflow", is_correct: true, explanation: "Why A is correct" },
+      { text: "This is sample answer B which is long enough to test text overflow", is_correct: false, explanation: "Why B is wrong" },
+      { text: "This is sample answer C which is long enough to test text overflow", is_correct: false, explanation: "Why C is wrong" },
+      { text: "This is sample answer D which is long enough to test text overflow", is_correct: false, explanation: "Why D is wrong" }
+    ],
+    isLastQuestion: false
+  };
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 2: ENGINE CORE - DO NOT MODIFY                                    ║
+  // ║  Standard engine interface and end screen. This is sacred.                 ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  const canvas = document.getElementById('gameCanvas');
+  const ctx = canvas.getContext('2d');
+
+  // Logical dimensions (game code works in this coordinate space)
+  const W = 720, H = 540;
+
+  // Scaling state (computed on resize)
+  let scale = 1;
+  let dpr = 1;
+
+  let gameState = 'playing'; // 'playing' | 'ended'
+  let gameResult = null;     // true (correct) | false (wrong)
+  let gameExplanation = '';
+  let endScreenTime = 0;
+  let confettiParticles = [];
+
+  // End screen button bounds (logical coordinates)
+  const restartButton = { x: W / 2 - 170, y: H / 2 + 60, w: 150, h: 48 };
+  const nextButton = { x: W / 2 + 20, y: H / 2 + 60, w: 150, h: 48 };
+
+  /** Check if point is inside rectangle */
+  function pointInRect(px, py, rect) {
+    return px >= rect.x && px <= rect.x + rect.w &&
+           py >= rect.y && py <= rect.y + rect.h;
+  }
+
+  /** Draw a styled button */
+  function drawButton(rect, label, color, pulse) {
+    const p = pulse ? 1 + Math.sin(endScreenTime * 4) * 0.03 : 1;
+    ctx.save();
+    ctx.translate(rect.x + rect.w / 2, rect.y + rect.h / 2);
+    ctx.scale(p, p);
+    ctx.translate(-(rect.x + rect.w / 2), -(rect.y + rect.h / 2));
+
+    // Button background
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.roundRect(rect.x, rect.y, rect.w, rect.h, 12);
+    ctx.fill();
+
+    // Button text
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = 'bold 18px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, rect.x + rect.w / 2, rect.y + rect.h / 2);
+
+    ctx.restore();
+  }
+
+  /**
+   * Resize canvas to fill available space with proper DPR scaling.
+   * Maintains logical coordinate system (720×540).
+   */
+  function resizeCanvas() {
+    dpr = window.devicePixelRatio || 1;
+
+    // Get available space
+    const availW = window.innerWidth;
+    const availH = window.innerHeight;
+
+    // Calculate scale to fit logical space (720×540) in available space
+    const scaleX = availW / W;
+    const scaleY = availH / H;
+    scale = Math.min(scaleX, scaleY);
+
+    // Physical canvas buffer (DPR-scaled for crisp rendering)
+    canvas.width = W * scale * dpr;
+    canvas.height = H * scale * dpr;
+
+    // CSS display size
+    canvas.style.width = (W * scale) + 'px';
+    canvas.style.height = (H * scale) + 'px';
+  }
+
+  /**
+   * Convert screen coordinates to logical coordinates.
+   * Use this for mouse/click events to get positions in 720×540 space.
+   */
+  function screenToLogical(screenX, screenY) {
+    const rect = canvas.getBoundingClientRect();
+    return {
+      x: (screenX - rect.left) * (W / rect.width),
+      y: (screenY - rect.top) * (H / rect.height)
+    };
+  }
+
+  const engine = {
+    /** Call this to end the game. DO NOT draw your own end screen. */
+    end(isCorrect, explanation) {
+      if (gameState === 'ended') return;
+      gameState = 'ended';
+      gameResult = isCorrect;
+      gameExplanation = explanation || '';
+      endScreenTime = 0;
+
+      // Spawn confetti for correct answers
+      if (isCorrect) {
+        for (let i = 0; i < 50; i++) {
+          confettiParticles.push({
+            x: W / 2,
+            y: H / 2,
+            vx: (Math.random() - 0.5) * 600,
+            vy: -Math.random() * 400 - 100,
+            size: 4 + Math.random() * 6,
+            color: ['#FFD700', '#FF6B6B', '#4ECDC4', '#95E1D3', '#F38181'][Math.floor(Math.random() * 5)],
+            rotation: Math.random() * Math.PI * 2,
+            rotationSpeed: (Math.random() - 0.5) * 10
+          });
+        }
+      }
+
+      // Notify parent frame
+      if (window.parent && window.parent !== window) {
+        window.parent.postMessage({
+          type: 'quiz-end',
+          isCorrect: isCorrect,
+          explanation: explanation || ''
+        }, '*');
+      }
+    }
+  };
+
+  /** STANDARD END SCREEN - DO NOT MODIFY */
+  function drawEndScreen(dt) {
+    endScreenTime += dt;
+
+    // Update confetti
+    confettiParticles = confettiParticles.filter(p => {
+      p.vy += 800 * dt; // gravity
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.rotation += p.rotationSpeed * dt;
+      p.vx *= 0.99;
+      return p.y < H + 50;
+    });
+
+    // Dark overlay
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
+    ctx.fillRect(0, 0, W, H);
+
+    // Draw confetti
+    confettiParticles.forEach(p => {
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rotation);
+      ctx.fillStyle = p.color;
+      ctx.fillRect(-p.size / 2, -p.size / 4, p.size, p.size / 2);
+      ctx.restore();
+    });
+
+    // Result emoji
+    ctx.font = '72px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(gameResult ? '🎉' : '😢', W / 2, H / 2 - 50);
+
+    // Result text
+    ctx.fillStyle = gameResult ? '#4ADE80' : '#F87171';
+    ctx.font = 'bold 36px system-ui, sans-serif';
+    ctx.fillText(gameResult ? 'Correct!' : 'Wrong!', W / 2, H / 2 + 20);
+
+    // Buttons
+    if (gameResult) {
+      // Correct: show both Restart and Next/Finish
+      drawButton(restartButton, 'Restart', '#E87A3E', true);
+      const nextLabel = QUESTION.isLastQuestion ? 'Finish' : 'Next';
+      drawButton(nextButton, nextLabel, '#4ECDC4', true);
+    } else {
+      // Wrong: show only centered Restart button
+      const centeredRestart = { x: W / 2 - 75, y: H / 2 + 60, w: 150, h: 48 };
+      drawButton(centeredRestart, 'Restart', '#E87A3E', true);
+    }
+  }
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 3: YOUR GAME CODE - IMPLEMENT THESE FUNCTIONS                     ║
+  // ║  This is where your game logic goes. See requirements below.               ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+
+  // === COLORS ===
+  const COLORS = {
+    bgPrimary: '#FAFAF7',
+    bgSurface: '#FFFFFF',
+    textPrimary: '#2B2B28',
+    textSecondary: '#5A5A54',
+    orange: '#E87A3E',
+    orangeHover: '#D66B31',
+    amber: '#F5A742',
+    cyan: '#4ECDC4',
+    success: '#6BBF59',
+    error: '#E85D4A',
+    borderSubtle: '#E6E6E0',
+    borderStrong: '#D4D4CC',
+    grass: '#4A8B3C',
+    grassDark: '#3A7030',
+    dirt: '#C4A574',
+    dirtDark: '#A88B5A',
+    sky: '#87CEEB',
+    skyDark: '#6BB5D8'
+  };
+
+  // === GAME STATE ===
+  let ball = { x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, active: false, phase: 'incoming' };
+  let bat = { angle: -Math.PI / 4, swinging: false, swingTime: 0, swingDuration: 0.25 };
+  let outfieldZones = [];
+  let pitchTimer = 0;
+  let pitchSpeed = 280;
+  let swingTiming = null; // 0-3 mapping to zone
+  let ballHit = false;
+  let ballLanding = { x: 0, y: 0, zone: -1 };
+  let animationTime = 0;
+  let entranceAnimation = 0;
+  let particles = [];
+  let hitEffect = { active: false, time: 0 };
+  let zoneFlash = { active: false, zone: -1, time: 0 };
+
+  // Audio context for sounds
+  let audioCtx = null;
+  function getAudioContext() {
+    if (!audioCtx) {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    return audioCtx;
+  }
+
+  function playSound(type) {
+    try {
+      const ctx = getAudioContext();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+
+      if (type === 'hit') {
+        osc.frequency.value = 220;
+        osc.type = 'triangle';
+        gain.gain.setValueAtTime(0.3, ctx.currentTime);
+        gain.gain.exponentialDecayTo && gain.gain.exponentialDecayTo(0.01, ctx.currentTime + 0.15);
+        gain.gain.setValueAtTime(0.3, ctx.currentTime);
+        gain.gain.linearRampToValueAtTime(0.01, ctx.currentTime + 0.15);
+        osc.start(ctx.currentTime);
+        osc.stop(ctx.currentTime + 0.15);
+      } else if (type === 'correct') {
+        osc.frequency.value = 523;
+        osc.type = 'sine';
+        gain.gain.setValueAtTime(0.2, ctx.currentTime);
+        gain.gain.linearRampToValueAtTime(0.01, ctx.currentTime + 0.3);
+        osc.start(ctx.currentTime);
+        osc.frequency.setValueAtTime(659, ctx.currentTime + 0.1);
+        osc.frequency.setValueAtTime(784, ctx.currentTime + 0.2);
+        osc.stop(ctx.currentTime + 0.3);
+      } else if (type === 'wrong') {
+        osc.frequency.value = 200;
+        osc.type = 'sawtooth';
+        gain.gain.setValueAtTime(0.15, ctx.currentTime);
+        gain.gain.linearRampToValueAtTime(0.01, ctx.currentTime + 0.3);
+        osc.start(ctx.currentTime);
+        osc.frequency.setValueAtTime(150, ctx.currentTime + 0.15);
+        osc.stop(ctx.currentTime + 0.3);
+      } else if (type === 'swing') {
+        osc.frequency.value = 100;
+        osc.type = 'sine';
+        gain.gain.setValueAtTime(0.1, ctx.currentTime);
+        gain.gain.linearRampToValueAtTime(0.01, ctx.currentTime + 0.1);
+        osc.start(ctx.currentTime);
+        osc.frequency.linearRampToValueAtTime(300, ctx.currentTime + 0.08);
+        osc.stop(ctx.currentTime + 0.1);
+      }
+    } catch(e) {}
+  }
+
+  function initGame() {
+    // Reset state
+    ball = { x: W / 2, y: 100, z: 500, vx: 0, vy: 0, vz: -pitchSpeed, active: false, phase: 'incoming' };
+    bat = { angle: -Math.PI / 4, swinging: false, swingTime: 0, swingDuration: 0.15 };
+    pitchTimer = 0.5; // Delay before pitch
+    swingTiming = null;
+    ballHit = false;
+    ballLanding = { x: 0, y: 0, zone: -1 };
+    animationTime = 0;
+    entranceAnimation = 0;
+    particles = [];
+    hitEffect = { active: false, time: 0 };
+    zoneFlash = { active: false, zone: -1, time: 0 };
+
+    // Setup outfield zones - 4 zones from left to right
+    // Each zone is a trapezoid section of the outfield
+    const zoneWidth = 165;
+    outfieldZones = QUESTION.choices.map((choice, i) => ({
+      index: i,
+      choice: choice,
+      x: 20 + i * zoneWidth,
+      y: 10,
+      width: zoneWidth - 8,
+      height: 125,
+      scale: 0,
+      alpha: 0
+    }));
+  }
+
+  function updateGame(dt) {
+    if (gameState !== 'playing') return;
+
+    animationTime += dt;
+    entranceAnimation = Math.min(1, entranceAnimation + dt * 2);
+
+    // Update zone entrance animation
+    outfieldZones.forEach((zone, i) => {
+      const delay = i * 0.1;
+      const t = Math.max(0, Math.min(1, (entranceAnimation - delay) * 2));
+      const spring = 1 + Math.sin(t * Math.PI * 2) * 0.15 * (1 - t);
+      zone.scale = t * spring;
+      zone.alpha = t;
+    });
+
+    // Update particles
+    particles = particles.filter(p => {
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.vy += 400 * dt;
+      p.life -= dt;
+      p.rotation += p.rotationSpeed * dt;
+      return p.life > 0;
+    });
+
+    // Update hit effect
+    if (hitEffect.active) {
+      hitEffect.time += dt;
+      if (hitEffect.time > 0.3) hitEffect.active = false;
+    }
+
+    // Update zone flash
+    if (zoneFlash.active) {
+      zoneFlash.time += dt;
+      if (zoneFlash.time > 0.5) {
+        // Select answer after flash
+        const choice = QUESTION.choices[zoneFlash.zone];
+        if (choice.is_correct) {
+          playSound('correct');
+        } else {
+          playSound('wrong');
+        }
+        engine.end(choice.is_correct, choice.explanation);
+      }
+    }
+
+    // Pitch timer
+    if (pitchTimer > 0) {
+      pitchTimer -= dt;
+      if (pitchTimer <= 0) {
+        ball.active = true;
+        ball.z = 500;
+        ball.y = 100;
+        ball.x = W / 2;
+      }
+      return;
+    }
+
+    // Update ball position first
+    if (ball.active && ball.phase === 'incoming') {
+      ball.z += ball.vz * dt;
+
+      // Ball gets closer - increase apparent y position
+      const progress = 1 - ball.z / 500;
+      ball.y = 100 + progress * 320; // Move toward batter
+    }
+
+    // Update bat swing
+    if (bat.swinging) {
+      bat.swingTime += dt;
+      const progress = Math.min(1, bat.swingTime / bat.swingDuration);
+      bat.angle = -Math.PI / 4 + progress * Math.PI * 0.7;
+    }
+
+    // Check for swing contact - swing must have started and ball must be in contact zone
+    // The swing "counts" for contact even slightly after animation ends
+    if (bat.swingTime > 0 && bat.swingTime < bat.swingDuration + 0.15) {
+      if (ball.active && ball.phase === 'incoming' && ball.z <= 100 && ball.z >= -50 && !ballHit) {
+        ballHit = true;
+        hitEffect.active = true;
+        hitEffect.time = 0;
+        playSound('hit');
+
+        // Determine zone based on swing timing
+        // swingTiming was set when player pressed space
+        const zone = swingTiming;
+        ballLanding.zone = zone;
+
+        // Calculate landing position based on zone
+        const targetZone = outfieldZones[zone];
+        ballLanding.x = targetZone.x + targetZone.width / 2;
+        ballLanding.y = targetZone.y + targetZone.height / 2;
+
+        // Set ball trajectory
+        ball.phase = 'outgoing';
+        ball.vx = (ballLanding.x - ball.x) * 3;
+        ball.vy = -800;
+
+        // Spawn hit particles
+        for (let i = 0; i < 12; i++) {
+          particles.push({
+            x: ball.x,
+            y: ball.y,
+            vx: (Math.random() - 0.5) * 300,
+            vy: (Math.random() - 0.5) * 200 - 100,
+            life: 0.4 + Math.random() * 0.3,
+            size: 3 + Math.random() * 4,
+            rotation: Math.random() * Math.PI * 2,
+            rotationSpeed: (Math.random() - 0.5) * 10,
+            color: ['#FFFFFF', '#F5A742', '#E87A3E'][Math.floor(Math.random() * 3)]
+          });
+        }
+      }
+
+      // End swing after duration
+      if (bat.swingTime >= bat.swingDuration && !ballHit) {
+        bat.swinging = false;
+      }
+    }
+
+    // Ball passed without hit - reset
+    if (ball.active && ball.phase === 'incoming' && ball.z < -50 && !ballHit) {
+      // Reset for another pitch if missed
+      ball.z = 500;
+      ball.y = 100;
+      pitchTimer = 0.3;
+      ball.active = false;
+      bat.swinging = false;
+      bat.angle = -Math.PI / 4;
+    }
+
+    // Ball flying to outfield
+    if (ball.phase === 'outgoing') {
+      ball.x += ball.vx * dt;
+      ball.y += ball.vy * dt;
+      ball.vy += 600 * dt; // Gravity
+
+      // Check if ball reached target zone
+      if (ball.y >= ballLanding.y) {
+        ball.active = false;
+        zoneFlash.active = true;
+        zoneFlash.zone = ballLanding.zone;
+        zoneFlash.time = 0;
+
+        // Spawn landing particles
+        for (let i = 0; i < 8; i++) {
+          particles.push({
+            x: ball.x,
+            y: ball.y,
+            vx: (Math.random() - 0.5) * 150,
+            vy: -Math.random() * 100,
+            life: 0.3 + Math.random() * 0.2,
+            size: 2 + Math.random() * 3,
+            rotation: 0,
+            rotationSpeed: 0,
+            color: COLORS.grass
+          });
+        }
+      }
+    }
+  }
+
+  function drawGame() {
+    // Sky gradient
+    const skyGrad = ctx.createLinearGradient(0, 0, 0, H);
+    skyGrad.addColorStop(0, COLORS.sky);
+    skyGrad.addColorStop(0.4, COLORS.skyDark);
+    skyGrad.addColorStop(1, COLORS.grass);
+    ctx.fillStyle = skyGrad;
+    ctx.fillRect(0, 0, W, H);
+
+    // Outfield grass
+    ctx.fillStyle = COLORS.grass;
+    ctx.fillRect(0, 150, W, H - 150);
+
+    // Grass stripes
+    ctx.fillStyle = COLORS.grassDark;
+    for (let i = 0; i < 8; i++) {
+      const y = 160 + i * 50;
+      ctx.fillRect(0, y, W, 20);
+    }
+
+    // Draw outfield fence
+    ctx.fillStyle = '#2B2B28';
+    ctx.fillRect(0, 130, W, 8);
+
+    // Draw outfield zones with answer text
+    outfieldZones.forEach((zone, i) => {
+      ctx.save();
+      ctx.globalAlpha = zone.alpha;
+
+      // Zone background
+      const isFlashing = zoneFlash.active && zoneFlash.zone === i;
+      const flashIntensity = isFlashing ? Math.sin(zoneFlash.time * 20) * 0.3 + 0.7 : 1;
+
+      ctx.translate(zone.x + zone.width / 2, zone.y + zone.height / 2);
+      ctx.scale(zone.scale, zone.scale);
+      ctx.translate(-(zone.x + zone.width / 2), -(zone.y + zone.height / 2));
+
+      // Zone panel
+      let bgColor = COLORS.bgSurface;
+      if (isFlashing) {
+        bgColor = zone.choice.is_correct ? COLORS.success : COLORS.error;
+      }
+      ctx.fillStyle = bgColor;
+      ctx.globalAlpha = zone.alpha * flashIntensity;
+      ctx.beginPath();
+      ctx.roundRect(zone.x, zone.y, zone.width, zone.height, 8);
+      ctx.fill();
+
+      // Zone border
+      ctx.strokeStyle = isFlashing ? (zone.choice.is_correct ? COLORS.success : COLORS.error) : COLORS.borderSubtle;
+      ctx.lineWidth = 2;
+      ctx.stroke();
+
+      // Zone label (A, B, C, D)
+      ctx.globalAlpha = zone.alpha;
+      ctx.fillStyle = isFlashing ? '#FFFFFF' : COLORS.orange;
+      ctx.font = "600 16px 'Nunito Sans', sans-serif";
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'top';
+      ctx.fillText(['A', 'B', 'C', 'D'][i], zone.x + zone.width / 2, zone.y + 6);
+
+      // Answer text with word wrap
+      ctx.fillStyle = isFlashing ? '#FFFFFF' : COLORS.textPrimary;
+      ctx.font = "400 14px 'Nunito', sans-serif";
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'top';
+
+      const maxWidth = zone.width - 12;
+      const lineHeight = 15;
+      const words = zone.choice.text.split(' ');
+      let line = '';
+      let y = zone.y + 26;
+      let lineCount = 0;
+      const maxLines = 6;
+
+      for (let n = 0; n < words.length; n++) {
+        const testLine = line + words[n] + ' ';
+        const metrics = ctx.measureText(testLine);
+        if (metrics.width > maxWidth && n > 0) {
+          lineCount++;
+          if (lineCount >= maxLines) {
+            ctx.fillText(line.trim(), zone.x + zone.width / 2, y);
+            break;
+          }
+          ctx.fillText(line.trim(), zone.x + zone.width / 2, y);
+          line = words[n] + ' ';
+          y += lineHeight;
+        } else {
+          line = testLine;
+        }
+      }
+      if (lineCount < maxLines && line.trim()) {
+        ctx.fillText(line.trim(), zone.x + zone.width / 2, y);
+      }
+
+      ctx.restore();
+    });
+
+    // Draw infield diamond
+    ctx.fillStyle = COLORS.dirt;
+    ctx.beginPath();
+    ctx.moveTo(W / 2, 420); // Home plate
+    ctx.lineTo(W / 2 + 150, 350); // First base
+    ctx.lineTo(W / 2, 280); // Second base
+    ctx.lineTo(W / 2 - 150, 350); // Third base
+    ctx.closePath();
+    ctx.fill();
+
+    // Base paths
+    ctx.strokeStyle = '#FFFFFF';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(W / 2, 420);
+    ctx.lineTo(W / 2 + 150, 350);
+    ctx.lineTo(W / 2, 280);
+    ctx.lineTo(W / 2 - 150, 350);
+    ctx.closePath();
+    ctx.stroke();
+
+    // Pitcher's mound
+    ctx.fillStyle = COLORS.dirtDark;
+    ctx.beginPath();
+    ctx.ellipse(W / 2, 340, 25, 15, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Home plate area
+    ctx.fillStyle = COLORS.dirtDark;
+    ctx.beginPath();
+    ctx.ellipse(W / 2, 460, 60, 30, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Home plate
+    ctx.fillStyle = '#FFFFFF';
+    ctx.beginPath();
+    ctx.moveTo(W / 2, 455);
+    ctx.lineTo(W / 2 + 15, 465);
+    ctx.lineTo(W / 2 + 15, 475);
+    ctx.lineTo(W / 2 - 15, 475);
+    ctx.lineTo(W / 2 - 15, 465);
+    ctx.closePath();
+    ctx.fill();
+
+    // Batter stance indicator
+    const batterX = W / 2 + 40;
+    const batterY = 460;
+
+    // Batter body (simplified)
+    ctx.fillStyle = COLORS.textPrimary;
+    ctx.beginPath();
+    ctx.ellipse(batterX, batterY - 30, 12, 15, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Bat
+    ctx.save();
+    ctx.translate(batterX, batterY - 20);
+    ctx.rotate(bat.angle);
+    ctx.fillStyle = '#8B4513';
+    ctx.fillRect(-5, -60, 10, 65);
+    ctx.fillStyle = '#654321';
+    ctx.fillRect(-6, -65, 12, 10);
+    ctx.restore();
+
+    // Draw ball
+    if (ball.active) {
+      // Ball shadow
+      ctx.fillStyle = 'rgba(0,0,0,0.3)';
+      const shadowScale = ball.phase === 'incoming' ? (1 - ball.z / 500) : 1;
+      ctx.beginPath();
+      ctx.ellipse(ball.x, ball.y + 15 * shadowScale, 8 * shadowScale, 4 * shadowScale, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Ball
+      const ballScale = ball.phase === 'incoming' ? 0.3 + (1 - ball.z / 500) * 0.7 : 1;
+      ctx.fillStyle = '#FFFFFF';
+      ctx.beginPath();
+      ctx.arc(ball.x, ball.y, 10 * ballScale, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Ball stitches
+      ctx.strokeStyle = '#E85D4A';
+      ctx.lineWidth = 1.5 * ballScale;
+      ctx.beginPath();
+      ctx.arc(ball.x - 3 * ballScale, ball.y, 4 * ballScale, -Math.PI * 0.7, Math.PI * 0.7);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(ball.x + 3 * ballScale, ball.y, 4 * ballScale, Math.PI * 0.3, Math.PI * 1.7);
+      ctx.stroke();
+    }
+
+    // Hit effect
+    if (hitEffect.active) {
+      const t = hitEffect.time / 0.3;
+      ctx.strokeStyle = `rgba(255, 255, 255, ${1 - t})`;
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(batterX, batterY - 20, 20 + t * 40, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+
+    // Draw particles
+    particles.forEach(p => {
+      ctx.save();
+      ctx.globalAlpha = p.life;
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rotation);
+      ctx.fillStyle = p.color;
+      ctx.fillRect(-p.size / 2, -p.size / 2, p.size, p.size);
+      ctx.restore();
+    });
+
+    // Timing indicator bar at bottom
+    const barY = H - 30;
+    const barWidth = 400;
+    const barX = (W - barWidth) / 2;
+
+    ctx.fillStyle = COLORS.borderSubtle;
+    ctx.beginPath();
+    ctx.roundRect(barX, barY, barWidth, 15, 4);
+    ctx.fill();
+
+    // Zone indicators on bar
+    const zoneLabels = ['Early\n(Left)', 'Mid-L\n(C-Left)', 'Mid-R\n(C-Right)', 'Late\n(Right)'];
+    const zoneWidth = barWidth / 4;
+    for (let i = 0; i < 4; i++) {
+      ctx.fillStyle = ['#E85D4A', '#F5A742', '#4ECDC4', '#6BBF59'][i];
+      ctx.globalAlpha = 0.7;
+      ctx.beginPath();
+      ctx.roundRect(barX + i * zoneWidth + 2, barY + 2, zoneWidth - 4, 11, 2);
+      ctx.fill();
+      ctx.globalAlpha = 1;
+    }
+
+    // Ball position indicator on timing bar (when ball is incoming)
+    if (ball.active && ball.phase === 'incoming') {
+      const ballProgress = 1 - ball.z / 500;
+      const indicatorX = barX + ballProgress * barWidth;
+      ctx.fillStyle = '#FFFFFF';
+      ctx.beginPath();
+      ctx.arc(indicatorX, barY + 7.5, 8, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = COLORS.textPrimary;
+      ctx.lineWidth = 2;
+      ctx.stroke();
+    }
+  }
+
+  function handleInput(e) {
+    if (gameState !== 'playing') return;
+
+    if (e.code === 'Space' && !bat.swinging && ball.active && ball.phase === 'incoming') {
+      e.preventDefault();
+      bat.swinging = true;
+      bat.swingTime = 0;
+      playSound('swing');
+
+      // Determine timing zone based on ball position
+      const ballProgress = 1 - ball.z / 500; // 0 = far, 1 = close
+      if (ballProgress < 0.25) {
+        swingTiming = 0; // Very early - left field
+      } else if (ballProgress < 0.5) {
+        swingTiming = 1; // Early - center-left
+      } else if (ballProgress < 0.75) {
+        swingTiming = 2; // Good timing - center-right
+      } else {
+        swingTiming = 3; // Late - right field
+      }
+    }
+  }
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 4: GAME LOOP - DO NOT MODIFY                                      ║
+  // ║  Standard loop with responsive scaling and DPR support.                    ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  let lastTime = performance.now();
+
+  function gameLoop(now) {
+    const dt = Math.min((now - lastTime) / 1000, 0.05); // Cap at 50ms
+    lastTime = now;
+
+    // Apply transform for logical coordinate system
+    ctx.setTransform(scale * dpr, 0, 0, scale * dpr, 0, 0);
+
+    if (gameState === 'playing') {
+      updateGame(dt);
+      drawGame();
+    } else {
+      drawGame(); // Draw game state behind overlay
+      drawEndScreen(dt);
+    }
+
+    // Reset transform for next frame
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+    requestAnimationFrame(gameLoop);
+  }
+
+  // Input handlers
+  document.addEventListener('keydown', (e) => {
+    if (gameState === 'ended' && (e.code === 'KeyR')) {
+      // Restart game
+      gameState = 'playing';
+      gameResult = null;
+      gameExplanation = '';
+      confettiParticles = [];
+      initGame();
+      return;
+    }
+    handleInput(e);
+  });
+
+  document.addEventListener('keyup', (e) => {
+    // Optional: handle key release in your handleInput
+  });
+
+  // Canvas click handler for end screen buttons
+  canvas.addEventListener('click', (e) => {
+    if (gameState !== 'ended') return;
+
+    const { x, y } = screenToLogical(e.clientX, e.clientY);
+
+    if (gameResult) {
+      // Correct answer: check both buttons
+      if (pointInRect(x, y, restartButton)) {
+        gameState = 'playing';
+        gameResult = null;
+        gameExplanation = '';
+        confettiParticles = [];
+        initGame();
+        return;
+      }
+      if (pointInRect(x, y, nextButton)) {
+        // Notify parent to go to next question
+        if (window.parent && window.parent !== window) {
+          window.parent.postMessage({ type: 'quiz-next' }, '*');
+        }
+        return;
+      }
+    } else {
+      // Wrong answer: check centered restart button
+      const centeredRestart = { x: W / 2 - 75, y: H / 2 + 60, w: 150, h: 48 };
+      if (pointInRect(x, y, centeredRestart)) {
+        gameState = 'playing';
+        gameResult = null;
+        gameExplanation = '';
+        confettiParticles = [];
+        initGame();
+        return;
+      }
+    }
+  });
+
+  // Handle resize
+  window.addEventListener('resize', resizeCanvas);
+
+  // Initialize
+  resizeCanvas();
+  initGame();
+  requestAnimationFrame(gameLoop);
+  </script>
+</body>
+</html>

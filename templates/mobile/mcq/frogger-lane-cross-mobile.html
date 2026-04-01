@@ -1,0 +1,1080 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <title>Frogger Lane Cross</title>
+  <link href="https://fonts.googleapis.com/css2?family=Belanosima:wght@400;600;700&family=Nunito+Sans:wght@400;500;600;700&family=Nunito:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      touch-action: none;
+      -webkit-touch-callout: none;
+      -webkit-user-select: none;
+      user-select: none;
+    }
+    body {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      background: #1C1C1A;
+      font-family: 'Nunito Sans', system-ui, sans-serif;
+    }
+    #gameCanvas {
+      background: #2A2A27;
+      width: 100vw;
+      height: 100vh;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="gameCanvas"></canvas>
+
+  <script>
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 1: QUESTION PLACEHOLDER - DO NOT MODIFY FORMAT                    ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  const QUESTION = {
+    type: "mcq",
+    prompt: "Sample question text",
+    choices: [
+      { text: "This is sample answer A which is long enough to test text overflow", is_correct: true, explanation: "Why A is correct" },
+      { text: "This is sample answer B which is long enough to test text overflow", is_correct: false, explanation: "Why B is wrong" },
+      { text: "This is sample answer C which is long enough to test text overflow", is_correct: false, explanation: "Why C is wrong" },
+      { text: "This is sample answer D which is long enough to test text overflow", is_correct: false, explanation: "Why D is wrong" }
+    ],
+    isLastQuestion: false
+  };
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 2: ENGINE CORE (MOBILE) - DO NOT MODIFY                           ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  const canvas = document.getElementById('gameCanvas');
+  const ctx = canvas.getContext('2d');
+
+  const W = 360, H = 640;
+
+  let scaleX = 1;
+  let scaleY = 1;
+  let aspectRatio = 1;
+
+  let gameState = 'playing';
+  let gameResult = null;
+  let gameExplanation = '';
+  let endScreenTime = 0;
+  let confettiParticles = [];
+
+  const restartButton = { x: 20, y: H / 2 + 50, w: 155, h: 56 };
+  const nextButton = { x: 185, y: H / 2 + 50, w: 155, h: 56 };
+  const centeredRestartButton = { x: W / 2 - 100, y: H / 2 + 50, w: 200, h: 56 };
+
+  function drawMobileButton(rect, label, color, pulse) {
+    const textAdj = getTextScaleAdjustment();
+    const p = pulse ? 1 + Math.sin(endScreenTime * 4) * 0.03 : 1;
+
+    ctx.save();
+    ctx.translate(rect.x + rect.w / 2, rect.y + rect.h / 2);
+    ctx.scale(p, p);
+    ctx.translate(-(rect.x + rect.w / 2), -(rect.y + rect.h / 2));
+
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.roundRect(rect.x, rect.y, rect.w, rect.h, 12);
+    ctx.fill();
+
+    ctx.save();
+    ctx.translate(rect.x + rect.w / 2, rect.y + rect.h / 2);
+    ctx.scale(textAdj / aspectRatio, textAdj);
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = "bold 18px 'Nunito Sans', sans-serif";
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, 0, 0);
+    ctx.restore();
+
+    ctx.restore();
+  }
+
+  function resizeCanvas() {
+    const dpr = window.devicePixelRatio || 1;
+
+    canvas.width = window.innerWidth * dpr;
+    canvas.height = window.innerHeight * dpr;
+
+    canvas.style.width = window.innerWidth + 'px';
+    canvas.style.height = window.innerHeight + 'px';
+
+    scaleX = canvas.width / W;
+    scaleY = canvas.height / H;
+
+    aspectRatio = scaleX / scaleY;
+
+    if (typeof recalculateTextSizing === 'function') {
+      recalculateTextSizing();
+    }
+  }
+
+  const TEXT_SCALE_MIN = 0.75;
+  const TEXT_SCALE_MAX = 1.4;
+
+  function getTextScaleAdjustment() {
+    const baseScale = window.innerHeight / H;
+    const clampedScale = Math.min(TEXT_SCALE_MAX, Math.max(TEXT_SCALE_MIN, baseScale));
+    return clampedScale / baseScale;
+  }
+
+  function drawText(text, x, y, options = {}) {
+    const { font = "500 16px 'Nunito Sans', sans-serif", color = '#F5F5F0', align = 'center', baseline = 'middle' } = options;
+    ctx.save();
+    ctx.translate(x, y);
+    const adj = getTextScaleAdjustment();
+    ctx.scale(adj / aspectRatio, adj);
+    ctx.font = font;
+    ctx.fillStyle = color;
+    ctx.textAlign = align;
+    ctx.textBaseline = baseline;
+    ctx.fillText(text, 0, 0);
+    ctx.restore();
+  }
+
+  function screenToLogical(screenX, screenY) {
+    const dpr = window.devicePixelRatio || 1;
+    const rect = canvas.getBoundingClientRect();
+    const canvasX = (screenX - rect.left) * dpr;
+    const canvasY = (screenY - rect.top) * dpr;
+    return {
+      x: canvasX / scaleX,
+      y: canvasY / scaleY
+    };
+  }
+
+  function pointInRect(px, py, rect) {
+    return px >= rect.x && px <= rect.x + rect.w &&
+           py >= rect.y && py <= rect.y + rect.h;
+  }
+
+  function wrapText(text, maxWidth, font, maxLines = 3) {
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.font = font;
+    const adj = getTextScaleAdjustment();
+    const maxRawWidth = maxWidth * aspectRatio / adj;
+    const words = text.split(' ');
+    const lines = [];
+    let currentLine = '';
+    words.forEach(word => {
+      const testLine = currentLine ? currentLine + ' ' + word : word;
+      if (ctx.measureText(testLine).width > maxRawWidth && currentLine) {
+        lines.push(currentLine);
+        currentLine = word;
+      } else {
+        currentLine = testLine;
+      }
+    });
+    if (currentLine) lines.push(currentLine);
+    ctx.restore();
+    return lines.slice(0, maxLines);
+  }
+
+  function findOptimalFontSize(options) {
+    const {
+      texts,
+      maxWidth,
+      availableHeight,
+      minFont = 12,
+      maxFont = 18,
+      itemPadding = 4,
+      fontFamily = "'Nunito', sans-serif"
+    } = options;
+
+    let bestFontSize = minFont;
+    let bestWrappedTexts = [];
+
+    for (let fontSize = maxFont; fontSize >= minFont; fontSize -= 0.5) {
+      const font = `${fontSize}px ${fontFamily}`;
+      const lineHeight = fontSize + 2;
+
+      let totalHeight = 0;
+      const wrappedTexts = [];
+
+      for (const text of texts) {
+        const lines = wrapText(text, maxWidth, font);
+        wrappedTexts.push(lines);
+        totalHeight += itemPadding + lines.length * lineHeight;
+      }
+
+      if (totalHeight <= availableHeight) {
+        bestFontSize = fontSize;
+        bestWrappedTexts = wrappedTexts;
+        break;
+      }
+
+      bestWrappedTexts = wrappedTexts;
+    }
+
+    return { fontSize: bestFontSize, wrappedTexts: bestWrappedTexts };
+  }
+
+  const engine = {
+    end(isCorrect, explanation) {
+      if (gameState === 'ended') return;
+      gameState = 'ended';
+      gameResult = isCorrect;
+      gameExplanation = explanation || '';
+      endScreenTime = 0;
+
+      if (isCorrect) {
+        for (let i = 0; i < 50; i++) {
+          confettiParticles.push({
+            x: W / 2,
+            y: H / 2,
+            vx: (Math.random() - 0.5) * 400,
+            vy: -Math.random() * 300 - 80,
+            size: 4 + Math.random() * 6,
+            color: ['#E87A3E', '#F5A742', '#4ECDC4', '#6BBF59', '#FFB89D'][Math.floor(Math.random() * 5)],
+            rotation: Math.random() * Math.PI * 2,
+            rotationSpeed: (Math.random() - 0.5) * 10
+          });
+        }
+      }
+
+      if (window.parent && window.parent !== window) {
+        window.parent.postMessage({
+          type: 'quiz-end',
+          isCorrect: isCorrect,
+          explanation: explanation || ''
+        }, '*');
+      }
+    }
+  };
+
+  function drawEndScreen(dt) {
+    endScreenTime += dt;
+
+    confettiParticles = confettiParticles.filter(p => {
+      p.vy += 600 * dt;
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.rotation += p.rotationSpeed * dt;
+      p.vx *= 0.99;
+      return p.y < H + 50;
+    });
+
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
+    ctx.fillRect(0, 0, W, H);
+
+    confettiParticles.forEach(p => {
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rotation);
+      ctx.fillStyle = p.color;
+      ctx.fillRect(-p.size / 2, -p.size / 4, p.size, p.size / 2);
+      ctx.restore();
+    });
+
+    const textAdj = getTextScaleAdjustment();
+    ctx.save();
+    ctx.translate(W / 2, H / 2 - 80);
+    ctx.scale(textAdj / aspectRatio, textAdj);
+    ctx.font = '64px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(gameResult ? '🎉' : '😢', 0, 0);
+    ctx.restore();
+
+    ctx.save();
+    ctx.translate(W / 2, H / 2 - 10);
+    ctx.scale(textAdj / aspectRatio, textAdj);
+    ctx.fillStyle = gameResult ? '#6BBF59' : '#E85D4A';
+    ctx.font = "bold 32px 'Nunito Sans', sans-serif";
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(gameResult ? 'Correct!' : 'Wrong!', 0, 0);
+    ctx.restore();
+
+    if (gameResult) {
+      drawMobileButton(restartButton, 'Restart', '#E87A3E', true);
+      const nextLabel = QUESTION.isLastQuestion ? 'Finish' : 'Next';
+      drawMobileButton(nextButton, nextLabel, '#4ECDC4', true);
+    } else {
+      drawMobileButton(centeredRestartButton, 'Restart', '#E87A3E', true);
+    }
+  }
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 3: YOUR GAME CODE - IMPLEMENT THESE FUNCTIONS                     ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+
+  // Colors
+  const COLORS = {
+    grass: '#6BBF59',
+    grassDark: '#5AAF4A',
+    road: '#363633',
+    roadLine: '#5A5A56',
+    water: '#4ECDC4',
+    waterDark: '#45B8B0',
+    log: '#8B5A2B',
+    logLight: '#A0693B',
+    car1: '#E85D4A',
+    car2: '#F5A742',
+    car3: '#E87A3E',
+    frog: '#6BBF59',
+    frogDark: '#5AAF4A',
+    frogEye: '#2B2B28',
+    lilyPad: '#4ECDC4',
+    lilyPadDark: '#45B8B0'
+  };
+
+  // Game state
+  let frog = {};
+  let lanes = [];
+  let lilyPads = [];
+  let animationTime = 0;
+  let frogOnLog = null;
+  let splashParticles = [];
+  let hopSound = null;
+  let splashSound = null;
+  let successSound = null;
+
+  // Audio context for sounds
+  let audioCtx = null;
+
+  function initAudio() {
+    if (audioCtx) return;
+    try {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    } catch (e) {}
+  }
+
+  function playHop() {
+    if (!audioCtx) return;
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    osc.frequency.setValueAtTime(400, audioCtx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(600, audioCtx.currentTime + 0.05);
+    gain.gain.setValueAtTime(0.15, audioCtx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.1);
+    osc.start();
+    osc.stop(audioCtx.currentTime + 0.1);
+  }
+
+  function playSplash() {
+    if (!audioCtx) return;
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = 'sawtooth';
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    osc.frequency.setValueAtTime(200, audioCtx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(80, audioCtx.currentTime + 0.2);
+    gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.3);
+    osc.start();
+    osc.stop(audioCtx.currentTime + 0.3);
+  }
+
+  function playSuccess() {
+    if (!audioCtx) return;
+    const notes = [523, 659, 784];
+    notes.forEach((freq, i) => {
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      osc.frequency.value = freq;
+      gain.gain.setValueAtTime(0.12, audioCtx.currentTime + i * 0.1);
+      gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + i * 0.1 + 0.2);
+      osc.start(audioCtx.currentTime + i * 0.1);
+      osc.stop(audioCtx.currentTime + i * 0.1 + 0.2);
+    });
+  }
+
+  // Lane definitions
+  const LANE_HEIGHT = 55;
+  const FROG_SIZE = 32;
+
+  function initGame() {
+    animationTime = 0;
+    frogOnLog = null;
+    splashParticles = [];
+
+    // Frog starts at bottom center
+    frog = {
+      x: W / 2,
+      y: H - 50,
+      targetX: W / 2,
+      targetY: H - 50,
+      hopProgress: 1,
+      scale: 0,
+      alpha: 0,
+      shake: 0
+    };
+
+    // Lane layout from bottom to top:
+    // Row 0 (y=585): Start grass
+    // Row 1-3: Road lanes
+    // Row 4: Middle grass (safe)
+    // Row 5-7: Water lanes with logs
+    // Row 8: Lily pads at top
+
+    lanes = [];
+
+    // Road lanes (moving cars)
+    const roadLaneYs = [530, 475, 420];
+    const carSpeeds = [60, -80, 70];
+    const carCounts = [2, 3, 2];
+    const carColors = [COLORS.car1, COLORS.car2, COLORS.car3];
+
+    roadLaneYs.forEach((y, i) => {
+      const lane = {
+        type: 'road',
+        y: y,
+        speed: carSpeeds[i],
+        objects: []
+      };
+      for (let j = 0; j < carCounts[i]; j++) {
+        lane.objects.push({
+          x: (W / carCounts[i]) * j + Math.random() * 50,
+          w: 50 + Math.random() * 20,
+          h: 30,
+          color: carColors[i]
+        });
+      }
+      lanes.push(lane);
+    });
+
+    // Water lanes (logs)
+    const waterLaneYs = [310, 255, 200];
+    const logSpeeds = [-50, 60, -40];
+    const logCounts = [2, 2, 3];
+
+    waterLaneYs.forEach((y, i) => {
+      const lane = {
+        type: 'water',
+        y: y,
+        speed: logSpeeds[i],
+        objects: []
+      };
+      for (let j = 0; j < logCounts[i]; j++) {
+        lane.objects.push({
+          x: (W / logCounts[i]) * j + Math.random() * 30,
+          w: 70 + Math.random() * 30,
+          h: 35
+        });
+      }
+      lanes.push(lane);
+    });
+
+    // Lily pads at top with answers
+    const padY = 100;
+    const padSpacing = W / 4;
+    lilyPads = QUESTION.choices.map((choice, i) => ({
+      x: padSpacing * i + padSpacing / 2,
+      y: padY,
+      radius: 38,
+      choice: choice,
+      scale: 0,
+      alpha: 0,
+      wrappedText: [],
+      fontSize: 14
+    }));
+
+    // Entrance animations
+    setTimeout(() => {
+      bounceInFrog();
+    }, 100);
+
+    setTimeout(() => {
+      bounceInLilyPads();
+    }, 300);
+
+    recalculateTextSizing();
+  }
+
+  function bounceInFrog() {
+    const duration = 400;
+    const start = performance.now();
+    const animate = () => {
+      const t = Math.min((performance.now() - start) / duration, 1);
+      const spring = 1 + Math.sin(t * Math.PI * 2) * 0.3 * (1 - t);
+      frog.scale = t * spring;
+      frog.alpha = t;
+      if (t < 1) requestAnimationFrame(animate);
+      else { frog.scale = 1; frog.alpha = 1; }
+    };
+    requestAnimationFrame(animate);
+  }
+
+  function bounceInLilyPads() {
+    lilyPads.forEach((pad, i) => {
+      setTimeout(() => {
+        const duration = 350;
+        const start = performance.now();
+        const animate = () => {
+          const t = Math.min((performance.now() - start) / duration, 1);
+          const spring = 1 + Math.sin(t * Math.PI * 2) * 0.2 * (1 - t);
+          pad.scale = t * spring;
+          pad.alpha = t;
+          if (t < 1) requestAnimationFrame(animate);
+          else { pad.scale = 1; pad.alpha = 1; }
+        };
+        requestAnimationFrame(animate);
+      }, i * 60);
+    });
+  }
+
+  function recalculateTextSizing() {
+    if (!lilyPads || lilyPads.length === 0) return;
+
+    const maxWidth = 68; // Lily pad is ~76px diameter, leave margins
+    lilyPads.forEach((pad, i) => {
+      const lines = wrapText(QUESTION.choices[i].text, maxWidth, "14px 'Nunito', sans-serif", 3);
+      pad.wrappedText = lines;
+      pad.fontSize = 14;
+    });
+  }
+
+  function updateGame(dt) {
+    if (gameState !== 'playing') return;
+
+    animationTime += dt;
+
+    // Update frog hop animation
+    if (frog.hopProgress < 1) {
+      frog.hopProgress = Math.min(frog.hopProgress + dt * 5, 1);
+      const t = frog.hopProgress;
+      const eased = 1 - Math.pow(1 - t, 3);
+      frog.x = frog.startX + (frog.targetX - frog.startX) * eased;
+      frog.y = frog.startY + (frog.targetY - frog.startY) * eased;
+    }
+
+    // Update shake animation
+    if (frog.shake > 0) {
+      frog.shake -= dt * 10;
+      if (frog.shake < 0) frog.shake = 0;
+    }
+
+    // Move lane objects
+    lanes.forEach(lane => {
+      lane.objects.forEach(obj => {
+        obj.x += lane.speed * dt;
+        // Wrap around screen
+        if (lane.speed > 0 && obj.x > W + obj.w) {
+          obj.x = -obj.w;
+        } else if (lane.speed < 0 && obj.x < -obj.w) {
+          obj.x = W + obj.w;
+        }
+      });
+    });
+
+    // If frog is on a log, move with it
+    if (frogOnLog && frog.hopProgress >= 1) {
+      const lane = lanes.find(l => l.type === 'water' && l.objects.includes(frogOnLog));
+      if (lane) {
+        frog.x += lane.speed * dt;
+        frog.targetX = frog.x;
+        // Check if frog fell off screen
+        if (frog.x < -FROG_SIZE || frog.x > W + FROG_SIZE) {
+          resetFrog();
+        }
+      }
+    }
+
+    // Check collisions with cars (road lanes)
+    if (frog.hopProgress >= 1) {
+      lanes.filter(l => l.type === 'road').forEach(lane => {
+        const frogTop = frog.y - FROG_SIZE / 2;
+        const frogBottom = frog.y + FROG_SIZE / 2;
+        const laneTop = lane.y - LANE_HEIGHT / 2;
+        const laneBottom = lane.y + LANE_HEIGHT / 2;
+
+        if (frogBottom > laneTop && frogTop < laneBottom) {
+          lane.objects.forEach(car => {
+            if (frog.x > car.x - car.w / 2 - FROG_SIZE / 2 &&
+                frog.x < car.x + car.w / 2 + FROG_SIZE / 2) {
+              // Hit by car!
+              resetFrog();
+            }
+          });
+        }
+      });
+    }
+
+    // Check if frog is in water without a log
+    if (frog.hopProgress >= 1) {
+      const waterLanes = lanes.filter(l => l.type === 'water');
+      waterLanes.forEach(lane => {
+        const frogTop = frog.y - FROG_SIZE / 2;
+        const frogBottom = frog.y + FROG_SIZE / 2;
+        const laneTop = lane.y - LANE_HEIGHT / 2;
+        const laneBottom = lane.y + LANE_HEIGHT / 2;
+
+        if (frogBottom > laneTop && frogTop < laneBottom) {
+          let onLog = false;
+          lane.objects.forEach(log => {
+            if (frog.x > log.x - log.w / 2 + 5 &&
+                frog.x < log.x + log.w / 2 - 5) {
+              onLog = true;
+              frogOnLog = log;
+            }
+          });
+          if (!onLog) {
+            // Fell in water!
+            spawnSplash(frog.x, frog.y);
+            playSplash();
+            resetFrog();
+          }
+        }
+      });
+    }
+
+    // Check if frog reached lily pad
+    if (frog.hopProgress >= 1 && frog.y < 150) {
+      lilyPads.forEach(pad => {
+        const dx = frog.x - pad.x;
+        const dy = frog.y - pad.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist < pad.radius + FROG_SIZE / 2 - 10) {
+          // Landed on lily pad!
+          playSuccess();
+          engine.end(pad.choice.is_correct, pad.choice.explanation);
+        }
+      });
+    }
+
+    // Update splash particles
+    splashParticles = splashParticles.filter(p => {
+      p.vy += 200 * dt;
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.alpha -= dt * 2;
+      return p.alpha > 0;
+    });
+  }
+
+  function spawnSplash(x, y) {
+    for (let i = 0; i < 12; i++) {
+      splashParticles.push({
+        x: x,
+        y: y,
+        vx: (Math.random() - 0.5) * 150,
+        vy: -Math.random() * 100 - 50,
+        radius: 3 + Math.random() * 4,
+        alpha: 1
+      });
+    }
+  }
+
+  function resetFrog() {
+    frog.shake = 1;
+    setTimeout(() => {
+      frog.x = W / 2;
+      frog.y = H - 50;
+      frog.targetX = W / 2;
+      frog.targetY = H - 50;
+      frog.hopProgress = 1;
+      frogOnLog = null;
+    }, 200);
+  }
+
+  function drawGame() {
+    // Background
+    ctx.fillStyle = COLORS.grass;
+    ctx.fillRect(0, 0, W, H);
+
+    // Draw water section background
+    ctx.fillStyle = COLORS.water;
+    ctx.fillRect(0, 145, W, 200);
+
+    // Draw road section background
+    ctx.fillStyle = COLORS.road;
+    ctx.fillRect(0, 390, W, 175);
+
+    // Draw road lines
+    ctx.strokeStyle = COLORS.roadLine;
+    ctx.setLineDash([15, 10]);
+    ctx.lineWidth = 2;
+    [447, 502].forEach(y => {
+      ctx.beginPath();
+      ctx.moveTo(0, y);
+      ctx.lineTo(W, y);
+      ctx.stroke();
+    });
+    ctx.setLineDash([]);
+
+    // Draw safe grass zones
+    ctx.fillStyle = COLORS.grassDark;
+    // Top grass
+    ctx.fillRect(0, 0, W, 145);
+    // Middle safe zone
+    ctx.fillRect(0, 345, W, 45);
+    // Bottom safe zone
+    ctx.fillRect(0, 565, W, 75);
+
+    // Draw grass texture stripes
+    ctx.strokeStyle = COLORS.grass;
+    ctx.lineWidth = 2;
+    for (let i = 0; i < W; i += 20) {
+      ctx.beginPath();
+      ctx.moveTo(i, 575);
+      ctx.lineTo(i + 5, 595);
+      ctx.stroke();
+    }
+
+    // Draw logs
+    lanes.filter(l => l.type === 'water').forEach(lane => {
+      lane.objects.forEach(log => {
+        // Log shadow
+        ctx.fillStyle = 'rgba(0,0,0,0.2)';
+        ctx.beginPath();
+        ctx.ellipse(log.x + 3, lane.y + 3, log.w / 2, log.h / 2 * aspectRatio, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Log body
+        ctx.fillStyle = COLORS.log;
+        ctx.beginPath();
+        ctx.ellipse(log.x, lane.y, log.w / 2, log.h / 2 * aspectRatio, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Log highlight
+        ctx.fillStyle = COLORS.logLight;
+        ctx.beginPath();
+        ctx.ellipse(log.x, lane.y - 5 * aspectRatio, log.w / 2 - 5, (log.h / 2 - 5) * aspectRatio, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Log rings
+        ctx.strokeStyle = COLORS.log;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.ellipse(log.x - log.w / 4, lane.y, 8, 8 * aspectRatio, 0, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.ellipse(log.x + log.w / 4, lane.y, 6, 6 * aspectRatio, 0, 0, Math.PI * 2);
+        ctx.stroke();
+      });
+    });
+
+    // Draw cars
+    lanes.filter(l => l.type === 'road').forEach(lane => {
+      lane.objects.forEach(car => {
+        // Car shadow
+        ctx.fillStyle = 'rgba(0,0,0,0.3)';
+        ctx.beginPath();
+        ctx.roundRect(car.x - car.w / 2 + 3, lane.y - car.h / 2 * aspectRatio + 3, car.w, car.h * aspectRatio, 6);
+        ctx.fill();
+
+        // Car body
+        ctx.fillStyle = car.color;
+        ctx.beginPath();
+        ctx.roundRect(car.x - car.w / 2, lane.y - car.h / 2 * aspectRatio, car.w, car.h * aspectRatio, 6);
+        ctx.fill();
+
+        // Car roof
+        ctx.fillStyle = adjustColor(car.color, -20);
+        ctx.beginPath();
+        ctx.roundRect(car.x - car.w / 4, lane.y - car.h / 3 * aspectRatio, car.w / 2, car.h / 2 * aspectRatio, 4);
+        ctx.fill();
+
+        // Headlights
+        ctx.fillStyle = '#F5F5F0';
+        const headlightX = lane.speed > 0 ? car.x + car.w / 2 - 6 : car.x - car.w / 2 + 6;
+        ctx.beginPath();
+        ctx.ellipse(headlightX, lane.y - 6 * aspectRatio, 3, 3 * aspectRatio, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.ellipse(headlightX, lane.y + 6 * aspectRatio, 3, 3 * aspectRatio, 0, 0, Math.PI * 2);
+        ctx.fill();
+      });
+    });
+
+    // Draw lily pads with answers
+    lilyPads.forEach((pad, i) => {
+      if (pad.alpha <= 0) return;
+
+      ctx.save();
+      ctx.globalAlpha = pad.alpha;
+      ctx.translate(pad.x, pad.y);
+      ctx.scale(pad.scale, pad.scale);
+
+      // Lily pad shadow
+      ctx.fillStyle = 'rgba(0,0,0,0.2)';
+      ctx.beginPath();
+      ctx.ellipse(3, 3 * aspectRatio, pad.radius, pad.radius * aspectRatio, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Lily pad
+      ctx.fillStyle = COLORS.lilyPad;
+      ctx.beginPath();
+      ctx.ellipse(0, 0, pad.radius, pad.radius * aspectRatio, 0, 0.1, Math.PI * 1.9);
+      ctx.lineTo(0, 0);
+      ctx.closePath();
+      ctx.fill();
+
+      // Lily pad inner
+      ctx.fillStyle = COLORS.lilyPadDark;
+      ctx.beginPath();
+      ctx.ellipse(0, 0, pad.radius * 0.6, pad.radius * 0.6 * aspectRatio, 0, 0.1, Math.PI * 1.9);
+      ctx.lineTo(0, 0);
+      ctx.closePath();
+      ctx.fill();
+
+      ctx.restore();
+
+      // Draw answer label below lily pad
+      const label = String.fromCharCode(65 + i);
+      drawText(label, pad.x, pad.y + pad.radius * aspectRatio + 20, {
+        font: "700 20px 'Belanosima', sans-serif",
+        color: '#F5F5F0'
+      });
+
+      // Draw wrapped answer text below label
+      const lines = pad.wrappedText || [pad.choice.text];
+      lines.forEach((line, lineIdx) => {
+        drawText(line, pad.x, pad.y + pad.radius * aspectRatio + 40 + lineIdx * 16, {
+          font: `${pad.fontSize}px 'Nunito', sans-serif`,
+          color: '#E6E6E0'
+        });
+      });
+    });
+
+    // Draw splash particles
+    ctx.fillStyle = COLORS.water;
+    splashParticles.forEach(p => {
+      ctx.globalAlpha = p.alpha;
+      ctx.beginPath();
+      ctx.ellipse(p.x, p.y, p.radius, p.radius * aspectRatio, 0, 0, Math.PI * 2);
+      ctx.fill();
+    });
+    ctx.globalAlpha = 1;
+
+    // Draw frog
+    if (frog.alpha > 0) {
+      ctx.save();
+      ctx.globalAlpha = frog.alpha;
+
+      let drawX = frog.x;
+      if (frog.shake > 0) {
+        drawX += Math.sin(animationTime * 50) * frog.shake * 8;
+      }
+
+      ctx.translate(drawX, frog.y);
+      ctx.scale(frog.scale, frog.scale);
+
+      // Hop squash/stretch
+      const hopSquash = frog.hopProgress < 1 ? Math.sin(frog.hopProgress * Math.PI) * 0.2 : 0;
+      ctx.scale(1 - hopSquash * 0.5, 1 + hopSquash);
+
+      // Frog shadow
+      ctx.fillStyle = 'rgba(0,0,0,0.3)';
+      ctx.beginPath();
+      ctx.ellipse(2, 4 * aspectRatio, FROG_SIZE / 2, FROG_SIZE / 3 * aspectRatio, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Frog body
+      ctx.fillStyle = COLORS.frog;
+      ctx.beginPath();
+      ctx.ellipse(0, 0, FROG_SIZE / 2, FROG_SIZE / 2.5 * aspectRatio, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Frog head
+      ctx.fillStyle = COLORS.frog;
+      ctx.beginPath();
+      ctx.ellipse(0, -FROG_SIZE / 3 * aspectRatio, FROG_SIZE / 2.5, FROG_SIZE / 3 * aspectRatio, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Frog eyes
+      ctx.fillStyle = '#FFFFFF';
+      ctx.beginPath();
+      ctx.ellipse(-8, -FROG_SIZE / 2.5 * aspectRatio, 6, 6 * aspectRatio, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.ellipse(8, -FROG_SIZE / 2.5 * aspectRatio, 6, 6 * aspectRatio, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Frog pupils
+      ctx.fillStyle = COLORS.frogEye;
+      ctx.beginPath();
+      ctx.ellipse(-8, -FROG_SIZE / 2.5 * aspectRatio, 3, 3 * aspectRatio, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.ellipse(8, -FROG_SIZE / 2.5 * aspectRatio, 3, 3 * aspectRatio, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Frog legs (back)
+      ctx.fillStyle = COLORS.frogDark;
+      ctx.beginPath();
+      ctx.ellipse(-FROG_SIZE / 2.5, FROG_SIZE / 4 * aspectRatio, 8, 12 * aspectRatio, -0.3, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.ellipse(FROG_SIZE / 2.5, FROG_SIZE / 4 * aspectRatio, 8, 12 * aspectRatio, 0.3, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.restore();
+    }
+  }
+
+  function adjustColor(color, amount) {
+    const hex = color.replace('#', '');
+    const r = Math.max(0, Math.min(255, parseInt(hex.substr(0, 2), 16) + amount));
+    const g = Math.max(0, Math.min(255, parseInt(hex.substr(2, 2), 16) + amount));
+    const b = Math.max(0, Math.min(255, parseInt(hex.substr(4, 2), 16) + amount));
+    return '#' + [r, g, b].map(x => x.toString(16).padStart(2, '0')).join('');
+  }
+
+  function handleTouch(e, type) {
+    if (gameState !== 'playing') return;
+    if (type !== 'start') return;
+
+    initAudio();
+
+    const touch = e.touches ? e.touches[0] : e.changedTouches[0];
+    const { x, y } = screenToLogical(touch.clientX, touch.clientY);
+
+    // Only hop if not already hopping
+    if (frog.hopProgress < 1) return;
+
+    // Determine hop direction based on tap position relative to frog
+    const dx = x - frog.x;
+    const dy = y - frog.y;
+
+    let newX = frog.x;
+    let newY = frog.y;
+
+    // Prioritize vertical movement for this game
+    if (Math.abs(dy) > Math.abs(dx) * 0.5 || Math.abs(dx) < 30) {
+      // Vertical hop
+      if (dy < -20) {
+        // Hop up
+        newY = frog.y - LANE_HEIGHT;
+      } else if (dy > 20) {
+        // Hop down
+        newY = frog.y + LANE_HEIGHT;
+      }
+    } else {
+      // Horizontal hop
+      if (dx < -20) {
+        newX = frog.x - 50;
+      } else if (dx > 20) {
+        newX = frog.x + 50;
+      }
+    }
+
+    // Keep frog in bounds
+    newX = Math.max(FROG_SIZE, Math.min(W - FROG_SIZE, newX));
+    newY = Math.max(60, Math.min(H - 40, newY));
+
+    // Only hop if position changed
+    if (newX !== frog.x || newY !== frog.y) {
+      frog.startX = frog.x;
+      frog.startY = frog.y;
+      frog.targetX = newX;
+      frog.targetY = newY;
+      frog.hopProgress = 0;
+      frogOnLog = null;
+      playHop();
+    }
+  }
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 4: GAME LOOP - DO NOT MODIFY                                      ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  let lastTime = performance.now();
+
+  function gameLoop(now) {
+    const dt = Math.min((now - lastTime) / 1000, 0.05);
+    lastTime = now;
+
+    ctx.setTransform(scaleX, 0, 0, scaleY, 0, 0);
+
+    if (gameState === 'playing') {
+      updateGame(dt);
+      drawGame();
+    } else {
+      drawGame();
+      drawEndScreen(dt);
+    }
+
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+    requestAnimationFrame(gameLoop);
+  }
+
+  function onTouchStart(e) {
+    e.preventDefault();
+    if (gameState === 'ended') {
+      const touch = e.touches[0];
+      const { x, y } = screenToLogical(touch.clientX, touch.clientY);
+
+      if (gameResult) {
+        if (pointInRect(x, y, restartButton)) {
+          gameState = 'playing';
+          gameResult = null;
+          gameExplanation = '';
+          confettiParticles = [];
+          initGame();
+          return;
+        }
+        if (pointInRect(x, y, nextButton)) {
+          if (window.parent && window.parent !== window) {
+            window.parent.postMessage({ type: 'quiz-next' }, '*');
+          }
+          return;
+        }
+      } else {
+        if (pointInRect(x, y, centeredRestartButton)) {
+          gameState = 'playing';
+          gameResult = null;
+          gameExplanation = '';
+          confettiParticles = [];
+          initGame();
+          return;
+        }
+      }
+    }
+    handleTouch(e, 'start');
+  }
+
+  function onTouchMove(e) {
+    e.preventDefault();
+    handleTouch(e, 'move');
+  }
+
+  function onTouchEnd(e) {
+    e.preventDefault();
+    handleTouch(e, 'end');
+  }
+
+  canvas.addEventListener('touchstart', onTouchStart, { passive: false });
+  canvas.addEventListener('touchmove', onTouchMove, { passive: false });
+  canvas.addEventListener('touchend', onTouchEnd, { passive: false });
+
+  canvas.addEventListener('mousedown', (e) => {
+    const fakeTouch = { touches: [{ clientX: e.clientX, clientY: e.clientY }], changedTouches: [{ clientX: e.clientX, clientY: e.clientY }] };
+    onTouchStart(fakeTouch);
+  });
+
+  canvas.addEventListener('mouseup', (e) => {
+    const fakeTouch = { touches: [], changedTouches: [{ clientX: e.clientX, clientY: e.clientY }] };
+    onTouchEnd(fakeTouch);
+  });
+
+  window.addEventListener('resize', resizeCanvas);
+  window.addEventListener('orientationchange', () => {
+    setTimeout(resizeCanvas, 100);
+  });
+
+  document.body.addEventListener('touchmove', (e) => e.preventDefault(), { passive: false });
+
+  resizeCanvas();
+  initGame();
+  requestAnimationFrame(gameLoop);
+  </script>
+</body>
+</html>

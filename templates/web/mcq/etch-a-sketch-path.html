@@ -1,0 +1,786 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Etch-a-Sketch Path</title>
+  <link href="https://fonts.googleapis.com/css2?family=Belanosima:wght@400;600;700&family=Nunito+Sans:wght@400;500;600;700&family=Nunito:wght@400;500;600&display=swap" rel="stylesheet">
+  <!--
+  ╔══════════════════════════════════════════════════════════════════════════════╗
+  ║  GAME FACTORY TEMPLATE                                                        ║
+  ║  This template enforces critical invariants. Follow the section markers.      ║
+  ╚══════════════════════════════════════════════════════════════════════════════╝
+  -->
+  <style>
+    /* ═══════════════════════════════════════════════════════════════════════════
+       BASE STYLES - Can be extended, not removed
+       ═══════════════════════════════════════════════════════════════════════════ */
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+    }
+    body {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      background: #1C1C1A;
+      font-family: 'Nunito Sans', system-ui, -apple-system, sans-serif;
+    }
+    #gameCanvas {
+      background: #2A2A27;
+      border-radius: 8px;
+      display: block;
+    }
+  </style>
+</head>
+<body>
+  <!-- ═══════════════════════════════════════════════════════════════════════════
+       CANVAS - Sized dynamically to fill available space
+       ═══════════════════════════════════════════════════════════════════════════ -->
+  <canvas id="gameCanvas"></canvas>
+
+  <script>
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 1: QUESTION PLACEHOLDER - DO NOT MODIFY FORMAT                    ║
+  // ║  Platform replaces this at runtime. Use these exact 60-char answers.       ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  const QUESTION = {
+    type: "mcq",
+    prompt: "Sample question text",
+    choices: [
+      { text: "This is sample answer A which is long enough to test text overflow", is_correct: true, explanation: "Why A is correct" },
+      { text: "This is sample answer B which is long enough to test text overflow", is_correct: false, explanation: "Why B is wrong" },
+      { text: "This is sample answer C which is long enough to test text overflow", is_correct: false, explanation: "Why C is wrong" },
+      { text: "This is sample answer D which is long enough to test text overflow", is_correct: false, explanation: "Why D is wrong" }
+    ],
+    isLastQuestion: false
+  };
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 2: ENGINE CORE - DO NOT MODIFY                                    ║
+  // ║  Standard engine interface and end screen. This is sacred.                 ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  const canvas = document.getElementById('gameCanvas');
+  const ctx = canvas.getContext('2d');
+
+  // Logical dimensions (game code works in this coordinate space)
+  const W = 720, H = 540;
+
+  // Scaling state (computed on resize)
+  let scale = 1;
+  let dpr = 1;
+
+  let gameState = 'playing'; // 'playing' | 'ended'
+  let gameResult = null;     // true (correct) | false (wrong)
+  let gameExplanation = '';
+  let endScreenTime = 0;
+  let confettiParticles = [];
+
+  // End screen button bounds (logical coordinates)
+  const restartButton = { x: W / 2 - 170, y: H / 2 + 60, w: 150, h: 48 };
+  const nextButton = { x: W / 2 + 20, y: H / 2 + 60, w: 150, h: 48 };
+
+  /** Check if point is inside rectangle */
+  function pointInRect(px, py, rect) {
+    return px >= rect.x && px <= rect.x + rect.w &&
+           py >= rect.y && py <= rect.y + rect.h;
+  }
+
+  /** Draw a styled button */
+  function drawButton(rect, label, color, pulse) {
+    const p = pulse ? 1 + Math.sin(endScreenTime * 4) * 0.03 : 1;
+    ctx.save();
+    ctx.translate(rect.x + rect.w / 2, rect.y + rect.h / 2);
+    ctx.scale(p, p);
+    ctx.translate(-(rect.x + rect.w / 2), -(rect.y + rect.h / 2));
+
+    // Button background
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.roundRect(rect.x, rect.y, rect.w, rect.h, 12);
+    ctx.fill();
+
+    // Button text
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = 'bold 18px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, rect.x + rect.w / 2, rect.y + rect.h / 2);
+
+    ctx.restore();
+  }
+
+  /**
+   * Resize canvas to fill available space with proper DPR scaling.
+   * Maintains logical coordinate system (720×540).
+   */
+  function resizeCanvas() {
+    dpr = window.devicePixelRatio || 1;
+
+    // Get available space
+    const availW = window.innerWidth;
+    const availH = window.innerHeight;
+
+    // Calculate scale to fit logical space (720×540) in available space
+    const scaleX = availW / W;
+    const scaleY = availH / H;
+    scale = Math.min(scaleX, scaleY);
+
+    // Physical canvas buffer (DPR-scaled for crisp rendering)
+    canvas.width = W * scale * dpr;
+    canvas.height = H * scale * dpr;
+
+    // CSS display size
+    canvas.style.width = (W * scale) + 'px';
+    canvas.style.height = (H * scale) + 'px';
+  }
+
+  /**
+   * Convert screen coordinates to logical coordinates.
+   * Use this for mouse/click events to get positions in 720×540 space.
+   */
+  function screenToLogical(screenX, screenY) {
+    const rect = canvas.getBoundingClientRect();
+    return {
+      x: (screenX - rect.left) * (W / rect.width),
+      y: (screenY - rect.top) * (H / rect.height)
+    };
+  }
+
+  const engine = {
+    /** Call this to end the game. DO NOT draw your own end screen. */
+    end(isCorrect, explanation) {
+      if (gameState === 'ended') return;
+      gameState = 'ended';
+      gameResult = isCorrect;
+      gameExplanation = explanation || '';
+      endScreenTime = 0;
+
+      // Spawn confetti for correct answers
+      if (isCorrect) {
+        for (let i = 0; i < 50; i++) {
+          confettiParticles.push({
+            x: W / 2,
+            y: H / 2,
+            vx: (Math.random() - 0.5) * 600,
+            vy: -Math.random() * 400 - 100,
+            size: 4 + Math.random() * 6,
+            color: ['#FFD700', '#FF6B6B', '#4ECDC4', '#95E1D3', '#F38181'][Math.floor(Math.random() * 5)],
+            rotation: Math.random() * Math.PI * 2,
+            rotationSpeed: (Math.random() - 0.5) * 10
+          });
+        }
+      }
+
+      // Notify parent frame
+      if (window.parent && window.parent !== window) {
+        window.parent.postMessage({
+          type: 'quiz-end',
+          isCorrect: isCorrect,
+          explanation: explanation || ''
+        }, '*');
+      }
+    }
+  };
+
+  /** STANDARD END SCREEN - DO NOT MODIFY */
+  function drawEndScreen(dt) {
+    endScreenTime += dt;
+
+    // Update confetti
+    confettiParticles = confettiParticles.filter(p => {
+      p.vy += 800 * dt; // gravity
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.rotation += p.rotationSpeed * dt;
+      p.vx *= 0.99;
+      return p.y < H + 50;
+    });
+
+    // Dark overlay
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
+    ctx.fillRect(0, 0, W, H);
+
+    // Draw confetti
+    confettiParticles.forEach(p => {
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rotation);
+      ctx.fillStyle = p.color;
+      ctx.fillRect(-p.size / 2, -p.size / 4, p.size, p.size / 2);
+      ctx.restore();
+    });
+
+    // Result emoji
+    ctx.font = '72px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(gameResult ? '🎉' : '😢', W / 2, H / 2 - 50);
+
+    // Result text
+    ctx.fillStyle = gameResult ? '#4ADE80' : '#F87171';
+    ctx.font = 'bold 36px system-ui, sans-serif';
+    ctx.fillText(gameResult ? 'Correct!' : 'Wrong!', W / 2, H / 2 + 20);
+
+    // Buttons
+    if (gameResult) {
+      // Correct: show both Restart and Next/Finish
+      drawButton(restartButton, 'Restart', '#E87A3E', true);
+      const nextLabel = QUESTION.isLastQuestion ? 'Finish' : 'Next';
+      drawButton(nextButton, nextLabel, '#4ECDC4', true);
+    } else {
+      // Wrong: show only centered Restart button
+      const centeredRestart = { x: W / 2 - 75, y: H / 2 + 60, w: 150, h: 48 };
+      drawButton(centeredRestart, 'Restart', '#E87A3E', true);
+    }
+  }
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 3: YOUR GAME CODE - IMPLEMENT THESE FUNCTIONS                     ║
+  // ║  This is where your game logic goes. See requirements below.               ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+
+  // Colors
+  const COLORS = {
+    bgPrimary: '#FAFAF7',
+    bgSurface: '#FFFFFF',
+    textPrimary: '#2B2B28',
+    textSecondary: '#5A5A54',
+    orange: '#E87A3E',
+    orangeHover: '#D66B31',
+    amber: '#F5A742',
+    cyan: '#4ECDC4',
+    success: '#6BBF59',
+    error: '#E85D4A',
+    borderSubtle: '#E6E6E0',
+    borderStrong: '#D4D4CC',
+    etchFrame: '#C41E3A', // Classic red Etch-a-Sketch frame
+    etchScreen: '#A8B5A0', // Grayish-green screen
+    drawLine: '#3A3A3A' // Dark gray line
+  };
+
+  // Audio context for sounds
+  let audioCtx = null;
+  function initAudio() {
+    if (!audioCtx) {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    }
+  }
+
+  function playSound(type) {
+    if (!audioCtx) return;
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+
+    if (type === 'draw') {
+      osc.frequency.value = 200 + Math.random() * 100;
+      osc.type = 'sawtooth';
+      gain.gain.setValueAtTime(0.02, audioCtx.currentTime);
+      gain.gain.exponentialDecayTo && gain.gain.exponentialDecayTo(0.001, audioCtx.currentTime + 0.05);
+      osc.start();
+      osc.stop(audioCtx.currentTime + 0.05);
+    } else if (type === 'correct') {
+      osc.frequency.value = 523;
+      osc.type = 'sine';
+      gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
+      gain.gain.exponentialDecayTo && gain.gain.exponentialDecayTo(0.001, audioCtx.currentTime + 0.3);
+      osc.start();
+      osc.stop(audioCtx.currentTime + 0.3);
+      setTimeout(() => {
+        const osc2 = audioCtx.createOscillator();
+        const gain2 = audioCtx.createGain();
+        osc2.connect(gain2);
+        gain2.connect(audioCtx.destination);
+        osc2.frequency.value = 659;
+        osc2.type = 'sine';
+        gain2.gain.setValueAtTime(0.1, audioCtx.currentTime);
+        osc2.start();
+        osc2.stop(audioCtx.currentTime + 0.2);
+      }, 150);
+    } else if (type === 'wrong') {
+      osc.frequency.value = 200;
+      osc.type = 'square';
+      gain.gain.setValueAtTime(0.08, audioCtx.currentTime);
+      osc.start();
+      osc.stop(audioCtx.currentTime + 0.3);
+    } else if (type === 'click') {
+      osc.frequency.value = 800;
+      osc.type = 'sine';
+      gain.gain.setValueAtTime(0.05, audioCtx.currentTime);
+      osc.start();
+      osc.stop(audioCtx.currentTime + 0.05);
+    }
+  }
+
+  // Game state
+  let penPos = { x: 0, y: 0 };
+  let drawPath = [];
+  let targets = [];
+  let obstacles = [];
+  let knobAngleH = 0;
+  let knobAngleV = 0;
+  let entranceProgress = 0;
+  let selectedTarget = null;
+  let hoverTarget = null;
+  let drawSoundTimer = 0;
+  let keysPressed = {};
+
+  // Etch-a-Sketch dimensions
+  const FRAME_PADDING = 50;
+  const SCREEN_X = FRAME_PADDING + 30;
+  const SCREEN_Y = FRAME_PADDING + 20;
+  const SCREEN_W = W - FRAME_PADDING * 2 - 60;
+  const SCREEN_H = H - FRAME_PADDING * 2 - 100;
+  const KNOB_RADIUS = 28;
+  const KNOB_LEFT_X = FRAME_PADDING + 50;
+  const KNOB_RIGHT_X = W - FRAME_PADDING - 50;
+  const KNOB_Y = H - FRAME_PADDING - 30;
+
+  // Target zones - corners of the screen
+  const TARGET_SIZE = 90;
+  const TARGET_TEXT_WIDTH = 140;
+
+  function initGame() {
+    initAudio();
+
+    // Reset state
+    penPos = {
+      x: SCREEN_X + SCREEN_W / 2,
+      y: SCREEN_Y + SCREEN_H / 2
+    };
+    drawPath = [{ x: penPos.x, y: penPos.y }];
+    knobAngleH = 0;
+    knobAngleV = 0;
+    entranceProgress = 0;
+    selectedTarget = null;
+    hoverTarget = null;
+    keysPressed = {};
+
+    // Create targets in corners with labels - positioned so pen can reach the trigger zone
+    const cornerOffset = 40; // Offset from screen edge to target center
+    const corners = [
+      { x: SCREEN_X + cornerOffset, y: SCREEN_Y + cornerOffset }, // Top-left
+      { x: SCREEN_X + SCREEN_W - cornerOffset, y: SCREEN_Y + cornerOffset }, // Top-right
+      { x: SCREEN_X + cornerOffset, y: SCREEN_Y + SCREEN_H - cornerOffset }, // Bottom-left
+      { x: SCREEN_X + SCREEN_W - cornerOffset, y: SCREEN_Y + SCREEN_H - cornerOffset } // Bottom-right
+    ];
+
+    targets = QUESTION.choices.map((choice, i) => ({
+      x: corners[i].x,
+      y: corners[i].y,
+      choice: choice,
+      scale: 0,
+      index: i
+    }));
+
+    // Create random obstacles (rectangles that block the path)
+    obstacles = [];
+    const numObstacles = 3;
+    for (let i = 0; i < numObstacles; i++) {
+      const obstW = 40 + Math.random() * 60;
+      const obstH = 30 + Math.random() * 50;
+      let obstX, obstY;
+      let valid = false;
+      let attempts = 0;
+
+      while (!valid && attempts < 50) {
+        obstX = SCREEN_X + 100 + Math.random() * (SCREEN_W - 200 - obstW);
+        obstY = SCREEN_Y + 80 + Math.random() * (SCREEN_H - 160 - obstH);
+
+        // Check if obstacle doesn't overlap with center starting area
+        const centerX = SCREEN_X + SCREEN_W / 2;
+        const centerY = SCREEN_Y + SCREEN_H / 2;
+        const distToCenter = Math.sqrt(Math.pow(obstX + obstW/2 - centerX, 2) + Math.pow(obstY + obstH/2 - centerY, 2));
+
+        valid = distToCenter > 80;
+        attempts++;
+      }
+
+      if (valid) {
+        obstacles.push({ x: obstX, y: obstY, w: obstW, h: obstH });
+      }
+    }
+  }
+
+  function updateGame(dt) {
+    if (gameState !== 'playing') return;
+
+    // Entrance animation
+    if (entranceProgress < 1) {
+      entranceProgress += dt * 2;
+      targets.forEach((t, i) => {
+        const delay = i * 0.1;
+        const progress = Math.max(0, Math.min(1, (entranceProgress - delay) / 0.3));
+        // Spring easing
+        const spring = 1 + Math.sin(progress * Math.PI * 2) * 0.2 * (1 - progress);
+        t.scale = progress * spring;
+      });
+    }
+
+    // Move pen based on arrow keys
+    const speed = 150;
+    let moved = false;
+
+    if (keysPressed['ArrowLeft'] || keysPressed['KeyA']) {
+      penPos.x -= speed * dt;
+      knobAngleH -= dt * 3;
+      moved = true;
+    }
+    if (keysPressed['ArrowRight'] || keysPressed['KeyD']) {
+      penPos.x += speed * dt;
+      knobAngleH += dt * 3;
+      moved = true;
+    }
+    if (keysPressed['ArrowUp'] || keysPressed['KeyW']) {
+      penPos.y -= speed * dt;
+      knobAngleV -= dt * 3;
+      moved = true;
+    }
+    if (keysPressed['ArrowDown'] || keysPressed['KeyS']) {
+      penPos.y += speed * dt;
+      knobAngleV += dt * 3;
+      moved = true;
+    }
+
+    // Clamp to screen bounds
+    penPos.x = Math.max(SCREEN_X + 5, Math.min(SCREEN_X + SCREEN_W - 5, penPos.x));
+    penPos.y = Math.max(SCREEN_Y + 5, Math.min(SCREEN_Y + SCREEN_H - 5, penPos.y));
+
+    // Add to path if moved
+    if (moved) {
+      const lastPoint = drawPath[drawPath.length - 1];
+      const dist = Math.sqrt(Math.pow(penPos.x - lastPoint.x, 2) + Math.pow(penPos.y - lastPoint.y, 2));
+      if (dist > 2) {
+        drawPath.push({ x: penPos.x, y: penPos.y });
+
+        // Play drawing sound occasionally
+        drawSoundTimer += dt;
+        if (drawSoundTimer > 0.1) {
+          drawSoundTimer = 0;
+          playSound('draw');
+        }
+      }
+    }
+
+    // Check if pen is in a target zone
+    hoverTarget = null;
+    for (const target of targets) {
+      const dist = Math.sqrt(Math.pow(penPos.x - target.x, 2) + Math.pow(penPos.y - target.y, 2));
+      if (dist < TARGET_SIZE / 2) {
+        hoverTarget = target;
+
+        // Check if we've drawn a path to this target (trigger when close enough)
+        if (dist < 55) {
+          selectedTarget = target;
+          if (target.choice.is_correct) {
+            playSound('correct');
+          } else {
+            playSound('wrong');
+          }
+          engine.end(target.choice.is_correct, target.choice.explanation);
+          return;
+        }
+      }
+    }
+  }
+
+  function wrapText(text, maxWidth) {
+    const words = text.split(' ');
+    const lines = [];
+    let currentLine = '';
+
+    ctx.font = "500 14px 'Nunito', sans-serif";
+
+    for (const word of words) {
+      const testLine = currentLine ? currentLine + ' ' + word : word;
+      const metrics = ctx.measureText(testLine);
+
+      if (metrics.width > maxWidth && currentLine) {
+        lines.push(currentLine);
+        currentLine = word;
+      } else {
+        currentLine = testLine;
+      }
+    }
+    if (currentLine) {
+      lines.push(currentLine);
+    }
+
+    return lines;
+  }
+
+  function drawGame() {
+    // Clear with dark background
+    ctx.fillStyle = '#1C1C1A';
+    ctx.fillRect(0, 0, W, H);
+
+    // Draw Etch-a-Sketch frame
+    ctx.save();
+
+    // Outer frame shadow
+    ctx.shadowColor = 'rgba(0, 0, 0, 0.3)';
+    ctx.shadowBlur = 20;
+    ctx.shadowOffsetY = 5;
+
+    // Main red frame
+    ctx.fillStyle = COLORS.etchFrame;
+    ctx.beginPath();
+    ctx.roundRect(FRAME_PADDING - 10, FRAME_PADDING - 10, W - FRAME_PADDING * 2 + 20, H - FRAME_PADDING * 2 + 20, 20);
+    ctx.fill();
+
+    ctx.shadowColor = 'transparent';
+
+    // Frame highlight
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.roundRect(FRAME_PADDING - 8, FRAME_PADDING - 8, W - FRAME_PADDING * 2 + 16, H - FRAME_PADDING * 2 + 16, 18);
+    ctx.stroke();
+
+    // Inner frame border
+    ctx.fillStyle = '#8A1428';
+    ctx.beginPath();
+    ctx.roundRect(SCREEN_X - 8, SCREEN_Y - 8, SCREEN_W + 16, SCREEN_H + 16, 4);
+    ctx.fill();
+
+    // Screen background (grayish-green)
+    ctx.fillStyle = COLORS.etchScreen;
+    ctx.fillRect(SCREEN_X, SCREEN_Y, SCREEN_W, SCREEN_H);
+
+    ctx.restore();
+
+    // Draw obstacles
+    ctx.fillStyle = '#7A8A72';
+    for (const obs of obstacles) {
+      ctx.fillRect(obs.x, obs.y, obs.w, obs.h);
+    }
+
+    // Draw target zones with labels
+    for (const target of targets) {
+      const isHover = hoverTarget === target;
+      const targetScale = target.scale * (isHover ? 1.05 : 1);
+
+      ctx.save();
+      ctx.translate(target.x, target.y);
+      ctx.scale(targetScale, targetScale);
+
+      // Target circle
+      ctx.beginPath();
+      ctx.arc(0, 0, TARGET_SIZE / 2, 0, Math.PI * 2);
+      ctx.fillStyle = isHover ? 'rgba(78, 205, 196, 0.3)' : 'rgba(232, 122, 62, 0.2)';
+      ctx.fill();
+      ctx.strokeStyle = isHover ? COLORS.cyan : COLORS.orange;
+      ctx.lineWidth = 3;
+      ctx.stroke();
+
+      // Draw label letter (A, B, C, D)
+      const letters = ['A', 'B', 'C', 'D'];
+      ctx.fillStyle = COLORS.textPrimary;
+      ctx.font = "700 24px 'Belanosima', sans-serif";
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(letters[target.index], 0, -10);
+
+      ctx.restore();
+
+      // Draw answer text outside target area
+      const textX = target.index % 2 === 0 ? target.x + TARGET_SIZE / 2 + 15 : target.x - TARGET_SIZE / 2 - 15;
+      const textAlign = target.index % 2 === 0 ? 'left' : 'right';
+      const textY = target.y;
+
+      ctx.font = "500 14px 'Nunito', sans-serif";
+      ctx.fillStyle = COLORS.textPrimary;
+      ctx.textAlign = textAlign;
+      ctx.textBaseline = 'middle';
+
+      // Wrap text to fit
+      const maxWidth = target.index % 2 === 0
+        ? (SCREEN_X + SCREEN_W) - textX - 10
+        : textX - SCREEN_X - 10;
+
+      const lines = wrapText(target.choice.text, Math.min(maxWidth, TARGET_TEXT_WIDTH));
+      const lineHeight = 16;
+      const totalHeight = lines.length * lineHeight;
+      const startY = textY - totalHeight / 2 + lineHeight / 2;
+
+      lines.forEach((line, i) => {
+        ctx.fillText(line, textX, startY + i * lineHeight);
+      });
+    }
+
+    // Draw the path
+    if (drawPath.length > 1) {
+      ctx.beginPath();
+      ctx.moveTo(drawPath[0].x, drawPath[0].y);
+      for (let i = 1; i < drawPath.length; i++) {
+        ctx.lineTo(drawPath[i].x, drawPath[i].y);
+      }
+      ctx.strokeStyle = COLORS.drawLine;
+      ctx.lineWidth = 2;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.stroke();
+    }
+
+    // Draw pen position (current point)
+    ctx.beginPath();
+    ctx.arc(penPos.x, penPos.y, 4, 0, Math.PI * 2);
+    ctx.fillStyle = COLORS.drawLine;
+    ctx.fill();
+
+    // Draw knobs
+    drawKnob(KNOB_LEFT_X, KNOB_Y, knobAngleH, 'H');
+    drawKnob(KNOB_RIGHT_X, KNOB_Y, knobAngleV, 'V');
+
+    // Draw brand name on frame
+    ctx.fillStyle = '#FFD700';
+    ctx.font = "700 16px 'Belanosima', sans-serif";
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('QuizHP', W / 2, H - FRAME_PADDING - 25);
+  }
+
+  function drawKnob(x, y, angle, label) {
+    ctx.save();
+    ctx.translate(x, y);
+
+    // Knob shadow
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
+    ctx.beginPath();
+    ctx.arc(3, 3, KNOB_RADIUS, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Main knob body
+    const gradient = ctx.createRadialGradient(
+      -KNOB_RADIUS * 0.3, -KNOB_RADIUS * 0.3, 0,
+      0, 0, KNOB_RADIUS
+    );
+    gradient.addColorStop(0, '#FFFFFF');
+    gradient.addColorStop(0.3, '#E0E0E0');
+    gradient.addColorStop(1, '#A0A0A0');
+
+    ctx.fillStyle = gradient;
+    ctx.beginPath();
+    ctx.arc(0, 0, KNOB_RADIUS, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Knob edge
+    ctx.strokeStyle = '#808080';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    // Rotation indicator
+    ctx.rotate(angle);
+    ctx.fillStyle = '#404040';
+    ctx.fillRect(-3, -KNOB_RADIUS + 5, 6, 10);
+
+    ctx.restore();
+  }
+
+  function handleInput(e) {
+    if (gameState !== 'playing') return;
+
+    if (e.type === 'keydown') {
+      keysPressed[e.code] = true;
+      playSound('click');
+    } else if (e.type === 'keyup') {
+      keysPressed[e.code] = false;
+    }
+  }
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 4: GAME LOOP - DO NOT MODIFY                                      ║
+  // ║  Standard loop with responsive scaling and DPR support.                    ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  let lastTime = performance.now();
+
+  function gameLoop(now) {
+    const dt = Math.min((now - lastTime) / 1000, 0.05); // Cap at 50ms
+    lastTime = now;
+
+    // Apply transform for logical coordinate system
+    ctx.setTransform(scale * dpr, 0, 0, scale * dpr, 0, 0);
+
+    if (gameState === 'playing') {
+      updateGame(dt);
+      drawGame();
+    } else {
+      drawGame(); // Draw game state behind overlay
+      drawEndScreen(dt);
+    }
+
+    // Reset transform for next frame
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+    requestAnimationFrame(gameLoop);
+  }
+
+  // Input handlers
+  document.addEventListener('keydown', (e) => {
+    if (gameState === 'ended' && (e.code === 'KeyR')) {
+      // Restart game
+      gameState = 'playing';
+      gameResult = null;
+      gameExplanation = '';
+      confettiParticles = [];
+      initGame();
+      return;
+    }
+    handleInput(e);
+  });
+
+  document.addEventListener('keyup', (e) => {
+    handleInput(e);
+  });
+
+  // Canvas click handler for end screen buttons
+  canvas.addEventListener('click', (e) => {
+    if (gameState !== 'ended') return;
+
+    const { x, y } = screenToLogical(e.clientX, e.clientY);
+
+    if (gameResult) {
+      // Correct answer: check both buttons
+      if (pointInRect(x, y, restartButton)) {
+        gameState = 'playing';
+        gameResult = null;
+        gameExplanation = '';
+        confettiParticles = [];
+        initGame();
+        return;
+      }
+      if (pointInRect(x, y, nextButton)) {
+        // Notify parent to go to next question
+        if (window.parent && window.parent !== window) {
+          window.parent.postMessage({ type: 'quiz-next' }, '*');
+        }
+        return;
+      }
+    } else {
+      // Wrong answer: check centered restart button
+      const centeredRestart = { x: W / 2 - 75, y: H / 2 + 60, w: 150, h: 48 };
+      if (pointInRect(x, y, centeredRestart)) {
+        gameState = 'playing';
+        gameResult = null;
+        gameExplanation = '';
+        confettiParticles = [];
+        initGame();
+        return;
+      }
+    }
+  });
+
+  // Handle resize
+  window.addEventListener('resize', resizeCanvas);
+
+  // Initialize
+  resizeCanvas();
+  initGame();
+  requestAnimationFrame(gameLoop);
+  </script>
+</body>
+</html>

@@ -1,0 +1,837 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Operation Tweezers Extract</title>
+  <link href="https://fonts.googleapis.com/css2?family=Belanosima:wght@400;600;700&family=Nunito+Sans:wght@400;500;600;700&family=Nunito:wght@400;500;600&display=swap" rel="stylesheet">
+  <!--
+  ╔══════════════════════════════════════════════════════════════════════════════╗
+  ║  GAME FACTORY TEMPLATE                                                        ║
+  ║  This template enforces critical invariants. Follow the section markers.      ║
+  ╚══════════════════════════════════════════════════════════════════════════════╝
+  -->
+  <style>
+    /* ═══════════════════════════════════════════════════════════════════════════
+       BASE STYLES - Can be extended, not removed
+       ═══════════════════════════════════════════════════════════════════════════ */
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+    }
+    body {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      background: #1C1C1A;
+      font-family: 'Nunito Sans', system-ui, -apple-system, sans-serif;
+    }
+    #gameCanvas {
+      background: #FAFAF7;
+      border-radius: 8px;
+      display: block;
+      cursor: none;
+    }
+  </style>
+</head>
+<body>
+  <!-- ═══════════════════════════════════════════════════════════════════════════
+       CANVAS - Sized dynamically to fill available space
+       ═══════════════════════════════════════════════════════════════════════════ -->
+  <canvas id="gameCanvas"></canvas>
+
+  <script>
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 1: QUESTION PLACEHOLDER - DO NOT MODIFY FORMAT                    ║
+  // ║  Platform replaces this at runtime. Use these exact 60-char answers.       ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  const QUESTION = {
+    type: "mcq",
+    prompt: "Sample question text",
+    choices: [
+      { text: "This is sample answer A which is long enough to test text overflow", is_correct: true, explanation: "Why A is correct" },
+      { text: "This is sample answer B which is long enough to test text overflow", is_correct: false, explanation: "Why B is wrong" },
+      { text: "This is sample answer C which is long enough to test text overflow", is_correct: false, explanation: "Why C is wrong" },
+      { text: "This is sample answer D which is long enough to test text overflow", is_correct: false, explanation: "Why D is wrong" }
+    ],
+    isLastQuestion: false
+  };
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 2: ENGINE CORE - DO NOT MODIFY                                    ║
+  // ║  Standard engine interface and end screen. This is sacred.                 ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  const canvas = document.getElementById('gameCanvas');
+  const ctx = canvas.getContext('2d');
+
+  // Logical dimensions (game code works in this coordinate space)
+  const W = 720, H = 540;
+
+  // Scaling state (computed on resize)
+  let scale = 1;
+  let dpr = 1;
+
+  let gameState = 'playing'; // 'playing' | 'ended'
+  let gameResult = null;     // true (correct) | false (wrong)
+  let gameExplanation = '';
+  let endScreenTime = 0;
+  let confettiParticles = [];
+
+  // End screen button bounds (logical coordinates)
+  const restartButton = { x: W / 2 - 170, y: H / 2 + 60, w: 150, h: 48 };
+  const nextButton = { x: W / 2 + 20, y: H / 2 + 60, w: 150, h: 48 };
+
+  /** Check if point is inside rectangle */
+  function pointInRect(px, py, rect) {
+    return px >= rect.x && px <= rect.x + rect.w &&
+           py >= rect.y && py <= rect.y + rect.h;
+  }
+
+  /** Draw a styled button */
+  function drawButton(rect, label, color, pulse) {
+    const p = pulse ? 1 + Math.sin(endScreenTime * 4) * 0.03 : 1;
+    ctx.save();
+    ctx.translate(rect.x + rect.w / 2, rect.y + rect.h / 2);
+    ctx.scale(p, p);
+    ctx.translate(-(rect.x + rect.w / 2), -(rect.y + rect.h / 2));
+
+    // Button background
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.roundRect(rect.x, rect.y, rect.w, rect.h, 12);
+    ctx.fill();
+
+    // Button text
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = 'bold 18px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, rect.x + rect.w / 2, rect.y + rect.h / 2);
+
+    ctx.restore();
+  }
+
+  /**
+   * Resize canvas to fill available space with proper DPR scaling.
+   * Maintains logical coordinate system (720×540).
+   */
+  function resizeCanvas() {
+    dpr = window.devicePixelRatio || 1;
+
+    // Get available space
+    const availW = window.innerWidth;
+    const availH = window.innerHeight;
+
+    // Calculate scale to fit logical space (720×540) in available space
+    const scaleX = availW / W;
+    const scaleY = availH / H;
+    scale = Math.min(scaleX, scaleY);
+
+    // Physical canvas buffer (DPR-scaled for crisp rendering)
+    canvas.width = W * scale * dpr;
+    canvas.height = H * scale * dpr;
+
+    // CSS display size
+    canvas.style.width = (W * scale) + 'px';
+    canvas.style.height = (H * scale) + 'px';
+  }
+
+  /**
+   * Convert screen coordinates to logical coordinates.
+   * Use this for mouse/click events to get positions in 720×540 space.
+   */
+  function screenToLogical(screenX, screenY) {
+    const rect = canvas.getBoundingClientRect();
+    return {
+      x: (screenX - rect.left) * (W / rect.width),
+      y: (screenY - rect.top) * (H / rect.height)
+    };
+  }
+
+  const engine = {
+    /** Call this to end the game. DO NOT draw your own end screen. */
+    end(isCorrect, explanation) {
+      if (gameState === 'ended') return;
+      gameState = 'ended';
+      gameResult = isCorrect;
+      gameExplanation = explanation || '';
+      endScreenTime = 0;
+
+      // Spawn confetti for correct answers
+      if (isCorrect) {
+        for (let i = 0; i < 50; i++) {
+          confettiParticles.push({
+            x: W / 2,
+            y: H / 2,
+            vx: (Math.random() - 0.5) * 600,
+            vy: -Math.random() * 400 - 100,
+            size: 4 + Math.random() * 6,
+            color: ['#FFD700', '#FF6B6B', '#4ECDC4', '#95E1D3', '#F38181'][Math.floor(Math.random() * 5)],
+            rotation: Math.random() * Math.PI * 2,
+            rotationSpeed: (Math.random() - 0.5) * 10
+          });
+        }
+      }
+
+      // Notify parent frame
+      if (window.parent && window.parent !== window) {
+        window.parent.postMessage({
+          type: 'quiz-end',
+          isCorrect: isCorrect,
+          explanation: explanation || ''
+        }, '*');
+      }
+    }
+  };
+
+  /** STANDARD END SCREEN - DO NOT MODIFY */
+  function drawEndScreen(dt) {
+    endScreenTime += dt;
+
+    // Update confetti
+    confettiParticles = confettiParticles.filter(p => {
+      p.vy += 800 * dt; // gravity
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.rotation += p.rotationSpeed * dt;
+      p.vx *= 0.99;
+      return p.y < H + 50;
+    });
+
+    // Dark overlay
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
+    ctx.fillRect(0, 0, W, H);
+
+    // Draw confetti
+    confettiParticles.forEach(p => {
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rotation);
+      ctx.fillStyle = p.color;
+      ctx.fillRect(-p.size / 2, -p.size / 4, p.size, p.size / 2);
+      ctx.restore();
+    });
+
+    // Result emoji
+    ctx.font = '72px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(gameResult ? '🎉' : '😢', W / 2, H / 2 - 50);
+
+    // Result text
+    ctx.fillStyle = gameResult ? '#4ADE80' : '#F87171';
+    ctx.font = 'bold 36px system-ui, sans-serif';
+    ctx.fillText(gameResult ? 'Correct!' : 'Wrong!', W / 2, H / 2 + 20);
+
+    // Buttons
+    if (gameResult) {
+      // Correct: show both Restart and Next/Finish
+      drawButton(restartButton, 'Restart', '#E87A3E', true);
+      const nextLabel = QUESTION.isLastQuestion ? 'Finish' : 'Next';
+      drawButton(nextButton, nextLabel, '#4ECDC4', true);
+    } else {
+      // Wrong: show only centered Restart button
+      const centeredRestart = { x: W / 2 - 75, y: H / 2 + 60, w: 150, h: 48 };
+      drawButton(centeredRestart, 'Restart', '#E87A3E', true);
+    }
+  }
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 3: YOUR GAME CODE - IMPLEMENT THESE FUNCTIONS                     ║
+  // ║  This is where your game logic goes. See requirements below.               ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+
+  // === COLORS ===
+  const COLORS = {
+    bgPrimary: '#FAFAF7',
+    bgSurface: '#FFFFFF',
+    patientBody: '#FFE4C9',
+    patientOutline: '#D4A574',
+    cavityBg: '#8B4513',
+    cavityEdge: '#E85D4A',
+    textPrimary: '#2B2B28',
+    textSecondary: '#5A5A54',
+    orange: '#E87A3E',
+    orangeHover: '#D66B31',
+    amber: '#F5A742',
+    cyan: '#4ECDC4',
+    success: '#6BBF59',
+    error: '#E85D4A',
+    borderSubtle: '#E6E6E0',
+    borderStrong: '#D4D4CC',
+    tweezersSteel: '#C0C0C0',
+    tweezersHandle: '#4A4A4A',
+    pieceColors: ['#E87A3E', '#F5A742', '#4ECDC4', '#6BBF59']
+  };
+
+  // === AUDIO ===
+  const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+
+  function playSound(type) {
+    const osc = audioContext.createOscillator();
+    const gain = audioContext.createGain();
+    osc.connect(gain);
+    gain.connect(audioContext.destination);
+
+    if (type === 'buzz') {
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(150, audioContext.currentTime);
+      gain.gain.setValueAtTime(0.3, audioContext.currentTime);
+      gain.gain.exponentialDecayTo && gain.gain.exponentialDecayTo(0.01, audioContext.currentTime + 0.3);
+      osc.start();
+      osc.stop(audioContext.currentTime + 0.3);
+    } else if (type === 'success') {
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(523, audioContext.currentTime);
+      osc.frequency.setValueAtTime(659, audioContext.currentTime + 0.1);
+      osc.frequency.setValueAtTime(784, audioContext.currentTime + 0.2);
+      gain.gain.setValueAtTime(0.2, audioContext.currentTime);
+      osc.start();
+      osc.stop(audioContext.currentTime + 0.3);
+    } else if (type === 'click') {
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(800, audioContext.currentTime);
+      gain.gain.setValueAtTime(0.1, audioContext.currentTime);
+      gain.gain.exponentialDecayTo && gain.gain.exponentialDecayTo(0.01, audioContext.currentTime + 0.05);
+      osc.start();
+      osc.stop(audioContext.currentTime + 0.05);
+    }
+  }
+
+  // === GAME STATE ===
+  let tweezers = { x: W / 2, y: 100, grabbing: false };
+  let mousePos = { x: W / 2, y: 100 };
+  let cavities = [];
+  let noseGlow = 0;
+  let buzzTime = 0;
+  let shakeOffset = { x: 0, y: 0 };
+  let entranceAnim = 0;
+  let selectedCavity = null;
+  let extracting = false;
+  let extractProgress = 0;
+  let particles = [];
+
+  // Cavity positions on the patient body
+  const CAVITY_LAYOUT = [
+    { x: 200, y: 200, w: 140, h: 90 },   // Top left (chest area)
+    { x: 380, y: 200, w: 140, h: 90 },   // Top right (chest area)
+    { x: 200, y: 340, w: 140, h: 90 },   // Bottom left (abdomen)
+    { x: 380, y: 340, w: 140, h: 90 }    // Bottom right (abdomen)
+  ];
+
+  function initGame() {
+    tweezers = { x: W / 2, y: 100, grabbing: false };
+    mousePos = { x: W / 2, y: 100 };
+    noseGlow = 0;
+    buzzTime = 0;
+    shakeOffset = { x: 0, y: 0 };
+    entranceAnim = 0;
+    selectedCavity = null;
+    extracting = false;
+    extractProgress = 0;
+    particles = [];
+
+    cavities = QUESTION.choices.map((choice, i) => ({
+      ...CAVITY_LAYOUT[i],
+      choice: choice,
+      index: i,
+      pieceY: 0,
+      hover: false,
+      extracted: false,
+      bouncePhase: Math.random() * Math.PI * 2
+    }));
+  }
+
+  function wrapText(text, maxWidth) {
+    const words = text.split(' ');
+    const lines = [];
+    let currentLine = '';
+
+    ctx.font = "500 14px 'Nunito', sans-serif";
+
+    for (const word of words) {
+      const testLine = currentLine ? currentLine + ' ' + word : word;
+      const metrics = ctx.measureText(testLine);
+      if (metrics.width > maxWidth && currentLine) {
+        lines.push(currentLine);
+        currentLine = word;
+      } else {
+        currentLine = testLine;
+      }
+    }
+    if (currentLine) {
+      lines.push(currentLine);
+    }
+    return lines;
+  }
+
+  function updateGame(dt) {
+    if (gameState !== 'playing') return;
+
+    entranceAnim = Math.min(entranceAnim + dt * 2, 1);
+
+    // Smooth tweezers movement
+    tweezers.x += (mousePos.x - tweezers.x) * Math.min(dt * 12, 1);
+    tweezers.y += (mousePos.y - tweezers.y) * Math.min(dt * 12, 1);
+
+    // Update cavity hover states and check for edge collision
+    let touchingEdge = false;
+    selectedCavity = null;
+
+    for (const cavity of cavities) {
+      if (cavity.extracted) continue;
+
+      // Piece breathing animation
+      cavity.bouncePhase += dt * 2;
+
+      // Check if tweezers tip is inside cavity
+      const tipX = tweezers.x;
+      const tipY = tweezers.y + 40;
+      const inCavity = tipX > cavity.x && tipX < cavity.x + cavity.w &&
+                       tipY > cavity.y && tipY < cavity.y + cavity.h;
+
+      // Check if touching edge (within 8px of edge while inside expanded area)
+      const edgeMargin = 8;
+      const nearCavity = tipX > cavity.x - edgeMargin && tipX < cavity.x + cavity.w + edgeMargin &&
+                         tipY > cavity.y - edgeMargin && tipY < cavity.y + cavity.h + edgeMargin;
+
+      if (nearCavity && !inCavity) {
+        touchingEdge = true;
+      }
+
+      cavity.hover = inCavity;
+      if (inCavity && tweezers.grabbing) {
+        selectedCavity = cavity;
+      }
+    }
+
+    // Handle edge collision (buzzer)
+    if (touchingEdge && tweezers.grabbing) {
+      if (buzzTime === 0) {
+        playSound('buzz');
+      }
+      buzzTime += dt;
+      noseGlow = 1;
+      shakeOffset.x = (Math.random() - 0.5) * 8;
+      shakeOffset.y = (Math.random() - 0.5) * 8;
+    } else {
+      buzzTime = 0;
+      noseGlow = Math.max(0, noseGlow - dt * 3);
+      shakeOffset.x *= 0.9;
+      shakeOffset.y *= 0.9;
+    }
+
+    // Handle extraction
+    if (extracting && selectedCavity) {
+      extractProgress += dt * 2;
+      selectedCavity.pieceY = -extractProgress * 60;
+
+      if (extractProgress >= 1) {
+        extracting = false;
+        selectedCavity.extracted = true;
+        playSound('success');
+
+        // Spawn success particles
+        for (let i = 0; i < 20; i++) {
+          particles.push({
+            x: selectedCavity.x + selectedCavity.w / 2,
+            y: selectedCavity.y + selectedCavity.h / 2,
+            vx: (Math.random() - 0.5) * 200,
+            vy: -Math.random() * 150 - 50,
+            color: COLORS.pieceColors[selectedCavity.index],
+            size: 4 + Math.random() * 4,
+            life: 1
+          });
+        }
+
+        // End game
+        const choice = selectedCavity.choice;
+        engine.end(choice.is_correct, choice.explanation);
+      }
+    }
+
+    // Update particles
+    particles = particles.filter(p => {
+      p.vy += 400 * dt;
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.life -= dt;
+      return p.life > 0;
+    });
+  }
+
+  function drawGame() {
+    ctx.save();
+    ctx.translate(shakeOffset.x, shakeOffset.y);
+
+    // Clear canvas with background
+    ctx.fillStyle = COLORS.bgPrimary;
+    ctx.fillRect(-10, -10, W + 20, H + 20);
+
+    // Draw game board outline
+    ctx.fillStyle = '#4A90A4';
+    ctx.beginPath();
+    ctx.roundRect(40, 60, W - 80, H - 80, 16);
+    ctx.fill();
+
+    // Draw patient body (light pink/beige)
+    ctx.fillStyle = COLORS.patientBody;
+    ctx.beginPath();
+    ctx.roundRect(60, 80, W - 120, H - 120, 12);
+    ctx.fill();
+
+    // Draw patient outline
+    ctx.strokeStyle = COLORS.patientOutline;
+    ctx.lineWidth = 3;
+    ctx.stroke();
+
+    // Draw head
+    ctx.fillStyle = COLORS.patientBody;
+    ctx.beginPath();
+    ctx.ellipse(360, 120, 50, 40, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = COLORS.patientOutline;
+    ctx.stroke();
+
+    // Draw eyes
+    ctx.fillStyle = '#2B2B28';
+    ctx.beginPath();
+    ctx.ellipse(345, 115, 6, 8, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.ellipse(375, 115, 6, 8, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Draw nose (classic red light-up nose)
+    const noseRadius = 12 + noseGlow * 4;
+    ctx.fillStyle = noseGlow > 0 ? '#FF0000' : '#E85D4A';
+    ctx.beginPath();
+    ctx.arc(360, 130, noseRadius, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Nose glow effect
+    if (noseGlow > 0) {
+      const gradient = ctx.createRadialGradient(360, 130, 0, 360, 130, 30);
+      gradient.addColorStop(0, `rgba(255, 0, 0, ${noseGlow * 0.5})`);
+      gradient.addColorStop(1, 'rgba(255, 0, 0, 0)');
+      ctx.fillStyle = gradient;
+      ctx.beginPath();
+      ctx.arc(360, 130, 30, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Draw mouth
+    ctx.strokeStyle = '#D4A574';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(360, 145, 15, 0.2, Math.PI - 0.2);
+    ctx.stroke();
+
+    // Draw cavities with entrance animation
+    const easeOut = 1 - Math.pow(1 - entranceAnim, 3);
+
+    cavities.forEach((cavity, i) => {
+      const delay = i * 0.15;
+      const cavityAnim = Math.max(0, Math.min(1, (entranceAnim - delay) / 0.3));
+      const scale = cavityAnim * (1 + Math.sin(cavityAnim * Math.PI) * 0.2);
+
+      if (cavityAnim <= 0) return;
+
+      ctx.save();
+      ctx.translate(cavity.x + cavity.w / 2, cavity.y + cavity.h / 2);
+      ctx.scale(scale, scale);
+      ctx.translate(-(cavity.x + cavity.w / 2), -(cavity.y + cavity.h / 2));
+
+      // Cavity background (dark)
+      ctx.fillStyle = COLORS.cavityBg;
+      ctx.beginPath();
+      ctx.roundRect(cavity.x, cavity.y, cavity.w, cavity.h, 8);
+      ctx.fill();
+
+      // Cavity edge (danger zone - red)
+      ctx.strokeStyle = cavity.hover ? COLORS.cyan : COLORS.cavityEdge;
+      ctx.lineWidth = cavity.hover ? 4 : 3;
+      ctx.stroke();
+
+      // Draw piece inside cavity
+      if (!cavity.extracted) {
+        const pieceColor = COLORS.pieceColors[i];
+        const bounceY = Math.sin(cavity.bouncePhase) * 2;
+
+        ctx.save();
+        ctx.translate(0, cavity.pieceY + bounceY);
+
+        // Piece body (rounded rectangle with organ-like shape)
+        ctx.fillStyle = pieceColor;
+        ctx.beginPath();
+        const pieceW = cavity.w - 24;
+        const pieceH = cavity.h - 24;
+        ctx.roundRect(cavity.x + 12, cavity.y + 12, pieceW, pieceH, 6);
+        ctx.fill();
+
+        // Piece highlight
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
+        ctx.beginPath();
+        ctx.roundRect(cavity.x + 14, cavity.y + 14, pieceW - 4, pieceH / 3, 4);
+        ctx.fill();
+
+        // Answer text on piece - wrap text to fit
+        ctx.fillStyle = '#FFFFFF';
+        ctx.font = "500 14px 'Nunito', sans-serif";
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+
+        const lines = wrapText(cavity.choice.text, pieceW - 10);
+        const lineHeight = 16;
+        const totalHeight = lines.length * lineHeight;
+        const startY = cavity.y + 12 + pieceH / 2 - totalHeight / 2 + lineHeight / 2;
+
+        lines.forEach((line, lineIndex) => {
+          ctx.fillText(line, cavity.x + 12 + pieceW / 2, startY + lineIndex * lineHeight);
+        });
+
+        ctx.restore();
+      }
+
+      ctx.restore();
+    });
+
+    // Draw particles
+    particles.forEach(p => {
+      ctx.globalAlpha = p.life;
+      ctx.fillStyle = p.color;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+      ctx.fill();
+    });
+    ctx.globalAlpha = 1;
+
+    // Draw tweezers
+    const tipX = tweezers.x;
+    const tipY = tweezers.y + 40;
+    const grabSpread = tweezers.grabbing ? 2 : 8;
+
+    // Tweezers shadow
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.2)';
+    ctx.beginPath();
+    ctx.ellipse(tipX + 3, tipY + 5, 8, 4, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Left arm
+    ctx.strokeStyle = COLORS.tweezersSteel;
+    ctx.lineWidth = 4;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(tweezers.x - 15, tweezers.y - 30);
+    ctx.quadraticCurveTo(tweezers.x - 10, tweezers.y + 10, tipX - grabSpread, tipY);
+    ctx.stroke();
+
+    // Right arm
+    ctx.beginPath();
+    ctx.moveTo(tweezers.x + 15, tweezers.y - 30);
+    ctx.quadraticCurveTo(tweezers.x + 10, tweezers.y + 10, tipX + grabSpread, tipY);
+    ctx.stroke();
+
+    // Handle
+    ctx.fillStyle = COLORS.tweezersHandle;
+    ctx.beginPath();
+    ctx.roundRect(tweezers.x - 20, tweezers.y - 50, 40, 25, 5);
+    ctx.fill();
+
+    // Grip texture
+    ctx.strokeStyle = '#3A3A3A';
+    ctx.lineWidth = 1;
+    for (let i = 0; i < 4; i++) {
+      ctx.beginPath();
+      ctx.moveTo(tweezers.x - 15, tweezers.y - 45 + i * 6);
+      ctx.lineTo(tweezers.x + 15, tweezers.y - 45 + i * 6);
+      ctx.stroke();
+    }
+
+    // Tweezers tips (pointed)
+    ctx.fillStyle = COLORS.tweezersSteel;
+    ctx.beginPath();
+    ctx.moveTo(tipX - grabSpread - 3, tipY - 5);
+    ctx.lineTo(tipX - grabSpread, tipY + 5);
+    ctx.lineTo(tipX - grabSpread + 3, tipY - 5);
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.beginPath();
+    ctx.moveTo(tipX + grabSpread - 3, tipY - 5);
+    ctx.lineTo(tipX + grabSpread, tipY + 5);
+    ctx.lineTo(tipX + grabSpread + 3, tipY - 5);
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.restore();
+  }
+
+  function handleInput(e) {
+    if (gameState !== 'playing') return;
+    // Keyboard not used - mouse only
+  }
+
+  // Mouse/touch handlers for tweezers
+  canvas.addEventListener('mousemove', (e) => {
+    if (gameState !== 'playing') return;
+    const pos = screenToLogical(e.clientX, e.clientY);
+    mousePos.x = pos.x;
+    mousePos.y = pos.y;
+  });
+
+  canvas.addEventListener('mousedown', (e) => {
+    if (gameState !== 'playing') return;
+    tweezers.grabbing = true;
+    playSound('click');
+
+    // Check if we're in a cavity and can extract
+    if (selectedCavity && !extracting) {
+      extracting = true;
+      extractProgress = 0;
+    }
+  });
+
+  canvas.addEventListener('mouseup', (e) => {
+    if (gameState !== 'playing') return;
+    tweezers.grabbing = false;
+    extracting = false;
+  });
+
+  canvas.addEventListener('mouseleave', () => {
+    tweezers.grabbing = false;
+    extracting = false;
+  });
+
+  // Also handle click for answer selection
+  canvas.addEventListener('click', (e) => {
+    if (gameState !== 'playing') return;
+
+    const pos = screenToLogical(e.clientX, e.clientY);
+    const tipX = pos.x;
+    const tipY = pos.y + 40;
+
+    for (const cavity of cavities) {
+      if (cavity.extracted) continue;
+
+      const inCavity = tipX > cavity.x && tipX < cavity.x + cavity.w &&
+                       tipY > cavity.y && tipY < cavity.y + cavity.h;
+
+      if (inCavity) {
+        // Direct extraction on click
+        cavity.extracted = true;
+        playSound('success');
+
+        // Spawn particles
+        for (let i = 0; i < 20; i++) {
+          particles.push({
+            x: cavity.x + cavity.w / 2,
+            y: cavity.y + cavity.h / 2,
+            vx: (Math.random() - 0.5) * 200,
+            vy: -Math.random() * 150 - 50,
+            color: COLORS.pieceColors[cavity.index],
+            size: 4 + Math.random() * 4,
+            life: 1
+          });
+        }
+
+        engine.end(cavity.choice.is_correct, cavity.choice.explanation);
+        break;
+      }
+    }
+  });
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 4: GAME LOOP - DO NOT MODIFY                                      ║
+  // ║  Standard loop with responsive scaling and DPR support.                    ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  let lastTime = performance.now();
+
+  function gameLoop(now) {
+    const dt = Math.min((now - lastTime) / 1000, 0.05); // Cap at 50ms
+    lastTime = now;
+
+    // Apply transform for logical coordinate system
+    ctx.setTransform(scale * dpr, 0, 0, scale * dpr, 0, 0);
+
+    if (gameState === 'playing') {
+      updateGame(dt);
+      drawGame();
+    } else {
+      drawGame(); // Draw game state behind overlay
+      drawEndScreen(dt);
+    }
+
+    // Reset transform for next frame
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+    requestAnimationFrame(gameLoop);
+  }
+
+  // Input handlers
+  document.addEventListener('keydown', (e) => {
+    if (gameState === 'ended' && (e.code === 'KeyR')) {
+      // Restart game
+      gameState = 'playing';
+      gameResult = null;
+      gameExplanation = '';
+      confettiParticles = [];
+      initGame();
+      return;
+    }
+    handleInput(e);
+  });
+
+  document.addEventListener('keyup', (e) => {
+    // Optional: handle key release in your handleInput
+  });
+
+  // Canvas click handler for end screen buttons
+  canvas.addEventListener('click', (e) => {
+    if (gameState !== 'ended') return;
+
+    const { x, y } = screenToLogical(e.clientX, e.clientY);
+
+    if (gameResult) {
+      // Correct answer: check both buttons
+      if (pointInRect(x, y, restartButton)) {
+        gameState = 'playing';
+        gameResult = null;
+        gameExplanation = '';
+        confettiParticles = [];
+        initGame();
+        return;
+      }
+      if (pointInRect(x, y, nextButton)) {
+        // Notify parent to go to next question
+        if (window.parent && window.parent !== window) {
+          window.parent.postMessage({ type: 'quiz-next' }, '*');
+        }
+        return;
+      }
+    } else {
+      // Wrong answer: check centered restart button
+      const centeredRestart = { x: W / 2 - 75, y: H / 2 + 60, w: 150, h: 48 };
+      if (pointInRect(x, y, centeredRestart)) {
+        gameState = 'playing';
+        gameResult = null;
+        gameExplanation = '';
+        confettiParticles = [];
+        initGame();
+        return;
+      }
+    }
+  });
+
+  // Handle resize
+  window.addEventListener('resize', resizeCanvas);
+
+  // Initialize
+  resizeCanvas();
+  initGame();
+  requestAnimationFrame(gameLoop);
+  </script>
+</body>
+</html>

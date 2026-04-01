@@ -1,0 +1,1054 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <title>Crokinole Flick</title>
+  <!--
+  ╔══════════════════════════════════════════════════════════════════════════════╗
+  ║  CROKINOLE FLICK - MOBILE                                                    ║
+  ║  Flick a disc toward target zones on a crokinole board                       ║
+  ╚══════════════════════════════════════════════════════════════════════════════╝
+  -->
+  <link href="https://fonts.googleapis.com/css2?family=Belanosima:wght@400;600;700&family=Nunito+Sans:wght@400;500;600;700&family=Nunito:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    /* ═══════════════════════════════════════════════════════════════════════════
+       BASE STYLES - Can be extended, not removed
+       ═══════════════════════════════════════════════════════════════════════════ */
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      touch-action: none; /* Prevent default touch behaviors */
+      -webkit-touch-callout: none;
+      -webkit-user-select: none;
+      user-select: none;
+    }
+    body {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      background: #1a1a2e;
+      font-family: 'Nunito Sans', system-ui, -apple-system, sans-serif;
+    }
+    #gameCanvas {
+      background: #16213e;
+      /* Canvas fills viewport via JS, these are fallbacks */
+      width: 100vw;
+      height: 100vh;
+    }
+  </style>
+</head>
+<body>
+  <!-- ═══════════════════════════════════════════════════════════════════════════
+       CANVAS - Sized dynamically to fill viewport
+       ═══════════════════════════════════════════════════════════════════════════ -->
+  <canvas id="gameCanvas"></canvas>
+
+  <script>
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 1: QUESTION PLACEHOLDER - DO NOT MODIFY FORMAT                    ║
+  // ║  Platform replaces this at runtime. Use these exact 60-char answers.       ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  const QUESTION = {
+    type: "mcq",
+    prompt: "Sample question text",
+    choices: [
+      { text: "This is sample answer A which is long enough to test text overflow", is_correct: true, explanation: "Why A is correct" },
+      { text: "This is sample answer B which is long enough to test text overflow", is_correct: false, explanation: "Why B is wrong" },
+      { text: "This is sample answer C which is long enough to test text overflow", is_correct: false, explanation: "Why C is wrong" },
+      { text: "This is sample answer D which is long enough to test text overflow", is_correct: false, explanation: "Why D is wrong" }
+    ],
+    isLastQuestion: false
+  };
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 2: ENGINE CORE (MOBILE) - DO NOT MODIFY                           ║
+  // ║  Non-uniform scaling (fills container), touch input, tap-to-restart.       ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  const canvas = document.getElementById('gameCanvas');
+  const ctx = canvas.getContext('2d');
+
+  // Logical dimensions (game code works in this coordinate space)
+  const W = 360, H = 640;
+
+  // Scaling state (computed on resize)
+  let scaleX = 1;
+  let scaleY = 1;
+  let aspectRatio = 1;  // scaleX/scaleY - use for proportional shapes
+
+  // Game state
+  let gameState = 'playing'; // 'playing' | 'ended'
+  let gameResult = null;     // true (correct) | false (wrong)
+  let gameExplanation = '';
+  let endScreenTime = 0;
+  let confettiParticles = [];
+
+  // End screen button bounds (logical coordinates)
+  const restartButton = { x: 20, y: H / 2 + 50, w: 155, h: 56 };
+  const nextButton = { x: 185, y: H / 2 + 50, w: 155, h: 56 };
+  // Centered restart button for wrong answers
+  const centeredRestartButton = { x: W / 2 - 100, y: H / 2 + 50, w: 200, h: 56 };
+
+  /** Draw a styled button with aspect-ratio aware text */
+  function drawMobileButton(rect, label, color, pulse) {
+    const textAdj = getTextScaleAdjustment();
+    const p = pulse ? 1 + Math.sin(endScreenTime * 4) * 0.03 : 1;
+
+    ctx.save();
+    ctx.translate(rect.x + rect.w / 2, rect.y + rect.h / 2);
+    ctx.scale(p, p);
+    ctx.translate(-(rect.x + rect.w / 2), -(rect.y + rect.h / 2));
+
+    // Button background
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.roundRect(rect.x, rect.y, rect.w, rect.h, 12);
+    ctx.fill();
+
+    // Button text (aspect-ratio aware)
+    ctx.save();
+    ctx.translate(rect.x + rect.w / 2, rect.y + rect.h / 2);
+    ctx.scale(textAdj / aspectRatio, textAdj);
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = 'bold 18px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, 0, 0);
+    ctx.restore();
+
+    ctx.restore();
+  }
+
+  /**
+   * Resize canvas to fill viewport completely (no letterboxing).
+   * Uses non-uniform scaling - game code works in 360×640 logical space.
+   * Use aspectRatio to draw proportionally correct shapes.
+   */
+  function resizeCanvas() {
+    const dpr = window.devicePixelRatio || 1;
+
+    // Physical canvas size (actual pixels)
+    canvas.width = window.innerWidth * dpr;
+    canvas.height = window.innerHeight * dpr;
+
+    // CSS size (fills viewport)
+    canvas.style.width = window.innerWidth + 'px';
+    canvas.style.height = window.innerHeight + 'px';
+
+    // Non-uniform scaling to fill entire canvas
+    scaleX = canvas.width / W;
+    scaleY = canvas.height / H;
+
+    // Aspect ratio for proportional shape drawing
+    // >1 means container is wider than logical space
+    // <1 means container is taller than logical space
+    aspectRatio = scaleX / scaleY;
+
+    // Recalculate text sizing on resize (implement this in SECTION 3)
+    if (typeof recalculateTextSizing === 'function') {
+      recalculateTextSizing();
+    }
+  }
+
+  // === ASPECT-RATIO-AWARE TEXT WITH CLAMPED SCALING ===
+  // Text gets stretched by non-uniform scaling, so we compensate.
+  // Also clamp the effective scale to keep text legible at all sizes.
+  const TEXT_SCALE_MIN = 0.75;
+  const TEXT_SCALE_MAX = 1.4;
+
+  function getTextScaleAdjustment() {
+    const baseScale = window.innerHeight / H;
+    const clampedScale = Math.min(TEXT_SCALE_MAX, Math.max(TEXT_SCALE_MIN, baseScale));
+    return clampedScale / baseScale;
+  }
+
+  /**
+   * Draw text with aspect-ratio compensation and clamped scaling.
+   * Use this instead of raw ctx.fillText() to prevent text stretching.
+   * Default font is 16px (minimum for answer text). Use 18-20px for better readability.
+   */
+  function drawText(text, x, y, options = {}) {
+    const { font = "500 16px system-ui, sans-serif", color = '#F5F5F0', align = 'center', baseline = 'middle' } = options;
+    ctx.save();
+    ctx.translate(x, y);
+    const adj = getTextScaleAdjustment();
+    ctx.scale(adj / aspectRatio, adj);
+    ctx.font = font;
+    ctx.fillStyle = color;
+    ctx.textAlign = align;
+    ctx.textBaseline = baseline;
+    ctx.fillText(text, 0, 0);
+    ctx.restore();
+  }
+
+  /**
+   * Convert screen coordinates to logical coordinates.
+   * Use this in handleTouch to get positions in 360×640 space.
+   */
+  function screenToLogical(screenX, screenY) {
+    const dpr = window.devicePixelRatio || 1;
+    const rect = canvas.getBoundingClientRect();
+    const canvasX = (screenX - rect.left) * dpr;
+    const canvasY = (screenY - rect.top) * dpr;
+    return {
+      x: canvasX / scaleX,
+      y: canvasY / scaleY
+    };
+  }
+
+  /**
+   * Check if a point is inside a rectangle (logical coordinates).
+   */
+  function pointInRect(px, py, rect) {
+    return px >= rect.x && px <= rect.x + rect.w &&
+           py >= rect.y && py <= rect.y + rect.h;
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // TEXT UTILITIES - Dynamic wrapping and font sizing
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  /**
+   * Wrap text to fit within a maximum width (in logical coordinates).
+   * Accounts for canvas transforms applied by drawText().
+   *
+   * @param {string} text - The text to wrap
+   * @param {number} maxWidth - Maximum width in logical coordinates
+   * @param {string} font - CSS font string (e.g., "16px 'Nunito', sans-serif")
+   * @param {number} maxLines - Maximum number of lines (default 3)
+   * @returns {string[]} Array of text lines
+   */
+  function wrapText(text, maxWidth, font, maxLines = 3) {
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.font = font;
+    const adj = getTextScaleAdjustment();
+    const maxRawWidth = maxWidth * aspectRatio / adj;
+    const words = text.split(' ');
+    const lines = [];
+    let currentLine = '';
+    words.forEach(word => {
+      const testLine = currentLine ? currentLine + ' ' + word : word;
+      if (ctx.measureText(testLine).width > maxRawWidth && currentLine) {
+        lines.push(currentLine);
+        currentLine = word;
+      } else {
+        currentLine = testLine;
+      }
+    });
+    if (currentLine) lines.push(currentLine);
+    ctx.restore();
+    return lines.slice(0, maxLines);
+  }
+
+  /**
+   * Find the optimal font size to fit content in available space.
+   * Tries font sizes from max to min until content fits.
+   *
+   * @param {Object} options
+   * @param {string[]} options.texts - Array of text strings to fit
+   * @param {number} options.maxWidth - Maximum width for text wrapping
+   * @param {number} options.availableHeight - Total height available for all texts
+   * @param {number} options.minFont - Minimum font size (default 12)
+   * @param {number} options.maxFont - Maximum font size (default 18)
+   * @param {number} options.itemPadding - Vertical padding per text item (default 4)
+   * @param {string} options.fontFamily - Font family (default "'Nunito Sans', sans-serif")
+   * @returns {{ fontSize: number, wrappedTexts: string[][] }} Optimal font size and pre-wrapped texts
+   */
+  function findOptimalFontSize(options) {
+    const {
+      texts,
+      maxWidth,
+      availableHeight,
+      minFont = 12,
+      maxFont = 18,
+      itemPadding = 4,
+      fontFamily = "'Nunito Sans', sans-serif"
+    } = options;
+
+    let bestFontSize = minFont;
+    let bestWrappedTexts = [];
+
+    for (let fontSize = maxFont; fontSize >= minFont; fontSize -= 0.5) {
+      const font = `${fontSize}px ${fontFamily}`;
+      const lineHeight = fontSize + 2;
+
+      let totalHeight = 0;
+      const wrappedTexts = [];
+
+      for (const text of texts) {
+        const lines = wrapText(text, maxWidth, font);
+        wrappedTexts.push(lines);
+        totalHeight += itemPadding + lines.length * lineHeight;
+      }
+
+      if (totalHeight <= availableHeight) {
+        bestFontSize = fontSize;
+        bestWrappedTexts = wrappedTexts;
+        break;
+      }
+
+      bestWrappedTexts = wrappedTexts;
+    }
+
+    return { fontSize: bestFontSize, wrappedTexts: bestWrappedTexts };
+  }
+
+  const engine = {
+    /** Call this to end the game. DO NOT draw your own end screen. */
+    end(isCorrect, explanation) {
+      if (gameState === 'ended') return;
+      gameState = 'ended';
+      gameResult = isCorrect;
+      gameExplanation = explanation || '';
+      endScreenTime = 0;
+
+      // Spawn confetti for correct answers
+      if (isCorrect) {
+        for (let i = 0; i < 50; i++) {
+          confettiParticles.push({
+            x: W / 2,
+            y: H / 2,
+            vx: (Math.random() - 0.5) * 400,
+            vy: -Math.random() * 300 - 80,
+            size: 4 + Math.random() * 6,
+            color: ['#FFD700', '#FF6B6B', '#4ECDC4', '#95E1D3', '#F38181'][Math.floor(Math.random() * 5)],
+            rotation: Math.random() * Math.PI * 2,
+            rotationSpeed: (Math.random() - 0.5) * 10
+          });
+        }
+      }
+
+      // Notify parent frame
+      if (window.parent && window.parent !== window) {
+        window.parent.postMessage({
+          type: 'quiz-end',
+          isCorrect: isCorrect,
+          explanation: explanation || ''
+        }, '*');
+      }
+    }
+  };
+
+  /** STANDARD END SCREEN (MOBILE) - DO NOT MODIFY */
+  function drawEndScreen(dt) {
+    endScreenTime += dt;
+
+    // Update confetti
+    confettiParticles = confettiParticles.filter(p => {
+      p.vy += 600 * dt; // gravity
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.rotation += p.rotationSpeed * dt;
+      p.vx *= 0.99;
+      return p.y < H + 50;
+    });
+
+    // Dark overlay
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
+    ctx.fillRect(0, 0, W, H);
+
+    // Draw confetti
+    confettiParticles.forEach(p => {
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rotation);
+      ctx.fillStyle = p.color;
+      ctx.fillRect(-p.size / 2, -p.size / 4, p.size, p.size / 2);
+      ctx.restore();
+    });
+
+    // Result emoji (aspect-ratio aware)
+    const textAdj = getTextScaleAdjustment();
+    ctx.save();
+    ctx.translate(W / 2, H / 2 - 80);
+    ctx.scale(textAdj / aspectRatio, textAdj);
+    ctx.font = '64px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(gameResult ? '🎉' : '😢', 0, 0);
+    ctx.restore();
+
+    // Result text (aspect-ratio aware)
+    ctx.save();
+    ctx.translate(W / 2, H / 2 - 10);
+    ctx.scale(textAdj / aspectRatio, textAdj);
+    ctx.fillStyle = gameResult ? '#4ADE80' : '#F87171';
+    ctx.font = 'bold 32px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(gameResult ? 'Correct!' : 'Wrong!', 0, 0);
+    ctx.restore();
+
+    // Buttons
+    if (gameResult) {
+      // Correct: show both Restart and Next/Finish
+      drawMobileButton(restartButton, 'Restart', '#E87A3E', true);
+      const nextLabel = QUESTION.isLastQuestion ? 'Finish' : 'Next';
+      drawMobileButton(nextButton, nextLabel, '#4ECDC4', true);
+    } else {
+      // Wrong: show only centered Restart button
+      drawMobileButton(centeredRestartButton, 'Restart', '#E87A3E', true);
+    }
+  }
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 3: YOUR GAME CODE - IMPLEMENT THESE FUNCTIONS                     ║
+  // ║  Crokinole Flick - Flick disc toward answer zones on a circular board      ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+
+  // Game colors from QuizHP palette
+  const COLORS = {
+    boardOuter: '#8B4513',      // Saddle brown for outer ring
+    boardMiddle: '#D2691E',     // Chocolate for middle ring
+    boardInner: '#DEB887',      // Burlywood for inner ring
+    boardCenter: '#F5A742',     // Amber for center
+    disc: '#E87A3E',            // Orange primary
+    discHighlight: '#F5A742',   // Amber
+    zoneA: '#4ECDC4',           // Cyan
+    zoneB: '#6BBF59',           // Success green
+    zoneC: '#E87A3E',           // Orange
+    zoneD: '#F5A742',           // Amber
+    background: '#FAFAF7',      // Light background
+    text: '#2B2B28',            // Dark text
+    lineGuide: 'rgba(232, 122, 62, 0.5)'  // Translucent orange
+  };
+
+  // Game state
+  let disc = null;
+  let zones = [];
+  let touchStart = null;
+  let isDragging = false;
+  let animationTime = 0;
+  let boardParticles = [];
+
+  // Board dimensions
+  const BOARD_CENTER_X = W / 2;
+  const BOARD_CENTER_Y = 250;
+  const BOARD_RADIUS = 140;
+
+  // Disc starting position
+  const DISC_START_X = W / 2;
+  const DISC_START_Y = 530;
+  const DISC_RADIUS = 18;
+
+  // Physics constants
+  const FRICTION = 0.985;
+  const MIN_VELOCITY = 5;
+  const MAX_POWER = 800;
+
+  // Audio context for sounds
+  let audioCtx = null;
+
+  function initAudio() {
+    if (!audioCtx) {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    }
+  }
+
+  function playSound(type) {
+    if (!audioCtx) return;
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+
+    if (type === 'flick') {
+      osc.frequency.setValueAtTime(300, audioCtx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(150, audioCtx.currentTime + 0.1);
+      gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.15);
+      osc.start();
+      osc.stop(audioCtx.currentTime + 0.15);
+    } else if (type === 'correct') {
+      osc.frequency.setValueAtTime(523.25, audioCtx.currentTime);
+      osc.frequency.setValueAtTime(659.25, audioCtx.currentTime + 0.1);
+      osc.frequency.setValueAtTime(783.99, audioCtx.currentTime + 0.2);
+      gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.4);
+      osc.start();
+      osc.stop(audioCtx.currentTime + 0.4);
+    } else if (type === 'wrong') {
+      osc.frequency.setValueAtTime(200, audioCtx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(100, audioCtx.currentTime + 0.3);
+      gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.3);
+      osc.start();
+      osc.stop(audioCtx.currentTime + 0.3);
+    } else if (type === 'slide') {
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(80, audioCtx.currentTime);
+      gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.05);
+      osc.start();
+      osc.stop(audioCtx.currentTime + 0.05);
+    }
+  }
+
+  function initGame() {
+    // Initialize disc at starting position
+    disc = {
+      x: DISC_START_X,
+      y: DISC_START_Y,
+      vx: 0,
+      vy: 0,
+      moving: false,
+      scale: 0,
+      bouncePhase: 0
+    };
+
+    // Create 4 answer zones in quadrants of the board
+    const zoneColors = [COLORS.zoneA, COLORS.zoneB, COLORS.zoneC, COLORS.zoneD];
+    const zoneRadius = 35;
+    const zoneDistance = 65;
+
+    // Position zones: A=top-left, B=top-right, C=bottom-left, D=bottom-right
+    const zoneAngles = [
+      Math.PI * 1.25, // A: 225° (top-left because Y is inverted in canvas)
+      Math.PI * 1.75, // B: 315° (top-right)
+      Math.PI * 0.75, // C: 135° (bottom-left)
+      Math.PI * 0.25  // D: 45° (bottom-right)
+    ];
+
+    zones = QUESTION.choices.map((choice, i) => {
+      const angle = zoneAngles[i];
+      return {
+        x: BOARD_CENTER_X + Math.cos(angle) * zoneDistance,
+        y: BOARD_CENTER_Y + Math.sin(angle) * zoneDistance,
+        radius: zoneRadius,
+        color: zoneColors[i],
+        choice: choice,
+        index: i,
+        scale: 0,
+        pulsePhase: i * 0.5
+      };
+    });
+
+    touchStart = null;
+    isDragging = false;
+    animationTime = 0;
+    boardParticles = [];
+
+    // Call text sizing
+    recalculateTextSizing();
+  }
+
+  function recalculateTextSizing() {
+    if (!zones || zones.length === 0) return;
+
+    // Calculate wrapped text for each zone
+    const maxWidth = 70; // Zone width for text
+    zones.forEach((zone, i) => {
+      const font = "600 14px 'Nunito Sans', sans-serif";
+      zone.wrappedText = wrapText(QUESTION.choices[i].text, maxWidth, font, 3);
+      zone.fontSize = 14;
+    });
+  }
+
+  function updateGame(dt) {
+    if (gameState !== 'playing') return;
+
+    animationTime += dt;
+
+    // Animate entrance
+    if (disc.scale < 1) {
+      disc.scale = Math.min(1, disc.scale + dt * 4);
+    }
+
+    zones.forEach((zone, i) => {
+      if (zone.scale < 1) {
+        zone.scale = Math.min(1, zone.scale + dt * 3 * (1 - i * 0.15));
+      }
+      zone.pulsePhase += dt * 2;
+    });
+
+    // Update disc physics
+    if (disc.moving) {
+      disc.x += disc.vx * dt;
+      disc.y += disc.vy * dt;
+
+      // Apply friction
+      disc.vx *= FRICTION;
+      disc.vy *= FRICTION;
+
+      // Play slide sound occasionally
+      if (Math.random() < 0.1 && (Math.abs(disc.vx) > 50 || Math.abs(disc.vy) > 50)) {
+        playSound('slide');
+      }
+
+      // Add trail particles
+      if (Math.random() < 0.3) {
+        boardParticles.push({
+          x: disc.x,
+          y: disc.y,
+          vx: (Math.random() - 0.5) * 20,
+          vy: (Math.random() - 0.5) * 20,
+          life: 1,
+          size: 3 + Math.random() * 3,
+          color: COLORS.disc
+        });
+      }
+
+      // Check collision with board boundary
+      const distFromCenter = Math.sqrt(
+        Math.pow(disc.x - BOARD_CENTER_X, 2) +
+        Math.pow((disc.y - BOARD_CENTER_Y) * aspectRatio, 2)
+      );
+
+      if (distFromCenter > BOARD_RADIUS - DISC_RADIUS) {
+        // Bounce off boundary
+        const angle = Math.atan2(disc.y - BOARD_CENTER_Y, disc.x - BOARD_CENTER_X);
+        const normalX = Math.cos(angle);
+        const normalY = Math.sin(angle);
+        const dot = disc.vx * normalX + disc.vy * normalY;
+        disc.vx -= 2 * dot * normalX * 0.6;
+        disc.vy -= 2 * dot * normalY * 0.6;
+
+        // Push back inside
+        disc.x = BOARD_CENTER_X + normalX * (BOARD_RADIUS - DISC_RADIUS - 2);
+        disc.y = BOARD_CENTER_Y + normalY * (BOARD_RADIUS - DISC_RADIUS - 2);
+      }
+
+      // Check if disc stopped
+      const speed = Math.sqrt(disc.vx * disc.vx + disc.vy * disc.vy);
+      if (speed < MIN_VELOCITY) {
+        disc.moving = false;
+        disc.vx = 0;
+        disc.vy = 0;
+
+        // Check which zone disc is in
+        let hitZone = null;
+        for (const zone of zones) {
+          const distToZone = Math.sqrt(
+            Math.pow(disc.x - zone.x, 2) +
+            Math.pow((disc.y - zone.y) * aspectRatio, 2)
+          );
+          if (distToZone < zone.radius) {
+            hitZone = zone;
+            break;
+          }
+        }
+
+        if (hitZone) {
+          // Selected an answer
+          if (hitZone.choice.is_correct) {
+            playSound('correct');
+          } else {
+            playSound('wrong');
+          }
+          setTimeout(() => {
+            engine.end(hitZone.choice.is_correct, hitZone.choice.explanation);
+          }, 300);
+        } else {
+          // Missed - reset disc
+          disc.x = DISC_START_X;
+          disc.y = DISC_START_Y;
+          disc.bouncePhase = 0;
+        }
+      }
+    } else {
+      // Idle bounce animation
+      disc.bouncePhase += dt * 3;
+    }
+
+    // Update particles
+    boardParticles = boardParticles.filter(p => {
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.life -= dt * 2;
+      return p.life > 0;
+    });
+  }
+
+  function drawGame() {
+    // Clear with background
+    ctx.fillStyle = COLORS.background;
+    ctx.fillRect(0, 0, W, H);
+
+    // Draw board (outer ring)
+    ctx.fillStyle = COLORS.boardOuter;
+    ctx.beginPath();
+    ctx.ellipse(BOARD_CENTER_X, BOARD_CENTER_Y, BOARD_RADIUS, BOARD_RADIUS * aspectRatio, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Board middle ring
+    ctx.fillStyle = COLORS.boardMiddle;
+    ctx.beginPath();
+    ctx.ellipse(BOARD_CENTER_X, BOARD_CENTER_Y, BOARD_RADIUS * 0.85, BOARD_RADIUS * 0.85 * aspectRatio, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Board inner ring
+    ctx.fillStyle = COLORS.boardInner;
+    ctx.beginPath();
+    ctx.ellipse(BOARD_CENTER_X, BOARD_CENTER_Y, BOARD_RADIUS * 0.6, BOARD_RADIUS * 0.6 * aspectRatio, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Board center
+    ctx.fillStyle = COLORS.boardCenter;
+    ctx.beginPath();
+    ctx.ellipse(BOARD_CENTER_X, BOARD_CENTER_Y, BOARD_RADIUS * 0.15, BOARD_RADIUS * 0.15 * aspectRatio, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Draw concentric ring lines
+    ctx.strokeStyle = 'rgba(43, 43, 40, 0.2)';
+    ctx.lineWidth = 1;
+    [0.4, 0.7, 0.9].forEach(r => {
+      ctx.beginPath();
+      ctx.ellipse(BOARD_CENTER_X, BOARD_CENTER_Y, BOARD_RADIUS * r, BOARD_RADIUS * r * aspectRatio, 0, 0, Math.PI * 2);
+      ctx.stroke();
+    });
+
+    // Draw answer zones with animation
+    zones.forEach((zone, i) => {
+      const pulse = 1 + Math.sin(zone.pulsePhase) * 0.05;
+      const scale = zone.scale * pulse;
+      const zoneR = Math.max(1, zone.radius * scale);
+      const zoneRY = Math.max(1, zoneR * aspectRatio);
+
+      // Zone background
+      ctx.fillStyle = zone.color;
+      ctx.globalAlpha = 0.8;
+      ctx.beginPath();
+      ctx.ellipse(zone.x, zone.y, zoneR, zoneRY, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.globalAlpha = 1;
+
+      // Zone border
+      ctx.strokeStyle = '#2B2B28';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.ellipse(zone.x, zone.y, zoneR, zoneRY, 0, 0, Math.PI * 2);
+      ctx.stroke();
+
+      // Zone letter (A, B, C, D)
+      if (zone.scale > 0.3) {
+        const letter = String.fromCharCode(65 + i);
+        drawText(letter, zone.x, zone.y, {
+          font: "bold 24px 'Belanosima', sans-serif",
+          color: '#FFFFFF'
+        });
+      }
+    });
+
+    // Draw particles
+    boardParticles.forEach(p => {
+      ctx.globalAlpha = p.life;
+      ctx.fillStyle = p.color;
+      const pR = Math.max(1, p.size);
+      const pRY = Math.max(1, pR * aspectRatio);
+      ctx.beginPath();
+      ctx.ellipse(p.x, p.y, pR, pRY, 0, 0, Math.PI * 2);
+      ctx.fill();
+    });
+    ctx.globalAlpha = 1;
+
+    // Draw flick guide line if dragging
+    if (isDragging && touchStart) {
+      ctx.strokeStyle = COLORS.lineGuide;
+      ctx.lineWidth = 3;
+      ctx.setLineDash([10, 5]);
+      ctx.beginPath();
+      ctx.moveTo(disc.x, disc.y);
+      // Draw line in opposite direction of drag (preview trajectory)
+      const dx = disc.x - touchStart.currentX;
+      const dy = disc.y - touchStart.currentY;
+      ctx.lineTo(disc.x + dx * 0.5, disc.y + dy * 0.5);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      // Draw power indicator
+      const power = Math.min(1, Math.sqrt(dx * dx + dy * dy) / 150);
+      const barWidth = 60;
+      const barHeight = 8;
+      const barX = disc.x - barWidth / 2;
+      const barY = disc.y + 35;
+
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
+      ctx.beginPath();
+      ctx.roundRect(barX, barY, barWidth, barHeight * aspectRatio, 4);
+      ctx.fill();
+
+      ctx.fillStyle = power > 0.7 ? '#E85D4A' : COLORS.disc;
+      ctx.beginPath();
+      ctx.roundRect(barX, barY, barWidth * power, barHeight * aspectRatio, 4);
+      ctx.fill();
+    }
+
+    // Draw disc with bounce animation
+    if (!disc.moving) {
+      const bounce = Math.sin(disc.bouncePhase) * 3;
+      const discY = disc.y + bounce;
+      const discScale = Math.max(0.1, disc.scale);
+      const discR = DISC_RADIUS * discScale;
+      const discRY = Math.max(1, discR * aspectRatio);
+
+      // Disc shadow
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.2)';
+      ctx.beginPath();
+      ctx.ellipse(disc.x + 2, discY + 4, discR, discRY, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Disc body
+      ctx.fillStyle = COLORS.disc;
+      ctx.beginPath();
+      ctx.ellipse(disc.x, discY, discR, discRY, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Disc highlight
+      const hlR = Math.max(1, DISC_RADIUS * 0.4 * discScale);
+      const hlRY = Math.max(1, hlR * aspectRatio);
+      ctx.fillStyle = COLORS.discHighlight;
+      ctx.beginPath();
+      ctx.ellipse(disc.x - 4, discY - 4, hlR, hlRY, 0, 0, Math.PI * 2);
+      ctx.fill();
+    } else {
+      // Moving disc
+      const movDiscR = DISC_RADIUS;
+      const movDiscRY = Math.max(1, movDiscR * aspectRatio);
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.2)';
+      ctx.beginPath();
+      ctx.ellipse(disc.x + 2, disc.y + 2, movDiscR, movDiscRY, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.fillStyle = COLORS.disc;
+      ctx.beginPath();
+      ctx.ellipse(disc.x, disc.y, movDiscR, movDiscRY, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      const movHlR = Math.max(1, DISC_RADIUS * 0.4);
+      const movHlRY = Math.max(1, movHlR * aspectRatio);
+      ctx.fillStyle = COLORS.discHighlight;
+      ctx.beginPath();
+      ctx.ellipse(disc.x - 3, disc.y - 3, movHlR, movHlRY, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Draw answer text boxes below board
+    const textBoxY = 420;
+    const boxHeight = 50;
+    const boxGap = 6;
+    const boxWidth = 170;
+
+    zones.forEach((zone, i) => {
+      const row = Math.floor(i / 2);
+      const col = i % 2;
+      const boxX = col === 0 ? 10 : W - boxWidth - 10;
+      const boxY = textBoxY + row * (boxHeight + boxGap);
+
+      // Box background
+      ctx.fillStyle = zone.color;
+      ctx.globalAlpha = 0.15;
+      ctx.beginPath();
+      ctx.roundRect(boxX, boxY, boxWidth, boxHeight, 8);
+      ctx.fill();
+      ctx.globalAlpha = 1;
+
+      // Box border
+      ctx.strokeStyle = zone.color;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.roundRect(boxX, boxY, boxWidth, boxHeight, 8);
+      ctx.stroke();
+
+      // Letter badge
+      const letter = String.fromCharCode(65 + i);
+      const badgeX = boxX + 16;
+      const badgeY = boxY + boxHeight / 2;
+
+      ctx.fillStyle = zone.color;
+      ctx.beginPath();
+      ctx.ellipse(badgeX, badgeY, 12, 12 * aspectRatio, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      drawText(letter, badgeX, badgeY, {
+        font: "bold 14px 'Belanosima', sans-serif",
+        color: '#FFFFFF'
+      });
+
+      // Answer text with wrapping
+      const textX = boxX + 36;
+      const lines = zone.wrappedText || [zone.choice.text];
+      const lineHeight = 16;
+      const totalTextHeight = lines.length * lineHeight;
+      const startY = boxY + (boxHeight - totalTextHeight) / 2 + lineHeight / 2;
+
+      lines.forEach((line, lineIdx) => {
+        drawText(line, textX, startY + lineIdx * lineHeight, {
+          font: "500 14px 'Nunito', sans-serif",
+          color: COLORS.text,
+          align: 'left'
+        });
+      });
+    });
+  }
+
+  function handleTouch(e, type) {
+    if (gameState !== 'playing') return;
+    if (disc.moving) return;
+
+    const touch = e.touches[0] || e.changedTouches[0];
+    const { x, y } = screenToLogical(touch.clientX, touch.clientY);
+
+    if (type === 'start') {
+      // Check if touching the disc
+      const distToDisc = Math.sqrt(
+        Math.pow(x - disc.x, 2) +
+        Math.pow((y - disc.y) * aspectRatio, 2)
+      );
+
+      if (distToDisc < DISC_RADIUS * 2.5) {
+        initAudio();
+        isDragging = true;
+        touchStart = {
+          startX: x,
+          startY: y,
+          currentX: x,
+          currentY: y
+        };
+      }
+    } else if (type === 'move' && isDragging) {
+      touchStart.currentX = x;
+      touchStart.currentY = y;
+    } else if (type === 'end' && isDragging) {
+      isDragging = false;
+
+      if (touchStart) {
+        // Calculate flick velocity (opposite direction of drag)
+        const dx = disc.x - touchStart.currentX;
+        const dy = disc.y - touchStart.currentY;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+
+        if (dist > 20) {
+          const power = Math.min(dist / 150, 1);
+          const angle = Math.atan2(dy, dx);
+
+          disc.vx = Math.cos(angle) * power * MAX_POWER;
+          disc.vy = Math.sin(angle) * power * MAX_POWER;
+          disc.moving = true;
+
+          playSound('flick');
+        }
+      }
+
+      touchStart = null;
+    }
+  }
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 4: GAME LOOP - DO NOT MODIFY                                      ║
+  // ║  Standard loop with responsive scaling and touch handling.                 ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  let lastTime = performance.now();
+
+  function gameLoop(now) {
+    const dt = Math.min((now - lastTime) / 1000, 0.05); // Cap at 50ms
+    lastTime = now;
+
+    // Apply transform for logical coordinate system (non-uniform scaling)
+    ctx.setTransform(scaleX, 0, 0, scaleY, 0, 0);
+
+    if (gameState === 'playing') {
+      updateGame(dt);
+      drawGame();
+    } else {
+      drawGame(); // Draw game state behind overlay
+      drawEndScreen(dt);
+    }
+
+    // Reset transform for next frame
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+    requestAnimationFrame(gameLoop);
+  }
+
+  // Touch handlers
+  function onTouchStart(e) {
+    e.preventDefault();
+    if (gameState === 'ended') {
+      const touch = e.touches[0];
+      const { x, y } = screenToLogical(touch.clientX, touch.clientY);
+
+      if (gameResult) {
+        // Correct answer: check both buttons
+        if (pointInRect(x, y, restartButton)) {
+          gameState = 'playing';
+          gameResult = null;
+          gameExplanation = '';
+          confettiParticles = [];
+          initGame();
+          return;
+        }
+        if (pointInRect(x, y, nextButton)) {
+          // Notify parent to go to next question
+          if (window.parent && window.parent !== window) {
+            window.parent.postMessage({ type: 'quiz-next' }, '*');
+          }
+          return;
+        }
+      } else {
+        // Wrong answer: check centered restart button
+        if (pointInRect(x, y, centeredRestartButton)) {
+          gameState = 'playing';
+          gameResult = null;
+          gameExplanation = '';
+          confettiParticles = [];
+          initGame();
+          return;
+        }
+      }
+    }
+    handleTouch(e, 'start');
+  }
+
+  function onTouchMove(e) {
+    e.preventDefault();
+    handleTouch(e, 'move');
+  }
+
+  function onTouchEnd(e) {
+    e.preventDefault();
+    handleTouch(e, 'end');
+  }
+
+  canvas.addEventListener('touchstart', onTouchStart, { passive: false });
+  canvas.addEventListener('touchmove', onTouchMove, { passive: false });
+  canvas.addEventListener('touchend', onTouchEnd, { passive: false });
+
+  // Also support mouse for testing in browser
+  canvas.addEventListener('mousedown', (e) => {
+    const fakeTouch = { touches: [{ clientX: e.clientX, clientY: e.clientY }], changedTouches: [{ clientX: e.clientX, clientY: e.clientY }] };
+    onTouchStart(fakeTouch);
+  });
+
+  canvas.addEventListener('mousemove', (e) => {
+    if (isDragging) {
+      const fakeTouch = { touches: [{ clientX: e.clientX, clientY: e.clientY }], changedTouches: [{ clientX: e.clientX, clientY: e.clientY }] };
+      handleTouch(fakeTouch, 'move');
+    }
+  });
+
+  canvas.addEventListener('mouseup', (e) => {
+    const fakeTouch = { touches: [], changedTouches: [{ clientX: e.clientX, clientY: e.clientY }] };
+    onTouchEnd(fakeTouch);
+  });
+
+  // Handle resize
+  window.addEventListener('resize', resizeCanvas);
+  window.addEventListener('orientationchange', () => {
+    setTimeout(resizeCanvas, 100); // Delay for orientation change to complete
+  });
+
+  // Prevent pull-to-refresh and overscroll
+  document.body.addEventListener('touchmove', (e) => e.preventDefault(), { passive: false });
+
+  // Initialize
+  resizeCanvas();
+  initGame();
+  requestAnimationFrame(gameLoop);
+  </script>
+</body>
+</html>

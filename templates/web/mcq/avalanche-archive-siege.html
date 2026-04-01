@@ -1,0 +1,1077 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Avalanche Archive Siege</title>
+  <link href="https://fonts.googleapis.com/css2?family=Belanosima:wght@400;600;700&family=Nunito+Sans:wght@400;500;600;700&family=Nunito:wght@400;500;600&display=swap" rel="stylesheet">
+  <!--
+  ╔══════════════════════════════════════════════════════════════════════════════╗
+  ║  GAME FACTORY TEMPLATE                                                        ║
+  ║  This template enforces critical invariants. Follow the section markers.      ║
+  ╚══════════════════════════════════════════════════════════════════════════════╝
+  -->
+  <style>
+    /* ═══════════════════════════════════════════════════════════════════════════
+       BASE STYLES - Can be extended, not removed
+       ═══════════════════════════════════════════════════════════════════════════ */
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+    }
+    body {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      background: #1a1a2e;
+      font-family: 'Nunito', system-ui, -apple-system, sans-serif;
+    }
+    #gameCanvas {
+      background: #16213e;
+      border-radius: 8px;
+      display: block;
+    }
+  </style>
+</head>
+<body>
+  <!-- ═══════════════════════════════════════════════════════════════════════════
+       CANVAS - Sized dynamically to fill available space
+       ═══════════════════════════════════════════════════════════════════════════ -->
+  <canvas id="gameCanvas"></canvas>
+
+  <script>
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 1: QUESTION PLACEHOLDER - DO NOT MODIFY FORMAT                    ║
+  // ║  Platform replaces this at runtime. Use these exact 60-char answers.       ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  const QUESTION = {
+    type: "mcq",
+    prompt: "Sample question text",
+    choices: [
+      { text: "This is sample answer A which is long enough to test text overflow", is_correct: true, explanation: "Why A is correct" },
+      { text: "This is sample answer B which is long enough to test text overflow", is_correct: false, explanation: "Why B is wrong" },
+      { text: "This is sample answer C which is long enough to test text overflow", is_correct: false, explanation: "Why C is wrong" },
+      { text: "This is sample answer D which is long enough to test text overflow", is_correct: false, explanation: "Why D is wrong" }
+    ],
+    isLastQuestion: false
+  };
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 2: ENGINE CORE - DO NOT MODIFY                                    ║
+  // ║  Standard engine interface and end screen. This is sacred.                 ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  const canvas = document.getElementById('gameCanvas');
+  const ctx = canvas.getContext('2d');
+
+  // Logical dimensions (game code works in this coordinate space)
+  const W = 720, H = 540;
+
+  // Scaling state (computed on resize)
+  let scale = 1;
+  let dpr = 1;
+
+  let gameState = 'playing'; // 'playing' | 'ended'
+  let gameResult = null;     // true (correct) | false (wrong)
+  let gameExplanation = '';
+  let endScreenTime = 0;
+  let confettiParticles = [];
+
+  // End screen button bounds (logical coordinates)
+  const restartButton = { x: W / 2 - 170, y: H / 2 + 60, w: 150, h: 48 };
+  const nextButton = { x: W / 2 + 20, y: H / 2 + 60, w: 150, h: 48 };
+
+  /** Check if point is inside rectangle */
+  function pointInRect(px, py, rect) {
+    return px >= rect.x && px <= rect.x + rect.w &&
+           py >= rect.y && py <= rect.y + rect.h;
+  }
+
+  /** Draw a styled button */
+  function drawButton(rect, label, color, pulse) {
+    const p = pulse ? 1 + Math.sin(endScreenTime * 4) * 0.03 : 1;
+    ctx.save();
+    ctx.translate(rect.x + rect.w / 2, rect.y + rect.h / 2);
+    ctx.scale(p, p);
+    ctx.translate(-(rect.x + rect.w / 2), -(rect.y + rect.h / 2));
+
+    // Button background
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.roundRect(rect.x, rect.y, rect.w, rect.h, 12);
+    ctx.fill();
+
+    // Button text
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = "bold 18px 'Nunito Sans', sans-serif";
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, rect.x + rect.w / 2, rect.y + rect.h / 2);
+
+    ctx.restore();
+  }
+
+  /**
+   * Resize canvas to fill available space with proper DPR scaling.
+   * Maintains logical coordinate system (720×540).
+   */
+  function resizeCanvas() {
+    dpr = window.devicePixelRatio || 1;
+
+    // Get available space
+    const availW = window.innerWidth;
+    const availH = window.innerHeight;
+
+    // Calculate scale to fit logical space (720×540) in available space
+    const scaleX = availW / W;
+    const scaleY = availH / H;
+    scale = Math.min(scaleX, scaleY);
+
+    // Physical canvas buffer (DPR-scaled for crisp rendering)
+    canvas.width = W * scale * dpr;
+    canvas.height = H * scale * dpr;
+
+    // CSS display size
+    canvas.style.width = (W * scale) + 'px';
+    canvas.style.height = (H * scale) + 'px';
+  }
+
+  /**
+   * Convert screen coordinates to logical coordinates.
+   * Use this for mouse/click events to get positions in 720×540 space.
+   */
+  function screenToLogical(screenX, screenY) {
+    const rect = canvas.getBoundingClientRect();
+    return {
+      x: (screenX - rect.left) * (W / rect.width),
+      y: (screenY - rect.top) * (H / rect.height)
+    };
+  }
+
+  const engine = {
+    /** Call this to end the game. DO NOT draw your own end screen. */
+    end(isCorrect, explanation) {
+      if (gameState === 'ended') return;
+      gameState = 'ended';
+      gameResult = isCorrect;
+      gameExplanation = explanation || '';
+      endScreenTime = 0;
+
+      // Spawn confetti for correct answers
+      if (isCorrect) {
+        for (let i = 0; i < 50; i++) {
+          confettiParticles.push({
+            x: W / 2,
+            y: H / 2,
+            vx: (Math.random() - 0.5) * 600,
+            vy: -Math.random() * 400 - 100,
+            size: 4 + Math.random() * 6,
+            color: ['#FFD700', '#FF6B6B', '#4ECDC4', '#95E1D3', '#F38181'][Math.floor(Math.random() * 5)],
+            rotation: Math.random() * Math.PI * 2,
+            rotationSpeed: (Math.random() - 0.5) * 10
+          });
+        }
+      }
+
+      // Notify parent frame
+      if (window.parent && window.parent !== window) {
+        window.parent.postMessage({
+          type: 'quiz-end',
+          isCorrect: isCorrect,
+          explanation: explanation || ''
+        }, '*');
+      }
+    }
+  };
+
+  /** STANDARD END SCREEN - DO NOT MODIFY */
+  function drawEndScreen(dt) {
+    endScreenTime += dt;
+
+    // Update confetti
+    confettiParticles = confettiParticles.filter(p => {
+      p.vy += 800 * dt; // gravity
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.rotation += p.rotationSpeed * dt;
+      p.vx *= 0.99;
+      return p.y < H + 50;
+    });
+
+    // Dark overlay
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
+    ctx.fillRect(0, 0, W, H);
+
+    // Draw confetti
+    confettiParticles.forEach(p => {
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rotation);
+      ctx.fillStyle = p.color;
+      ctx.fillRect(-p.size / 2, -p.size / 4, p.size, p.size / 2);
+      ctx.restore();
+    });
+
+    // Result emoji
+    ctx.font = '72px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(gameResult ? '🎉' : '😢', W / 2, H / 2 - 50);
+
+    // Result text
+    ctx.fillStyle = gameResult ? '#4ADE80' : '#F87171';
+    ctx.font = "bold 36px 'Nunito Sans', sans-serif";
+    ctx.fillText(gameResult ? 'Correct!' : 'Wrong!', W / 2, H / 2 + 20);
+
+    // Buttons
+    if (gameResult) {
+      // Correct: show both Restart and Next/Finish
+      drawButton(restartButton, 'Restart', '#E87A3E', true);
+      const nextLabel = QUESTION.isLastQuestion ? 'Finish' : 'Next';
+      drawButton(nextButton, nextLabel, '#4ECDC4', true);
+    } else {
+      // Wrong: show only centered Restart button
+      const centeredRestart = { x: W / 2 - 75, y: H / 2 + 60, w: 150, h: 48 };
+      drawButton(centeredRestart, 'Restart', '#E87A3E', true);
+    }
+  }
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 3: YOUR GAME CODE - IMPLEMENT THESE FUNCTIONS                     ║
+  // ║  This is where your game logic goes. See requirements below.               ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+
+  // === COLORS ===
+  const COLORS = {
+    bgDark: '#1C1C1A',
+    bgCharcoal: '#2A2A27',
+    snowWhite: '#E8E8E4',
+    snowShadow: '#B0B0A8',
+    iceBlue: '#6BB8D4',
+    iceDark: '#4A8FA8',
+    lanternGlow: '#F5A742',
+    lanternCore: '#E87A3E',
+    brassGold: '#C4A060',
+    brassDark: '#8B7040',
+    woodDark: '#4A3828',
+    woodLight: '#6B5040',
+    textPrimary: '#F5F5F0',
+    textSecondary: '#C2C2B8',
+    borderSubtle: '#424240',
+    cyan: '#4ECDC4',
+    success: '#6BBF59',
+    error: '#E85D4A',
+    orange: '#E87A3E'
+  };
+
+  // === GAME STATE ===
+  let ballista = {
+    x: 100,
+    y: 400,
+    angle: -Math.PI / 4, // 45 degrees up
+    power: 0.5, // 0-1
+    loaded: true
+  };
+
+  let projectile = {
+    x: 0,
+    y: 0,
+    vx: 0,
+    vy: 0,
+    active: false,
+    trail: []
+  };
+
+  let bastions = [];
+  let avalanche = null;
+  let fallingPages = [];
+  let snowflakes = [];
+  let lanterns = [];
+  let telescopes = [];
+  let shelves = [];
+  let gameTime = 0;
+
+  // Sound effects
+  let audioCtx = null;
+
+  function initAudio() {
+    if (!audioCtx) {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    }
+  }
+
+  function playSound(type) {
+    if (!audioCtx) return;
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+
+    if (type === 'launch') {
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(150, audioCtx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(80, audioCtx.currentTime + 0.2);
+      gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.2);
+      osc.start();
+      osc.stop(audioCtx.currentTime + 0.2);
+    } else if (type === 'correct') {
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(523, audioCtx.currentTime);
+      osc.frequency.setValueAtTime(659, audioCtx.currentTime + 0.1);
+      osc.frequency.setValueAtTime(784, audioCtx.currentTime + 0.2);
+      gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.4);
+      osc.start();
+      osc.stop(audioCtx.currentTime + 0.4);
+    } else if (type === 'wrong') {
+      osc.type = 'square';
+      osc.frequency.setValueAtTime(200, audioCtx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(100, audioCtx.currentTime + 0.3);
+      gain.gain.setValueAtTime(0.2, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.3);
+      osc.start();
+      osc.stop(audioCtx.currentTime + 0.3);
+    } else if (type === 'avalanche') {
+      const noise = audioCtx.createBufferSource();
+      const bufferSize = audioCtx.sampleRate * 0.5;
+      const buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
+      const data = buffer.getChannelData(0);
+      for (let i = 0; i < bufferSize; i++) {
+        data[i] = (Math.random() * 2 - 1) * (1 - i / bufferSize);
+      }
+      noise.buffer = buffer;
+      const noiseGain = audioCtx.createGain();
+      noiseGain.gain.setValueAtTime(0.4, audioCtx.currentTime);
+      noiseGain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.5);
+      noise.connect(noiseGain);
+      noiseGain.connect(audioCtx.destination);
+      noise.start();
+    }
+  }
+
+  function initGame() {
+    gameTime = 0;
+
+    // Reset ballista
+    ballista = {
+      x: 100,
+      y: 400,
+      angle: -Math.PI / 4,
+      power: 0.5,
+      loaded: true
+    };
+
+    // Reset projectile
+    projectile = {
+      x: 0,
+      y: 0,
+      vx: 0,
+      vy: 0,
+      active: false,
+      trail: []
+    };
+
+    avalanche = null;
+    fallingPages = [];
+
+    // Create 4 bastions for answers
+    bastions = QUESTION.choices.map((choice, i) => {
+      const col = i % 2;
+      const row = Math.floor(i / 2);
+      const baseX = 350 + col * 180;
+      const baseY = 150 + row * 180;
+      return {
+        x: baseX,
+        y: baseY,
+        width: 160,
+        height: 110,
+        choice: choice,
+        index: i,
+        hit: false,
+        buried: false,
+        buryProgress: 0,
+        shake: 0,
+        scale: 0,
+        alpha: 0,
+        entranceDelay: i * 80
+      };
+    });
+
+    // Create snowflakes
+    snowflakes = [];
+    for (let i = 0; i < 60; i++) {
+      snowflakes.push({
+        x: Math.random() * W,
+        y: Math.random() * H,
+        size: 1 + Math.random() * 3,
+        speed: 20 + Math.random() * 40,
+        drift: (Math.random() - 0.5) * 30,
+        alpha: 0.3 + Math.random() * 0.5
+      });
+    }
+
+    // Create lanterns
+    lanterns = [
+      { x: 50, y: 80, flicker: Math.random() * Math.PI * 2 },
+      { x: 680, y: 100, flicker: Math.random() * Math.PI * 2 },
+      { x: 200, y: 50, flicker: Math.random() * Math.PI * 2 }
+    ];
+
+    // Create telescopes
+    telescopes = [
+      { x: 580, y: 60, angle: -0.3, scale: 1.2 },
+      { x: 650, y: 180, angle: 0.2, scale: 0.8 }
+    ];
+
+    // Create frosted shelves with books
+    shelves = [
+      { x: 550, y: 40, width: 80, height: 15 },
+      { x: 620, y: 90, width: 60, height: 12 },
+      { x: 580, y: 140, width: 70, height: 14 }
+    ];
+  }
+
+  function updateGame(dt) {
+    if (gameState !== 'playing') return;
+
+    gameTime += dt;
+
+    // Entrance animations for bastions
+    bastions.forEach(b => {
+      const elapsed = gameTime * 1000 - b.entranceDelay;
+      if (elapsed > 0) {
+        const t = Math.min(elapsed / 350, 1);
+        const spring = 1 + Math.sin(t * Math.PI * 2) * 0.2 * (1 - t);
+        b.scale = t * spring;
+        b.alpha = t;
+        if (t >= 1) {
+          b.scale = 1;
+          b.alpha = 1;
+        }
+      }
+    });
+
+    // Update snowflakes
+    snowflakes.forEach(s => {
+      s.y += s.speed * dt;
+      s.x += s.drift * dt;
+      if (s.y > H + 10) {
+        s.y = -10;
+        s.x = Math.random() * W;
+      }
+      if (s.x < -10) s.x = W + 10;
+      if (s.x > W + 10) s.x = -10;
+    });
+
+    // Update lantern flicker
+    lanterns.forEach(l => {
+      l.flicker += dt * 5;
+    });
+
+    // Update projectile
+    if (projectile.active) {
+      projectile.trail.push({ x: projectile.x, y: projectile.y, alpha: 1 });
+      if (projectile.trail.length > 20) projectile.trail.shift();
+      projectile.trail.forEach(t => t.alpha -= dt * 3);
+
+      projectile.vy += 400 * dt; // gravity
+      projectile.x += projectile.vx * dt;
+      projectile.y += projectile.vy * dt;
+
+      // Check collision with bastions
+      bastions.forEach(b => {
+        if (!b.hit && !b.buried && b.scale >= 1) {
+          const bx = b.x + b.width / 2;
+          const by = b.y + b.height / 2;
+          const dx = projectile.x - bx;
+          const dy = projectile.y - by;
+          if (Math.abs(dx) < b.width / 2 + 10 && Math.abs(dy) < b.height / 2 + 10) {
+            b.hit = true;
+            projectile.active = false;
+
+            if (b.choice.is_correct) {
+              playSound('correct');
+              setTimeout(() => {
+                engine.end(true, b.choice.explanation);
+              }, 500);
+            } else {
+              playSound('wrong');
+              playSound('avalanche');
+              // Trigger avalanche
+              avalanche = {
+                targetBastion: b,
+                progress: 0,
+                snowChunks: []
+              };
+              for (let i = 0; i < 30; i++) {
+                avalanche.snowChunks.push({
+                  x: b.x + Math.random() * b.width,
+                  y: b.y - 100 - Math.random() * 50,
+                  vx: (Math.random() - 0.5) * 100,
+                  vy: 100 + Math.random() * 200,
+                  size: 5 + Math.random() * 15,
+                  rotation: Math.random() * Math.PI * 2
+                });
+              }
+              // Create falling pages
+              for (let i = 0; i < 15; i++) {
+                fallingPages.push({
+                  x: b.x + Math.random() * b.width,
+                  y: b.y + Math.random() * 30,
+                  vx: (Math.random() - 0.5) * 150,
+                  vy: 50 + Math.random() * 100,
+                  rotation: Math.random() * Math.PI * 2,
+                  rotSpeed: (Math.random() - 0.5) * 5,
+                  width: 8 + Math.random() * 8,
+                  height: 10 + Math.random() * 6
+                });
+              }
+            }
+          }
+        }
+      });
+
+      // Check if projectile went off screen
+      if (projectile.x > W + 50 || projectile.y > H + 50 || projectile.x < -50) {
+        projectile.active = false;
+        ballista.loaded = true;
+      }
+    }
+
+    // Update avalanche
+    if (avalanche) {
+      avalanche.progress += dt * 2;
+      avalanche.snowChunks.forEach(c => {
+        c.vy += 500 * dt;
+        c.x += c.vx * dt;
+        c.y += c.vy * dt;
+        c.rotation += dt * 3;
+      });
+
+      if (avalanche.progress >= 1) {
+        const targetBastion = avalanche.targetBastion;
+        targetBastion.buried = true;
+        targetBastion.buryProgress = 1;
+        avalanche = null;
+        setTimeout(() => {
+          engine.end(false, targetBastion.choice.explanation);
+        }, 300);
+      }
+    }
+
+    // Update falling pages
+    fallingPages.forEach(p => {
+      p.vy += 200 * dt;
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.rotation += p.rotSpeed * dt;
+    });
+    fallingPages = fallingPages.filter(p => p.y < H + 50);
+
+    // Update bastion shake
+    bastions.forEach(b => {
+      if (b.shake > 0) {
+        b.shake -= dt * 5;
+        if (b.shake < 0) b.shake = 0;
+      }
+    });
+  }
+
+  function drawGame() {
+    // Draw dark charcoal background with gradient
+    const bgGrad = ctx.createLinearGradient(0, 0, 0, H);
+    bgGrad.addColorStop(0, '#1a1a18');
+    bgGrad.addColorStop(0.5, '#252523');
+    bgGrad.addColorStop(1, '#1C1C1A');
+    ctx.fillStyle = bgGrad;
+    ctx.fillRect(0, 0, W, H);
+
+    // Draw blizzard effect (subtle diagonal lines)
+    ctx.strokeStyle = 'rgba(200, 200, 195, 0.05)';
+    ctx.lineWidth = 1;
+    for (let i = 0; i < 30; i++) {
+      const x = (i * 40 + gameTime * 50) % (W + 100) - 50;
+      ctx.beginPath();
+      ctx.moveTo(x, 0);
+      ctx.lineTo(x + 100, H);
+      ctx.stroke();
+    }
+
+    // Draw frosted shelves in background
+    shelves.forEach(s => {
+      // Shelf
+      ctx.fillStyle = COLORS.woodDark;
+      ctx.fillRect(s.x, s.y, s.width, s.height);
+      // Frost on shelf
+      ctx.fillStyle = 'rgba(232, 232, 228, 0.4)';
+      ctx.fillRect(s.x, s.y, s.width, 3);
+      // Books on shelf
+      for (let i = 0; i < 4; i++) {
+        ctx.fillStyle = ['#5A4A3A', '#4A5A6A', '#6A5A4A', '#3A4A5A'][i];
+        ctx.fillRect(s.x + 5 + i * 15, s.y - 20, 12, 20);
+        // Frost on books
+        ctx.fillStyle = 'rgba(232, 232, 228, 0.3)';
+        ctx.fillRect(s.x + 5 + i * 15, s.y - 20, 12, 4);
+      }
+    });
+
+    // Draw telescopes
+    telescopes.forEach(t => {
+      ctx.save();
+      ctx.translate(t.x, t.y);
+      ctx.rotate(t.angle);
+      ctx.scale(t.scale, t.scale);
+      // Main tube
+      ctx.fillStyle = COLORS.brassDark;
+      ctx.fillRect(-40, -8, 80, 16);
+      // Lens end
+      ctx.fillStyle = COLORS.brassGold;
+      ctx.beginPath();
+      ctx.ellipse(40, 0, 12, 10, 0, 0, Math.PI * 2);
+      ctx.fill();
+      // Eyepiece
+      ctx.fillStyle = COLORS.brassDark;
+      ctx.fillRect(-50, -5, 15, 10);
+      // Frost/crack effect
+      ctx.strokeStyle = 'rgba(200, 220, 230, 0.5)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(35, -5);
+      ctx.lineTo(38, 0);
+      ctx.lineTo(42, 3);
+      ctx.stroke();
+      ctx.restore();
+    });
+
+    // Draw lanterns with glow
+    lanterns.forEach(l => {
+      const flicker = 0.8 + Math.sin(l.flicker) * 0.2;
+      // Outer glow
+      const glowGrad = ctx.createRadialGradient(l.x, l.y, 0, l.x, l.y, 60 * flicker);
+      glowGrad.addColorStop(0, 'rgba(245, 167, 66, 0.3)');
+      glowGrad.addColorStop(0.5, 'rgba(245, 167, 66, 0.1)');
+      glowGrad.addColorStop(1, 'rgba(245, 167, 66, 0)');
+      ctx.fillStyle = glowGrad;
+      ctx.fillRect(l.x - 60, l.y - 60, 120, 120);
+      // Lantern body
+      ctx.fillStyle = COLORS.brassDark;
+      ctx.fillRect(l.x - 8, l.y - 15, 16, 30);
+      // Lantern light
+      ctx.fillStyle = COLORS.lanternGlow;
+      ctx.globalAlpha = flicker;
+      ctx.fillRect(l.x - 5, l.y - 10, 10, 20);
+      ctx.globalAlpha = 1;
+      // Chain/hook
+      ctx.strokeStyle = COLORS.brassDark;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(l.x, l.y - 15);
+      ctx.lineTo(l.x, l.y - 30);
+      ctx.stroke();
+    });
+
+    // Draw snowflakes
+    snowflakes.forEach(s => {
+      ctx.fillStyle = `rgba(232, 232, 228, ${s.alpha})`;
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, s.size, 0, Math.PI * 2);
+      ctx.fill();
+    });
+
+    // Draw bastions (snow-brick answer areas)
+    bastions.forEach(b => {
+      if (b.scale <= 0) return;
+
+      ctx.save();
+      const shakeX = b.shake > 0 ? Math.sin(b.shake * 30) * 5 : 0;
+      ctx.translate(b.x + b.width / 2 + shakeX, b.y + b.height / 2);
+      ctx.scale(b.scale, b.scale);
+      ctx.translate(-b.width / 2, -b.height / 2);
+      ctx.globalAlpha = b.alpha;
+
+      // Shadow
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
+      ctx.beginPath();
+      ctx.roundRect(4, 4, b.width, b.height, 8);
+      ctx.fill();
+
+      // Main bastion body (snow bricks)
+      const grad = ctx.createLinearGradient(0, 0, 0, b.height);
+      grad.addColorStop(0, COLORS.snowWhite);
+      grad.addColorStop(1, COLORS.snowShadow);
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.roundRect(0, 0, b.width, b.height, 8);
+      ctx.fill();
+
+      // Brick lines
+      ctx.strokeStyle = 'rgba(176, 176, 168, 0.5)';
+      ctx.lineWidth = 1;
+      for (let row = 0; row < 4; row++) {
+        const y = 25 + row * 22;
+        ctx.beginPath();
+        ctx.moveTo(5, y);
+        ctx.lineTo(b.width - 5, y);
+        ctx.stroke();
+        // Vertical brick lines (staggered)
+        const offset = row % 2 === 0 ? 0 : b.width / 4;
+        for (let col = 1; col < 4; col++) {
+          const x = offset + col * (b.width / 4);
+          if (x > 5 && x < b.width - 5) {
+            ctx.beginPath();
+            ctx.moveTo(x, y);
+            ctx.lineTo(x, Math.min(y + 22, b.height - 5));
+            ctx.stroke();
+          }
+        }
+      }
+
+      // Ice/frost accent on top
+      ctx.fillStyle = COLORS.iceBlue;
+      ctx.globalAlpha = b.alpha * 0.4;
+      ctx.fillRect(5, 0, b.width - 10, 8);
+      ctx.globalAlpha = b.alpha;
+
+      // Border
+      ctx.strokeStyle = b.hit ? (b.choice.is_correct ? COLORS.success : COLORS.error) : COLORS.borderSubtle;
+      ctx.lineWidth = b.hit ? 3 : 2;
+      ctx.beginPath();
+      ctx.roundRect(0, 0, b.width, b.height, 8);
+      ctx.stroke();
+
+      // Answer text - wrap to fit
+      ctx.fillStyle = COLORS.textPrimary;
+      ctx.font = "500 14px 'Nunito', sans-serif";
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'top';
+
+      const maxWidth = b.width - 16;
+      const words = b.choice.text.split(' ');
+      let lines = [];
+      let currentLine = '';
+
+      words.forEach(word => {
+        const testLine = currentLine ? currentLine + ' ' + word : word;
+        const metrics = ctx.measureText(testLine);
+        if (metrics.width > maxWidth && currentLine) {
+          lines.push(currentLine);
+          currentLine = word;
+        } else {
+          currentLine = testLine;
+        }
+      });
+      if (currentLine) lines.push(currentLine);
+
+      // Draw lines (max 5 lines to fit)
+      const lineHeight = 16;
+      const startY = Math.max(8, (b.height - lines.length * lineHeight) / 2);
+      lines.slice(0, 5).forEach((line, i) => {
+        ctx.fillText(line, b.width / 2, startY + i * lineHeight);
+      });
+
+      // If buried, draw snow covering
+      if (b.buried || (avalanche && avalanche.targetBastion === b)) {
+        const buryAmount = b.buried ? 1 : (avalanche ? avalanche.progress : 1);
+        ctx.fillStyle = COLORS.snowWhite;
+        ctx.globalAlpha = b.alpha * buryAmount;
+        ctx.beginPath();
+        ctx.roundRect(0, b.height * (1 - buryAmount), b.width, b.height * buryAmount + 10, 8);
+        ctx.fill();
+        // Rough snow top edge
+        ctx.fillStyle = COLORS.snowShadow;
+        for (let i = 0; i < 10; i++) {
+          const x = i * (b.width / 10) + Math.random() * 5;
+          const y = b.height * (1 - buryAmount) - 5 + Math.random() * 10;
+          ctx.beginPath();
+          ctx.arc(x, y, 3 + Math.random() * 5, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+
+      ctx.restore();
+    });
+
+    // Draw avalanche snow chunks
+    if (avalanche) {
+      avalanche.snowChunks.forEach(c => {
+        ctx.save();
+        ctx.translate(c.x, c.y);
+        ctx.rotate(c.rotation);
+        ctx.fillStyle = COLORS.snowWhite;
+        ctx.fillRect(-c.size / 2, -c.size / 2, c.size, c.size);
+        ctx.fillStyle = COLORS.snowShadow;
+        ctx.fillRect(-c.size / 2 + 2, -c.size / 2 + 2, c.size - 4, c.size - 4);
+        ctx.restore();
+      });
+    }
+
+    // Draw falling pages
+    fallingPages.forEach(p => {
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rotation);
+      ctx.fillStyle = '#F5F5E8';
+      ctx.fillRect(-p.width / 2, -p.height / 2, p.width, p.height);
+      // Text lines on page
+      ctx.fillStyle = '#888';
+      ctx.fillRect(-p.width / 2 + 2, -p.height / 2 + 2, p.width - 4, 1);
+      ctx.fillRect(-p.width / 2 + 2, -p.height / 2 + 5, p.width - 6, 1);
+      ctx.restore();
+    });
+
+    // Draw ballista
+    ctx.save();
+    ctx.translate(ballista.x, ballista.y);
+
+    // Base/stand
+    ctx.fillStyle = COLORS.woodDark;
+    ctx.beginPath();
+    ctx.moveTo(-30, 20);
+    ctx.lineTo(30, 20);
+    ctx.lineTo(20, 0);
+    ctx.lineTo(-20, 0);
+    ctx.closePath();
+    ctx.fill();
+
+    // Rotating arm
+    ctx.rotate(ballista.angle);
+
+    // Main beam
+    ctx.fillStyle = COLORS.woodLight;
+    ctx.fillRect(-10, -8, 80, 16);
+
+    // Bow arms
+    ctx.strokeStyle = COLORS.woodDark;
+    ctx.lineWidth = 6;
+    ctx.beginPath();
+    ctx.moveTo(60, -15);
+    ctx.quadraticCurveTo(70, -25, 60, -35);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(60, 15);
+    ctx.quadraticCurveTo(70, 25, 60, 35);
+    ctx.stroke();
+
+    // Bowstring
+    ctx.strokeStyle = '#A0A090';
+    ctx.lineWidth = 2;
+    const stringPull = ballista.loaded ? ballista.power * 20 : 0;
+    ctx.beginPath();
+    ctx.moveTo(60, -35);
+    ctx.lineTo(40 - stringPull, 0);
+    ctx.lineTo(60, 35);
+    ctx.stroke();
+
+    // Bolt/projectile (if loaded)
+    if (ballista.loaded) {
+      ctx.fillStyle = COLORS.brassDark;
+      ctx.fillRect(20 - stringPull, -3, 40, 6);
+      // Arrow head
+      ctx.fillStyle = COLORS.brassGold;
+      ctx.beginPath();
+      ctx.moveTo(60 - stringPull, 0);
+      ctx.lineTo(50 - stringPull, -6);
+      ctx.lineTo(50 - stringPull, 6);
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    // Brass fittings
+    ctx.fillStyle = COLORS.brassGold;
+    ctx.fillRect(55, -10, 8, 20);
+
+    ctx.restore();
+
+    // Draw power meter
+    const meterX = 30;
+    const meterY = 450;
+    const meterW = 15;
+    const meterH = 80;
+
+    ctx.fillStyle = COLORS.bgCharcoal;
+    ctx.fillRect(meterX - 2, meterY - 2, meterW + 4, meterH + 4);
+    ctx.fillStyle = COLORS.borderSubtle;
+    ctx.fillRect(meterX, meterY, meterW, meterH);
+
+    // Power fill
+    const powerGrad = ctx.createLinearGradient(meterX, meterY + meterH, meterX, meterY);
+    powerGrad.addColorStop(0, COLORS.success);
+    powerGrad.addColorStop(0.5, COLORS.lanternGlow);
+    powerGrad.addColorStop(1, COLORS.error);
+    ctx.fillStyle = powerGrad;
+    ctx.fillRect(meterX, meterY + meterH * (1 - ballista.power), meterW, meterH * ballista.power);
+
+    // Meter label
+    ctx.fillStyle = COLORS.textSecondary;
+    ctx.font = "500 12px 'Nunito Sans', sans-serif";
+    ctx.textAlign = 'center';
+    ctx.fillText('PWR', meterX + meterW / 2, meterY + meterH + 15);
+
+    // Draw aim indicator
+    ctx.save();
+    ctx.translate(ballista.x, ballista.y);
+    ctx.rotate(ballista.angle);
+    ctx.strokeStyle = COLORS.cyan;
+    ctx.globalAlpha = 0.6;
+    ctx.lineWidth = 2;
+    ctx.setLineDash([5, 5]);
+    ctx.beginPath();
+    ctx.moveTo(70, 0);
+    ctx.lineTo(150, 0);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.globalAlpha = 1;
+    ctx.restore();
+
+    // Draw projectile trail
+    projectile.trail.forEach((t, i) => {
+      if (t.alpha > 0) {
+        ctx.fillStyle = `rgba(232, 122, 62, ${t.alpha * 0.5})`;
+        ctx.beginPath();
+        ctx.arc(t.x, t.y, 3, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    });
+
+    // Draw active projectile
+    if (projectile.active) {
+      ctx.save();
+      ctx.translate(projectile.x, projectile.y);
+      ctx.rotate(Math.atan2(projectile.vy, projectile.vx));
+      ctx.fillStyle = COLORS.brassDark;
+      ctx.fillRect(-15, -3, 30, 6);
+      ctx.fillStyle = COLORS.brassGold;
+      ctx.beginPath();
+      ctx.moveTo(15, 0);
+      ctx.lineTo(5, -5);
+      ctx.lineTo(5, 5);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+    }
+  }
+
+  function handleInput(e) {
+    if (gameState !== 'playing') return;
+
+    initAudio();
+
+    const aimSpeed = 0.03;
+    const powerSpeed = 0.05;
+
+    if (e.code === 'ArrowUp' || e.code === 'KeyW') {
+      ballista.power = Math.min(1, ballista.power + powerSpeed);
+    } else if (e.code === 'ArrowDown' || e.code === 'KeyS') {
+      ballista.power = Math.max(0.1, ballista.power - powerSpeed);
+    } else if (e.code === 'ArrowLeft' || e.code === 'KeyA') {
+      ballista.angle = Math.max(-Math.PI / 2 + 0.1, ballista.angle - aimSpeed);
+    } else if (e.code === 'ArrowRight' || e.code === 'KeyD') {
+      ballista.angle = Math.min(-0.1, ballista.angle + aimSpeed);
+    } else if ((e.code === 'Space' || e.code === 'Enter') && ballista.loaded && !projectile.active) {
+      // Launch projectile
+      playSound('launch');
+      const speed = 300 + ballista.power * 500;
+      projectile.x = ballista.x + Math.cos(ballista.angle) * 70;
+      projectile.y = ballista.y + Math.sin(ballista.angle) * 70;
+      projectile.vx = Math.cos(ballista.angle) * speed;
+      projectile.vy = Math.sin(ballista.angle) * speed;
+      projectile.active = true;
+      projectile.trail = [];
+      ballista.loaded = false;
+    }
+  }
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 4: GAME LOOP - DO NOT MODIFY                                      ║
+  // ║  Standard loop with responsive scaling and DPR support.                    ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  let lastTime = performance.now();
+
+  function gameLoop(now) {
+    const dt = Math.min((now - lastTime) / 1000, 0.05); // Cap at 50ms
+    lastTime = now;
+
+    // Apply transform for logical coordinate system
+    ctx.setTransform(scale * dpr, 0, 0, scale * dpr, 0, 0);
+
+    if (gameState === 'playing') {
+      updateGame(dt);
+      drawGame();
+    } else {
+      drawGame(); // Draw game state behind overlay
+      drawEndScreen(dt);
+    }
+
+    // Reset transform for next frame
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+    requestAnimationFrame(gameLoop);
+  }
+
+  // Input handlers
+  document.addEventListener('keydown', (e) => {
+    if (gameState === 'ended' && (e.code === 'KeyR')) {
+      // Restart game
+      gameState = 'playing';
+      gameResult = null;
+      gameExplanation = '';
+      confettiParticles = [];
+      initGame();
+      return;
+    }
+    handleInput(e);
+  });
+
+  document.addEventListener('keyup', (e) => {
+    // Optional: handle key release in your handleInput
+  });
+
+  // Canvas click handler for end screen buttons
+  canvas.addEventListener('click', (e) => {
+    if (gameState !== 'ended') return;
+
+    const { x, y } = screenToLogical(e.clientX, e.clientY);
+
+    if (gameResult) {
+      // Correct answer: check both buttons
+      if (pointInRect(x, y, restartButton)) {
+        gameState = 'playing';
+        gameResult = null;
+        gameExplanation = '';
+        confettiParticles = [];
+        initGame();
+        return;
+      }
+      if (pointInRect(x, y, nextButton)) {
+        // Notify parent to go to next question
+        if (window.parent && window.parent !== window) {
+          window.parent.postMessage({ type: 'quiz-next' }, '*');
+        }
+        return;
+      }
+    } else {
+      // Wrong answer: check centered restart button
+      const centeredRestart = { x: W / 2 - 75, y: H / 2 + 60, w: 150, h: 48 };
+      if (pointInRect(x, y, centeredRestart)) {
+        gameState = 'playing';
+        gameResult = null;
+        gameExplanation = '';
+        confettiParticles = [];
+        initGame();
+        return;
+      }
+    }
+  });
+
+  // Handle resize
+  window.addEventListener('resize', resizeCanvas);
+
+  // Initialize
+  resizeCanvas();
+  initGame();
+  requestAnimationFrame(gameLoop);
+  </script>
+</body>
+</html>

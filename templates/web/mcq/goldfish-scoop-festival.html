@@ -1,0 +1,1159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Goldfish Scoop Festival</title>
+  <link href="https://fonts.googleapis.com/css2?family=Belanosima:wght@400;600;700&family=Nunito+Sans:wght@400;500;600;700&family=Nunito:wght@400;500;600&display=swap" rel="stylesheet">
+  <!--
+  ╔══════════════════════════════════════════════════════════════════════════════╗
+  ║  GAME FACTORY TEMPLATE                                                        ║
+  ║  This template enforces critical invariants. Follow the section markers.      ║
+  ╚══════════════════════════════════════════════════════════════════════════════╝
+  -->
+  <style>
+    /* ═══════════════════════════════════════════════════════════════════════════
+       BASE STYLES - Can be extended, not removed
+       ═══════════════════════════════════════════════════════════════════════════ */
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+    }
+    body {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      background: #1C1C1A;
+      font-family: 'Nunito Sans', system-ui, -apple-system, sans-serif;
+    }
+    #gameCanvas {
+      background: #2B2B28;
+      border-radius: 12px;
+      display: block;
+    }
+  </style>
+</head>
+<body>
+  <!-- ═══════════════════════════════════════════════════════════════════════════
+       CANVAS - Sized dynamically to fill available space
+       ═══════════════════════════════════════════════════════════════════════════ -->
+  <canvas id="gameCanvas"></canvas>
+
+  <script>
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 1: QUESTION PLACEHOLDER - DO NOT MODIFY FORMAT                    ║
+  // ║  Platform replaces this at runtime. Use these exact 60-char answers.       ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  const QUESTION = {
+    type: "mcq",
+    prompt: "Sample question text",
+    choices: [
+      { text: "This is sample answer A which is long enough to test text overflow", is_correct: true, explanation: "Why A is correct" },
+      { text: "This is sample answer B which is long enough to test text overflow", is_correct: false, explanation: "Why B is wrong" },
+      { text: "This is sample answer C which is long enough to test text overflow", is_correct: false, explanation: "Why C is wrong" },
+      { text: "This is sample answer D which is long enough to test text overflow", is_correct: false, explanation: "Why D is wrong" }
+    ],
+    isLastQuestion: false
+  };
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 2: ENGINE CORE - DO NOT MODIFY                                    ║
+  // ║  Standard engine interface and end screen. This is sacred.                 ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  const canvas = document.getElementById('gameCanvas');
+  const ctx = canvas.getContext('2d');
+
+  // Logical dimensions (game code works in this coordinate space)
+  const W = 720, H = 540;
+
+  // Scaling state (computed on resize)
+  let scale = 1;
+  let dpr = 1;
+
+  let gameState = 'playing'; // 'playing' | 'ended'
+  let gameResult = null;     // true (correct) | false (wrong)
+  let gameExplanation = '';
+  let endScreenTime = 0;
+  let confettiParticles = [];
+
+  // End screen button bounds (logical coordinates)
+  const restartButton = { x: W / 2 - 170, y: H / 2 + 60, w: 150, h: 48 };
+  const nextButton = { x: W / 2 + 20, y: H / 2 + 60, w: 150, h: 48 };
+
+  /** Check if point is inside rectangle */
+  function pointInRect(px, py, rect) {
+    return px >= rect.x && px <= rect.x + rect.w &&
+           py >= rect.y && py <= rect.y + rect.h;
+  }
+
+  /** Draw a styled button */
+  function drawButton(rect, label, color, pulse) {
+    const p = pulse ? 1 + Math.sin(endScreenTime * 4) * 0.03 : 1;
+    ctx.save();
+    ctx.translate(rect.x + rect.w / 2, rect.y + rect.h / 2);
+    ctx.scale(p, p);
+    ctx.translate(-(rect.x + rect.w / 2), -(rect.y + rect.h / 2));
+
+    // Button background
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.roundRect(rect.x, rect.y, rect.w, rect.h, 12);
+    ctx.fill();
+
+    // Button text
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = 'bold 18px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, rect.x + rect.w / 2, rect.y + rect.h / 2);
+
+    ctx.restore();
+  }
+
+  /**
+   * Resize canvas to fill available space with proper DPR scaling.
+   * Maintains logical coordinate system (720×540).
+   */
+  function resizeCanvas() {
+    dpr = window.devicePixelRatio || 1;
+
+    // Get available space
+    const availW = window.innerWidth;
+    const availH = window.innerHeight;
+
+    // Calculate scale to fit logical space (720×540) in available space
+    const scaleX = availW / W;
+    const scaleY = availH / H;
+    scale = Math.min(scaleX, scaleY);
+
+    // Physical canvas buffer (DPR-scaled for crisp rendering)
+    canvas.width = W * scale * dpr;
+    canvas.height = H * scale * dpr;
+
+    // CSS display size
+    canvas.style.width = (W * scale) + 'px';
+    canvas.style.height = (H * scale) + 'px';
+  }
+
+  /**
+   * Convert screen coordinates to logical coordinates.
+   * Use this for mouse/click events to get positions in 720×540 space.
+   */
+  function screenToLogical(screenX, screenY) {
+    const rect = canvas.getBoundingClientRect();
+    return {
+      x: (screenX - rect.left) * (W / rect.width),
+      y: (screenY - rect.top) * (H / rect.height)
+    };
+  }
+
+  const engine = {
+    /** Call this to end the game. DO NOT draw your own end screen. */
+    end(isCorrect, explanation) {
+      if (gameState === 'ended') return;
+      gameState = 'ended';
+      gameResult = isCorrect;
+      gameExplanation = explanation || '';
+      endScreenTime = 0;
+
+      // Spawn confetti for correct answers
+      if (isCorrect) {
+        for (let i = 0; i < 50; i++) {
+          confettiParticles.push({
+            x: W / 2,
+            y: H / 2,
+            vx: (Math.random() - 0.5) * 600,
+            vy: -Math.random() * 400 - 100,
+            size: 4 + Math.random() * 6,
+            color: ['#FFD700', '#FF6B6B', '#4ECDC4', '#95E1D3', '#F38181'][Math.floor(Math.random() * 5)],
+            rotation: Math.random() * Math.PI * 2,
+            rotationSpeed: (Math.random() - 0.5) * 10
+          });
+        }
+      }
+
+      // Notify parent frame
+      if (window.parent && window.parent !== window) {
+        window.parent.postMessage({
+          type: 'quiz-end',
+          isCorrect: isCorrect,
+          explanation: explanation || ''
+        }, '*');
+      }
+    }
+  };
+
+  /** STANDARD END SCREEN - DO NOT MODIFY */
+  function drawEndScreen(dt) {
+    endScreenTime += dt;
+
+    // Update confetti
+    confettiParticles = confettiParticles.filter(p => {
+      p.vy += 800 * dt; // gravity
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.rotation += p.rotationSpeed * dt;
+      p.vx *= 0.99;
+      return p.y < H + 50;
+    });
+
+    // Dark overlay
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
+    ctx.fillRect(0, 0, W, H);
+
+    // Draw confetti
+    confettiParticles.forEach(p => {
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rotation);
+      ctx.fillStyle = p.color;
+      ctx.fillRect(-p.size / 2, -p.size / 4, p.size, p.size / 2);
+      ctx.restore();
+    });
+
+    // Result emoji
+    ctx.font = '72px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(gameResult ? '🎉' : '😢', W / 2, H / 2 - 50);
+
+    // Result text
+    ctx.fillStyle = gameResult ? '#4ADE80' : '#F87171';
+    ctx.font = 'bold 36px system-ui, sans-serif';
+    ctx.fillText(gameResult ? 'Correct!' : 'Wrong!', W / 2, H / 2 + 20);
+
+    // Buttons
+    if (gameResult) {
+      // Correct: show both Restart and Next/Finish
+      drawButton(restartButton, 'Restart', '#E87A3E', true);
+      const nextLabel = QUESTION.isLastQuestion ? 'Finish' : 'Next';
+      drawButton(nextButton, nextLabel, '#4ECDC4', true);
+    } else {
+      // Wrong: show only centered Restart button
+      const centeredRestart = { x: W / 2 - 75, y: H / 2 + 60, w: 150, h: 48 };
+      drawButton(centeredRestart, 'Restart', '#E87A3E', true);
+    }
+  }
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 3: YOUR GAME CODE - IMPLEMENT THESE FUNCTIONS                     ║
+  // ║  This is where your game logic goes. See requirements below.               ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+
+  // === QUIZHP COLOR PALETTE ===
+  const COLORS = {
+    bgPrimary: '#FAFAF7',
+    bgSurface: '#FFFFFF',
+    bgDark: '#2B2B28',
+    textPrimary: '#2B2B28',
+    textSecondary: '#5A5A54',
+    textLight: '#F5F5F0',
+    orange: '#E87A3E',
+    orangeHover: '#D66B31',
+    amber: '#F5A742',
+    cyan: '#4ECDC4',
+    success: '#6BBF59',
+    error: '#E85D4A',
+    borderSubtle: '#E6E6E0',
+    borderStrong: '#D4D4CC',
+    peach: '#FFB89D'
+  };
+
+  // === SOUND EFFECTS (Web Audio API) ===
+  let audioCtx = null;
+  const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  function initAudio() {
+    if (!audioCtx) {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    }
+  }
+
+  function playSound(type) {
+    if (!audioCtx || prefersReducedMotion) return;
+
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+
+    const now = audioCtx.currentTime;
+
+    if (type === 'splash') {
+      // Water splash sound
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(400, now);
+      osc.frequency.exponentialRampToValueAtTime(100, now + 0.15);
+      gain.gain.setValueAtTime(0.2, now);
+      gain.gain.exponentialRampToValueAtTime(0.01, now + 0.15);
+      osc.start(now);
+      osc.stop(now + 0.15);
+    } else if (type === 'correct') {
+      // Happy ascending sound
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(523, now);
+      osc.frequency.setValueAtTime(659, now + 0.1);
+      osc.frequency.setValueAtTime(784, now + 0.2);
+      gain.gain.setValueAtTime(0.25, now);
+      gain.gain.exponentialRampToValueAtTime(0.01, now + 0.4);
+      osc.start(now);
+      osc.stop(now + 0.4);
+    } else if (type === 'wrong') {
+      // Sad descending sound
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(300, now);
+      osc.frequency.exponentialRampToValueAtTime(150, now + 0.3);
+      gain.gain.setValueAtTime(0.15, now);
+      gain.gain.exponentialRampToValueAtTime(0.01, now + 0.3);
+      osc.start(now);
+      osc.stop(now + 0.3);
+    } else if (type === 'hover') {
+      // Gentle bubble sound
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(600, now);
+      osc.frequency.exponentialRampToValueAtTime(800, now + 0.05);
+      gain.gain.setValueAtTime(0.08, now);
+      gain.gain.exponentialRampToValueAtTime(0.01, now + 0.08);
+      osc.start(now);
+      osc.stop(now + 0.08);
+    }
+  }
+
+  // === GAME STATE ===
+  const POOL_CENTER_X = W / 2;
+  const POOL_CENTER_Y = 220;
+  const POOL_RADIUS_X = 280;
+  const POOL_RADIUS_Y = 140;
+
+  // Goldfish colors using QuizHP palette
+  const FISH_COLORS = [COLORS.orange, COLORS.amber, COLORS.cyan, COLORS.error];
+
+  // Game objects
+  let goldfish = [];
+  let scoop = { x: W / 2, y: H - 100, targetX: W / 2, targetY: H - 100, isScooping: false, scoopProgress: 0, integrity: 100, catching: null };
+  let selectedFish = null;
+  let gameTime = 0;
+
+  // Particle systems
+  let waterDroplets = [];
+  let bubbles = [];
+
+  // Answer panel state
+  let answerPanels = [];
+  const PANEL_WIDTH = 160;
+  const PANEL_HEIGHT = 70;
+  const PANEL_Y = 430;
+  const PANEL_SPACING = 10;
+
+  // Track last hovered fish for sound
+  let lastHoveredFish = null;
+
+  function initGame() {
+    initAudio();
+    gameTime = 0;
+    selectedFish = null;
+    waterDroplets = [];
+    bubbles = [];
+    lastHoveredFish = null;
+
+    // Initialize goldfish swimming in circular patterns
+    goldfish = QUESTION.choices.map((choice, i) => {
+      const angle = (Math.PI * 2 / 4) * i;
+      const orbitRadius = 80 + Math.random() * 40;
+      return {
+        choice: choice,
+        index: i,
+        color: FISH_COLORS[i],
+        orbitAngle: angle,
+        orbitRadius: orbitRadius,
+        orbitSpeed: 0.5 + Math.random() * 0.3,
+        orbitCenterX: POOL_CENTER_X + (Math.random() - 0.5) * 60,
+        orbitCenterY: POOL_CENTER_Y + (Math.random() - 0.5) * 30,
+        x: 0,
+        y: 0,
+        wiggle: Math.random() * Math.PI * 2,
+        tailWiggle: 0,
+        caught: false,
+        scale: 1,
+        highlighted: false,
+        entranceScale: 0,
+        entranceDelay: i * 0.15
+      };
+    });
+
+    // Initialize answer panels
+    const totalWidth = (PANEL_WIDTH * 4) + (PANEL_SPACING * 3);
+    const startX = (W - totalWidth) / 2;
+
+    answerPanels = QUESTION.choices.map((choice, i) => ({
+      x: startX + i * (PANEL_WIDTH + PANEL_SPACING),
+      y: PANEL_Y,
+      width: PANEL_WIDTH,
+      height: PANEL_HEIGHT,
+      choice: choice,
+      index: i,
+      color: FISH_COLORS[i],
+      scale: 1,
+      entranceDelay: i * 0.1,
+      entranceProgress: 0,
+      hovered: false
+    }));
+
+    // Reset scoop
+    scoop = { x: W / 2, y: H - 100, targetX: W / 2, targetY: H - 100, isScooping: false, scoopProgress: 0, integrity: 100, catching: null };
+
+    // Spawn initial bubbles
+    for (let i = 0; i < 8; i++) {
+      spawnBubble();
+    }
+  }
+
+  function spawnBubble() {
+    bubbles.push({
+      x: POOL_CENTER_X + (Math.random() - 0.5) * POOL_RADIUS_X * 1.6,
+      y: POOL_CENTER_Y + POOL_RADIUS_Y * 0.5,
+      size: 3 + Math.random() * 6,
+      speed: 30 + Math.random() * 40,
+      wobble: Math.random() * Math.PI * 2,
+      alpha: 0.3 + Math.random() * 0.4
+    });
+  }
+
+  function spawnWaterDroplets(x, y, count = 8) {
+    for (let i = 0; i < count; i++) {
+      waterDroplets.push({
+        x: x,
+        y: y,
+        vx: (Math.random() - 0.5) * 150,
+        vy: -Math.random() * 200 - 50,
+        size: 2 + Math.random() * 4,
+        alpha: 1,
+        color: COLORS.cyan
+      });
+    }
+  }
+
+  function updateGame(dt) {
+    if (gameState !== 'playing') return;
+
+    gameTime += dt;
+
+    // Update goldfish positions and entrance animations
+    goldfish.forEach(fish => {
+      // Entrance animation
+      if (gameTime > fish.entranceDelay && fish.entranceScale < 1) {
+        fish.entranceScale = Math.min(1, fish.entranceScale + dt * 4);
+      }
+
+      if (!fish.caught) {
+        fish.orbitAngle += fish.orbitSpeed * dt;
+        fish.wiggle += 8 * dt;
+        fish.tailWiggle += 12 * dt;
+
+        // Calculate position on elliptical orbit
+        fish.x = fish.orbitCenterX + Math.cos(fish.orbitAngle) * fish.orbitRadius;
+        fish.y = fish.orbitCenterY + Math.sin(fish.orbitAngle) * (fish.orbitRadius * 0.6);
+
+        // Add slight wiggle
+        fish.x += Math.sin(fish.wiggle) * 3;
+        fish.y += Math.cos(fish.wiggle * 0.7) * 2;
+      }
+    });
+
+    // Update scoop position smoothly
+    const lerpSpeed = 8;
+    scoop.x += (scoop.targetX - scoop.x) * lerpSpeed * dt;
+    scoop.y += (scoop.targetY - scoop.y) * lerpSpeed * dt;
+
+    // Handle scooping animation
+    if (scoop.isScooping) {
+      scoop.scoopProgress += dt * 3;
+
+      // Spawn water droplets at peak of scoop
+      if (scoop.scoopProgress > 0.4 && scoop.scoopProgress < 0.6) {
+        spawnWaterDroplets(scoop.x, scoop.y - 20, 3);
+      }
+
+      if (scoop.scoopProgress >= 1) {
+        // Check if we caught a fish
+        if (scoop.catching) {
+          const fish = scoop.catching;
+          fish.caught = true;
+          selectedFish = fish;
+
+          // Play sound and end game
+          if (fish.choice.is_correct) {
+            playSound('correct');
+          } else {
+            playSound('wrong');
+          }
+
+          // End game with selected answer
+          engine.end(fish.choice.is_correct, fish.choice.explanation);
+        }
+
+        scoop.isScooping = false;
+        scoop.scoopProgress = 0;
+        scoop.catching = null;
+      }
+    }
+
+    // Update panel entrance animations
+    answerPanels.forEach(panel => {
+      if (gameTime > panel.entranceDelay && panel.entranceProgress < 1) {
+        panel.entranceProgress = Math.min(1, panel.entranceProgress + dt * 3);
+      }
+
+      // Panel hover animation
+      const targetScale = panel.hovered ? 1.05 : 1;
+      panel.scale += (targetScale - panel.scale) * 8 * dt;
+    });
+
+    // Update water droplets
+    waterDroplets = waterDroplets.filter(drop => {
+      drop.vy += 500 * dt; // gravity
+      drop.x += drop.vx * dt;
+      drop.y += drop.vy * dt;
+      drop.alpha -= dt * 2;
+      return drop.alpha > 0 && drop.y < H;
+    });
+
+    // Update bubbles
+    bubbles.forEach(bubble => {
+      bubble.y -= bubble.speed * dt;
+      bubble.wobble += 3 * dt;
+      bubble.x += Math.sin(bubble.wobble) * 0.5;
+
+      // Reset bubble when it reaches top
+      if (bubble.y < POOL_CENTER_Y - POOL_RADIUS_Y) {
+        bubble.y = POOL_CENTER_Y + POOL_RADIUS_Y * 0.5;
+        bubble.x = POOL_CENTER_X + (Math.random() - 0.5) * POOL_RADIUS_X * 1.6;
+      }
+    });
+
+    // Occasionally spawn new bubbles
+    if (Math.random() < dt * 2) {
+      spawnBubble();
+    }
+  }
+
+  function drawGame() {
+    // Draw festival background with gradient
+    const bgGradient = ctx.createLinearGradient(0, 0, 0, H);
+    bgGradient.addColorStop(0, '#1C1C1A');
+    bgGradient.addColorStop(1, COLORS.bgDark);
+    ctx.fillStyle = bgGradient;
+    ctx.fillRect(0, 0, W, H);
+
+    // Draw wooden stall frame with better colors
+    ctx.fillStyle = '#8B5A2B';
+    ctx.fillRect(20, 10, 30, 400);
+    ctx.fillRect(W - 50, 10, 30, 400);
+    ctx.fillRect(10, 10, W - 20, 25);
+
+    // Wood grain highlights
+    ctx.fillStyle = '#A0724B';
+    ctx.fillRect(25, 15, 5, 390);
+    ctx.fillRect(W - 45, 15, 5, 390);
+
+    // Draw decorative lanterns
+    drawLantern(80, 50, COLORS.error);
+    drawLantern(W - 80, 50, COLORS.error);
+    drawLantern(W / 2, 40, COLORS.amber);
+
+    // Draw pool
+    drawPool();
+
+    // Draw bubbles behind fish
+    drawBubbles();
+
+    // Draw goldfish
+    goldfish.forEach(fish => {
+      if (!fish.caught) {
+        drawGoldfish(fish);
+      }
+    });
+
+    // Draw water droplets
+    drawWaterDroplets();
+
+    // Draw scoop (poi)
+    drawScoop();
+
+    // Draw answer panels at bottom
+    drawAnswerPanels();
+  }
+
+  function drawBubbles() {
+    bubbles.forEach(bubble => {
+      // Check if bubble is inside pool bounds (approximate)
+      const dx = (bubble.x - POOL_CENTER_X) / POOL_RADIUS_X;
+      const dy = (bubble.y - POOL_CENTER_Y) / POOL_RADIUS_Y;
+      if (dx * dx + dy * dy > 1) return;
+
+      ctx.beginPath();
+      ctx.arc(bubble.x, bubble.y, bubble.size, 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(255, 255, 255, ${bubble.alpha * 0.3})`;
+      ctx.fill();
+      ctx.strokeStyle = `rgba(255, 255, 255, ${bubble.alpha * 0.5})`;
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    });
+  }
+
+  function drawWaterDroplets() {
+    waterDroplets.forEach(drop => {
+      ctx.beginPath();
+      ctx.arc(drop.x, drop.y, drop.size, 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(78, 205, 196, ${drop.alpha})`;
+      ctx.fill();
+    });
+  }
+
+  function drawLantern(x, y, color) {
+    ctx.save();
+
+    // Gentle swaying animation
+    const sway = Math.sin(gameTime * 2 + x * 0.01) * 0.05;
+    ctx.translate(x, 0);
+    ctx.rotate(sway);
+    ctx.translate(-x, 0);
+
+    // String
+    ctx.strokeStyle = COLORS.bgDark;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(x, 0);
+    ctx.lineTo(x, y - 15);
+    ctx.stroke();
+
+    // Lantern glow
+    const glowGradient = ctx.createRadialGradient(x, y, 0, x, y, 35);
+    glowGradient.addColorStop(0, color + '40');
+    glowGradient.addColorStop(1, 'transparent');
+    ctx.fillStyle = glowGradient;
+    ctx.beginPath();
+    ctx.arc(x, y, 35, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Lantern body
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.ellipse(x, y, 18, 22, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Lantern ribs
+    ctx.strokeStyle = COLORS.bgDark + '80';
+    ctx.lineWidth = 1;
+    for (let i = 0; i < 5; i++) {
+      const ribX = x - 15 + i * 7.5;
+      ctx.beginPath();
+      ctx.moveTo(ribX, y - 18);
+      ctx.quadraticCurveTo(ribX + (i < 2 ? -3 : i > 2 ? 3 : 0), y, ribX, y + 18);
+      ctx.stroke();
+    }
+
+    // Top and bottom caps
+    ctx.fillStyle = COLORS.bgDark;
+    ctx.fillRect(x - 10, y - 24, 20, 6);
+    ctx.fillRect(x - 8, y + 20, 16, 5);
+
+    ctx.restore();
+  }
+
+  function drawPool() {
+    ctx.save();
+
+    // Pool shadow
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.4)';
+    ctx.beginPath();
+    ctx.ellipse(POOL_CENTER_X + 6, POOL_CENTER_Y + 6, POOL_RADIUS_X, POOL_RADIUS_Y, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Pool rim (wood) - outer ring
+    ctx.fillStyle = '#6B4423';
+    ctx.beginPath();
+    ctx.ellipse(POOL_CENTER_X, POOL_CENTER_Y, POOL_RADIUS_X + 12, POOL_RADIUS_Y + 12, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Pool rim (wood) - inner ring highlight
+    ctx.fillStyle = '#8B5A2B';
+    ctx.beginPath();
+    ctx.ellipse(POOL_CENTER_X, POOL_CENTER_Y, POOL_RADIUS_X + 8, POOL_RADIUS_Y + 8, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Pool water with QuizHP cyan
+    const gradient = ctx.createRadialGradient(POOL_CENTER_X, POOL_CENTER_Y - 30, 0, POOL_CENTER_X, POOL_CENTER_Y, POOL_RADIUS_X);
+    gradient.addColorStop(0, '#8FE8E2');
+    gradient.addColorStop(0.5, COLORS.cyan);
+    gradient.addColorStop(1, '#3BA99C');
+    ctx.fillStyle = gradient;
+    ctx.beginPath();
+    ctx.ellipse(POOL_CENTER_X, POOL_CENTER_Y, POOL_RADIUS_X, POOL_RADIUS_Y, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Water ripples with animation
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.25)';
+    ctx.lineWidth = 2;
+    for (let i = 0; i < 4; i++) {
+      const phase = gameTime * 1.5 + i * 1.5;
+      const rippleRadius = 40 + i * 50 + Math.sin(phase) * 15;
+      const alpha = 0.15 + Math.sin(phase + Math.PI / 2) * 0.1;
+      ctx.strokeStyle = `rgba(255, 255, 255, ${alpha})`;
+      ctx.beginPath();
+      ctx.ellipse(POOL_CENTER_X, POOL_CENTER_Y, rippleRadius, rippleRadius * 0.5, 0, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+
+    // Subtle water shimmer
+    const shimmerX = POOL_CENTER_X - 100 + Math.sin(gameTime * 3) * 30;
+    const shimmerGrad = ctx.createLinearGradient(shimmerX - 50, POOL_CENTER_Y - 60, shimmerX + 50, POOL_CENTER_Y - 40);
+    shimmerGrad.addColorStop(0, 'transparent');
+    shimmerGrad.addColorStop(0.5, 'rgba(255, 255, 255, 0.15)');
+    shimmerGrad.addColorStop(1, 'transparent');
+    ctx.fillStyle = shimmerGrad;
+    ctx.beginPath();
+    ctx.ellipse(shimmerX, POOL_CENTER_Y - 50, 60, 15, 0.2, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.restore();
+  }
+
+  function drawGoldfish(fish) {
+    ctx.save();
+    ctx.translate(fish.x, fish.y);
+
+    // Entrance animation with bounce
+    const entranceScale = easeOutBack(fish.entranceScale);
+    ctx.scale(entranceScale, entranceScale);
+
+    // Determine facing direction based on orbit angle
+    const facingRight = Math.cos(fish.orbitAngle + Math.PI / 2) > 0;
+    if (!facingRight) ctx.scale(-1, 1);
+
+    // Highlight scale effect
+    const highlightScale = fish.highlighted ? 1.15 : 1;
+    const s = fish.scale * highlightScale;
+    ctx.scale(s, s);
+
+    // Glow effect when highlighted
+    if (fish.highlighted) {
+      ctx.shadowColor = fish.color;
+      ctx.shadowBlur = 20;
+    }
+
+    // Fish body
+    ctx.fillStyle = fish.color;
+    ctx.beginPath();
+    ctx.ellipse(0, 0, 25, 12, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.shadowBlur = 0;
+
+    // Tail with wiggle
+    const tailAngle = Math.sin(fish.tailWiggle) * 0.3;
+    ctx.save();
+    ctx.rotate(tailAngle);
+    ctx.fillStyle = fish.color;
+    ctx.beginPath();
+    ctx.moveTo(-20, 0);
+    ctx.lineTo(-40, -15);
+    ctx.lineTo(-35, 0);
+    ctx.lineTo(-40, 15);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+
+    // Dorsal fin
+    ctx.fillStyle = fish.color;
+    ctx.beginPath();
+    ctx.moveTo(-5, -10);
+    ctx.quadraticCurveTo(5, -22, 15, -10);
+    ctx.closePath();
+    ctx.fill();
+
+    // Eye white
+    ctx.fillStyle = '#FFFFFF';
+    ctx.beginPath();
+    ctx.arc(15, -3, 5, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Eye pupil with slight animation
+    const pupilOffset = fish.highlighted ? 0.5 : 0;
+    ctx.fillStyle = COLORS.textPrimary;
+    ctx.beginPath();
+    ctx.arc(16 + pupilOffset, -3, 2.5, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Eye highlight
+    ctx.fillStyle = '#FFFFFF';
+    ctx.beginPath();
+    ctx.arc(17, -4, 1, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Body highlight
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+    ctx.beginPath();
+    ctx.ellipse(5, -4, 10, 4, -0.3, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Scales pattern (subtle)
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
+    ctx.lineWidth = 1;
+    for (let i = -10; i < 15; i += 8) {
+      ctx.beginPath();
+      ctx.arc(i, 0, 6, 0, Math.PI);
+      ctx.stroke();
+    }
+
+    ctx.restore();
+  }
+
+  function drawScoop() {
+    ctx.save();
+    ctx.translate(scoop.x, scoop.y);
+
+    // Apply scoop animation with bounce
+    if (scoop.isScooping) {
+      const dip = Math.sin(scoop.scoopProgress * Math.PI) * 35;
+      const wobble = Math.sin(scoop.scoopProgress * Math.PI * 3) * 0.1 * (1 - scoop.scoopProgress);
+      ctx.translate(0, -dip);
+      ctx.rotate(Math.sin(scoop.scoopProgress * Math.PI) * 0.25 + wobble);
+    }
+
+    // Handle shadow
+    ctx.strokeStyle = 'rgba(0, 0, 0, 0.2)';
+    ctx.lineWidth = 10;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(2, 42);
+    ctx.lineTo(2, 2);
+    ctx.stroke();
+
+    // Handle
+    const handleGrad = ctx.createLinearGradient(-5, 0, 5, 0);
+    handleGrad.addColorStop(0, '#6B4423');
+    handleGrad.addColorStop(0.5, '#8B5A2B');
+    handleGrad.addColorStop(1, '#6B4423');
+    ctx.strokeStyle = handleGrad;
+    ctx.lineWidth = 8;
+    ctx.beginPath();
+    ctx.moveTo(0, 40);
+    ctx.lineTo(0, 0);
+    ctx.stroke();
+
+    // Paper scoop frame
+    ctx.strokeStyle = '#5A3D2B';
+    ctx.lineWidth = 5;
+    ctx.beginPath();
+    ctx.ellipse(0, -15, 35, 25, 0, 0, Math.PI * 2);
+    ctx.stroke();
+
+    // Paper (semi-transparent to show fragility)
+    const paperOpacity = 0.4 + (scoop.integrity / 100) * 0.5;
+    const paperGrad = ctx.createRadialGradient(0, -15, 0, 0, -15, 35);
+    paperGrad.addColorStop(0, `rgba(255, 252, 245, ${paperOpacity})`);
+    paperGrad.addColorStop(1, `rgba(245, 235, 220, ${paperOpacity})`);
+    ctx.fillStyle = paperGrad;
+    ctx.beginPath();
+    ctx.ellipse(0, -15, 33, 23, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Paper texture lines
+    ctx.strokeStyle = `rgba(180, 160, 140, ${paperOpacity * 0.6})`;
+    ctx.lineWidth = 1;
+    for (let i = -20; i <= 20; i += 7) {
+      ctx.beginPath();
+      ctx.moveTo(i, -35);
+      ctx.lineTo(i, 5);
+      ctx.stroke();
+    }
+
+    // Cross-hatch pattern
+    ctx.strokeStyle = `rgba(180, 160, 140, ${paperOpacity * 0.3})`;
+    for (let i = -30; i <= 10; i += 8) {
+      ctx.beginPath();
+      ctx.moveTo(-30, i);
+      ctx.lineTo(30, i);
+      ctx.stroke();
+    }
+
+    ctx.restore();
+  }
+
+  function drawAnswerPanels() {
+    answerPanels.forEach((panel, i) => {
+      const progress = easeOutBack(panel.entranceProgress);
+
+      ctx.save();
+      ctx.translate(panel.x + panel.width / 2, panel.y + panel.height / 2);
+      ctx.scale(progress * panel.scale, progress * panel.scale);
+      ctx.translate(-(panel.x + panel.width / 2), -(panel.y + panel.height / 2));
+
+      // Panel shadow
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.2)';
+      ctx.beginPath();
+      ctx.roundRect(panel.x + 3, panel.y + 3, panel.width, panel.height, 12);
+      ctx.fill();
+
+      // Panel background with gradient
+      const panelGrad = ctx.createLinearGradient(panel.x, panel.y, panel.x, panel.y + panel.height);
+      panelGrad.addColorStop(0, panel.color);
+      panelGrad.addColorStop(1, adjustColor(panel.color, -20));
+      ctx.fillStyle = panelGrad;
+      ctx.beginPath();
+      ctx.roundRect(panel.x, panel.y, panel.width, panel.height, 12);
+      ctx.fill();
+
+      // Panel border with glow on hover
+      if (panel.hovered) {
+        ctx.shadowColor = panel.color;
+        ctx.shadowBlur = 15;
+      }
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      ctx.shadowBlur = 0;
+
+      // Fish icon with animation
+      const fishBob = Math.sin(gameTime * 4 + i) * 2;
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+      ctx.beginPath();
+      ctx.ellipse(panel.x + 20, panel.y + 18 + fishBob, 10, 6, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.moveTo(panel.x + 10, panel.y + 18 + fishBob);
+      ctx.lineTo(panel.x + 3, panel.y + 12 + fishBob);
+      ctx.lineTo(panel.x + 3, panel.y + 24 + fishBob);
+      ctx.closePath();
+      ctx.fill();
+
+      // Answer text - wrap to fit with Nunito font
+      ctx.fillStyle = COLORS.textLight;
+      ctx.font = "400 14px 'Nunito', sans-serif";
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'top';
+
+      const text = panel.choice.text;
+      const maxWidth = panel.width - 20;
+      const lineHeight = 16;
+      const words = text.split(' ');
+      let line = '';
+      let y = panel.y + 8;
+      let lineCount = 0;
+      const maxLines = 4;
+
+      for (let n = 0; n < words.length; n++) {
+        const testLine = line + words[n] + ' ';
+        const metrics = ctx.measureText(testLine);
+        if (metrics.width > maxWidth && n > 0) {
+          lineCount++;
+          if (lineCount <= maxLines) {
+            ctx.fillText(line.trim(), panel.x + 10, y);
+            line = words[n] + ' ';
+            y += lineHeight;
+          }
+        } else {
+          line = testLine;
+        }
+      }
+      if (lineCount < maxLines) {
+        ctx.fillText(line.trim(), panel.x + 10, y);
+      }
+
+      ctx.restore();
+    });
+  }
+
+  // Helper to adjust color brightness
+  function adjustColor(hex, amount) {
+    const num = parseInt(hex.slice(1), 16);
+    const r = Math.max(0, Math.min(255, (num >> 16) + amount));
+    const g = Math.max(0, Math.min(255, ((num >> 8) & 0x00FF) + amount));
+    const b = Math.max(0, Math.min(255, (num & 0x0000FF) + amount));
+    return `#${(1 << 24 | r << 16 | g << 8 | b).toString(16).slice(1)}`;
+  }
+
+  function easeOutBack(t) {
+    const c1 = 1.70158;
+    const c3 = c1 + 1;
+    return 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2);
+  }
+
+  function handleInput(e) {
+    if (gameState !== 'playing') return;
+    // Keyboard not used - mouse only
+  }
+
+  // Mouse/click handling for scooping
+  canvas.addEventListener('mousemove', (e) => {
+    if (gameState !== 'playing' || scoop.isScooping) return;
+
+    const { x, y } = screenToLogical(e.clientX, e.clientY);
+    scoop.targetX = x;
+    scoop.targetY = Math.max(100, Math.min(y, H - 50));
+
+    // Check if hovering over a fish
+    let hoveredFish = null;
+    goldfish.forEach(fish => {
+      const dx = fish.x - x;
+      const dy = fish.y - y;
+      const wasHighlighted = fish.highlighted;
+      fish.highlighted = Math.sqrt(dx * dx + dy * dy) < 40;
+      if (fish.highlighted) hoveredFish = fish;
+    });
+
+    // Play hover sound when entering a new fish
+    if (hoveredFish && hoveredFish !== lastHoveredFish) {
+      playSound('hover');
+    }
+    lastHoveredFish = hoveredFish;
+
+    // Check panel hover
+    answerPanels.forEach(panel => {
+      const wasHovered = panel.hovered;
+      panel.hovered = x >= panel.x && x <= panel.x + panel.width &&
+                      y >= panel.y && y <= panel.y + panel.height;
+      if (panel.hovered && !wasHovered) {
+        playSound('hover');
+      }
+    });
+  });
+
+  canvas.addEventListener('click', (e) => {
+    if (gameState !== 'playing' || scoop.isScooping) return;
+
+    initAudio(); // Ensure audio context is ready on first click
+    const { x, y } = screenToLogical(e.clientX, e.clientY);
+
+    // Check if clicking on a fish in the pool
+    for (const fish of goldfish) {
+      if (fish.caught) continue;
+
+      const dx = fish.x - x;
+      const dy = fish.y - y;
+      if (Math.sqrt(dx * dx + dy * dy) < 40) {
+        // Start scooping animation
+        playSound('splash');
+        scoop.isScooping = true;
+        scoop.scoopProgress = 0;
+        scoop.catching = fish;
+        scoop.targetX = fish.x;
+        scoop.targetY = fish.y;
+        return;
+      }
+    }
+
+    // Check if clicking on answer panels
+    for (const panel of answerPanels) {
+      if (x >= panel.x && x <= panel.x + panel.width &&
+          y >= panel.y && y <= panel.y + panel.height) {
+        // Find matching fish and scoop it
+        const fish = goldfish[panel.index];
+        if (!fish.caught) {
+          playSound('splash');
+          scoop.isScooping = true;
+          scoop.scoopProgress = 0;
+          scoop.catching = fish;
+          scoop.targetX = fish.x;
+          scoop.targetY = fish.y;
+        }
+        return;
+      }
+    }
+  });
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 4: GAME LOOP - DO NOT MODIFY                                      ║
+  // ║  Standard loop with responsive scaling and DPR support.                    ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  let lastTime = performance.now();
+
+  function gameLoop(now) {
+    const dt = Math.min((now - lastTime) / 1000, 0.05); // Cap at 50ms
+    lastTime = now;
+
+    // Apply transform for logical coordinate system
+    ctx.setTransform(scale * dpr, 0, 0, scale * dpr, 0, 0);
+
+    if (gameState === 'playing') {
+      updateGame(dt);
+      drawGame();
+    } else {
+      drawGame(); // Draw game state behind overlay
+      drawEndScreen(dt);
+    }
+
+    // Reset transform for next frame
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+    requestAnimationFrame(gameLoop);
+  }
+
+  // Input handlers
+  document.addEventListener('keydown', (e) => {
+    if (gameState === 'ended' && (e.code === 'KeyR')) {
+      // Restart game
+      gameState = 'playing';
+      gameResult = null;
+      gameExplanation = '';
+      confettiParticles = [];
+      initGame();
+      return;
+    }
+    handleInput(e);
+  });
+
+  document.addEventListener('keyup', (e) => {
+    // Optional: handle key release in your handleInput
+  });
+
+  // Canvas click handler for end screen buttons
+  canvas.addEventListener('click', (e) => {
+    if (gameState !== 'ended') return;
+
+    const { x, y } = screenToLogical(e.clientX, e.clientY);
+
+    if (gameResult) {
+      // Correct answer: check both buttons
+      if (pointInRect(x, y, restartButton)) {
+        gameState = 'playing';
+        gameResult = null;
+        gameExplanation = '';
+        confettiParticles = [];
+        initGame();
+        return;
+      }
+      if (pointInRect(x, y, nextButton)) {
+        // Notify parent to go to next question
+        if (window.parent && window.parent !== window) {
+          window.parent.postMessage({ type: 'quiz-next' }, '*');
+        }
+        return;
+      }
+    } else {
+      // Wrong answer: check centered restart button
+      const centeredRestart = { x: W / 2 - 75, y: H / 2 + 60, w: 150, h: 48 };
+      if (pointInRect(x, y, centeredRestart)) {
+        gameState = 'playing';
+        gameResult = null;
+        gameExplanation = '';
+        confettiParticles = [];
+        initGame();
+        return;
+      }
+    }
+  });
+
+  // Handle resize
+  window.addEventListener('resize', resizeCanvas);
+
+  // Initialize
+  resizeCanvas();
+  initGame();
+  requestAnimationFrame(gameLoop);
+  </script>
+</body>
+</html>

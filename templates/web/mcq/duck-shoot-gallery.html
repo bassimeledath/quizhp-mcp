@@ -1,0 +1,886 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Duck Shoot Gallery</title>
+  <!--
+  ╔══════════════════════════════════════════════════════════════════════════════╗
+  ║  GAME FACTORY TEMPLATE                                                        ║
+  ║  This template enforces critical invariants. Follow the section markers.      ║
+  ╚══════════════════════════════════════════════════════════════════════════════╝
+  -->
+  <link href="https://fonts.googleapis.com/css2?family=Belanosima:wght@400;600;700&family=Nunito+Sans:wght@400;500;600;700&family=Nunito:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    /* ═══════════════════════════════════════════════════════════════════════════
+       BASE STYLES - Can be extended, not removed
+       ═══════════════════════════════════════════════════════════════════════════ */
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      cursor: crosshair;
+    }
+    body {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      background: #1a1a2e;
+      font-family: 'Nunito Sans', system-ui, -apple-system, sans-serif;
+    }
+    #gameCanvas {
+      background: #16213e;
+      border-radius: 8px;
+      display: block;
+    }
+  </style>
+</head>
+<body>
+  <!-- ═══════════════════════════════════════════════════════════════════════════
+       CANVAS - Sized dynamically to fill available space
+       ═══════════════════════════════════════════════════════════════════════════ -->
+  <canvas id="gameCanvas"></canvas>
+
+  <script>
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 1: QUESTION PLACEHOLDER - DO NOT MODIFY FORMAT                    ║
+  // ║  Platform replaces this at runtime. Use these exact 60-char answers.       ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  const QUESTION = {
+    type: "mcq",
+    prompt: "Sample question text",
+    choices: [
+      { text: "This is sample answer A which is long enough to test text overflow", is_correct: true, explanation: "Why A is correct" },
+      { text: "This is sample answer B which is long enough to test text overflow", is_correct: false, explanation: "Why B is wrong" },
+      { text: "This is sample answer C which is long enough to test text overflow", is_correct: false, explanation: "Why C is wrong" },
+      { text: "This is sample answer D which is long enough to test text overflow", is_correct: false, explanation: "Why D is wrong" }
+    ],
+    isLastQuestion: false
+  };
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 2: ENGINE CORE - DO NOT MODIFY                                    ║
+  // ║  Standard engine interface and end screen. This is sacred.                 ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  const canvas = document.getElementById('gameCanvas');
+  const ctx = canvas.getContext('2d');
+
+  // Logical dimensions (game code works in this coordinate space)
+  const W = 720, H = 540;
+
+  // Scaling state (computed on resize)
+  let scale = 1;
+  let dpr = 1;
+
+  let gameState = 'playing'; // 'playing' | 'ended'
+  let gameResult = null;     // true (correct) | false (wrong)
+  let gameExplanation = '';
+  let endScreenTime = 0;
+  let confettiParticles = [];
+
+  // End screen button bounds (logical coordinates)
+  const restartButton = { x: W / 2 - 170, y: H / 2 + 60, w: 150, h: 48 };
+  const nextButton = { x: W / 2 + 20, y: H / 2 + 60, w: 150, h: 48 };
+
+  /** Check if point is inside rectangle */
+  function pointInRect(px, py, rect) {
+    return px >= rect.x && px <= rect.x + rect.w &&
+           py >= rect.y && py <= rect.y + rect.h;
+  }
+
+  /** Draw a styled button */
+  function drawButton(rect, label, color, pulse) {
+    const p = pulse ? 1 + Math.sin(endScreenTime * 4) * 0.03 : 1;
+    ctx.save();
+    ctx.translate(rect.x + rect.w / 2, rect.y + rect.h / 2);
+    ctx.scale(p, p);
+    ctx.translate(-(rect.x + rect.w / 2), -(rect.y + rect.h / 2));
+
+    // Button background
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.roundRect(rect.x, rect.y, rect.w, rect.h, 12);
+    ctx.fill();
+
+    // Button text
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = 'bold 18px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, rect.x + rect.w / 2, rect.y + rect.h / 2);
+
+    ctx.restore();
+  }
+
+  /**
+   * Resize canvas to fill available space with proper DPR scaling.
+   * Maintains logical coordinate system (720×540).
+   */
+  function resizeCanvas() {
+    dpr = window.devicePixelRatio || 1;
+
+    // Get available space
+    const availW = window.innerWidth;
+    const availH = window.innerHeight;
+
+    // Calculate scale to fit logical space (720×540) in available space
+    const scaleX = availW / W;
+    const scaleY = availH / H;
+    scale = Math.min(scaleX, scaleY);
+
+    // Physical canvas buffer (DPR-scaled for crisp rendering)
+    canvas.width = W * scale * dpr;
+    canvas.height = H * scale * dpr;
+
+    // CSS display size
+    canvas.style.width = (W * scale) + 'px';
+    canvas.style.height = (H * scale) + 'px';
+  }
+
+  /**
+   * Convert screen coordinates to logical coordinates.
+   * Use this for mouse/click events to get positions in 720×540 space.
+   */
+  function screenToLogical(screenX, screenY) {
+    const rect = canvas.getBoundingClientRect();
+    return {
+      x: (screenX - rect.left) * (W / rect.width),
+      y: (screenY - rect.top) * (H / rect.height)
+    };
+  }
+
+  const engine = {
+    /** Call this to end the game. DO NOT draw your own end screen. */
+    end(isCorrect, explanation) {
+      if (gameState === 'ended') return;
+      gameState = 'ended';
+      gameResult = isCorrect;
+      gameExplanation = explanation || '';
+      endScreenTime = 0;
+
+      // Spawn confetti for correct answers
+      if (isCorrect) {
+        for (let i = 0; i < 50; i++) {
+          confettiParticles.push({
+            x: W / 2,
+            y: H / 2,
+            vx: (Math.random() - 0.5) * 600,
+            vy: -Math.random() * 400 - 100,
+            size: 4 + Math.random() * 6,
+            color: ['#FFD700', '#FF6B6B', '#4ECDC4', '#95E1D3', '#F38181'][Math.floor(Math.random() * 5)],
+            rotation: Math.random() * Math.PI * 2,
+            rotationSpeed: (Math.random() - 0.5) * 10
+          });
+        }
+      }
+
+      // Notify parent frame
+      if (window.parent && window.parent !== window) {
+        window.parent.postMessage({
+          type: 'quiz-end',
+          isCorrect: isCorrect,
+          explanation: explanation || ''
+        }, '*');
+      }
+    }
+  };
+
+  /** STANDARD END SCREEN - DO NOT MODIFY */
+  function drawEndScreen(dt) {
+    endScreenTime += dt;
+
+    // Update confetti
+    confettiParticles = confettiParticles.filter(p => {
+      p.vy += 800 * dt; // gravity
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.rotation += p.rotationSpeed * dt;
+      p.vx *= 0.99;
+      return p.y < H + 50;
+    });
+
+    // Dark overlay
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
+    ctx.fillRect(0, 0, W, H);
+
+    // Draw confetti
+    confettiParticles.forEach(p => {
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rotation);
+      ctx.fillStyle = p.color;
+      ctx.fillRect(-p.size / 2, -p.size / 4, p.size, p.size / 2);
+      ctx.restore();
+    });
+
+    // Result emoji
+    ctx.font = '72px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(gameResult ? '🎉' : '😢', W / 2, H / 2 - 50);
+
+    // Result text
+    ctx.fillStyle = gameResult ? '#4ADE80' : '#F87171';
+    ctx.font = 'bold 36px system-ui, sans-serif';
+    ctx.fillText(gameResult ? 'Correct!' : 'Wrong!', W / 2, H / 2 + 20);
+
+    // Buttons
+    if (gameResult) {
+      // Correct: show both Restart and Next/Finish
+      drawButton(restartButton, 'Restart', '#E87A3E', true);
+      const nextLabel = QUESTION.isLastQuestion ? 'Finish' : 'Next';
+      drawButton(nextButton, nextLabel, '#4ECDC4', true);
+    } else {
+      // Wrong: show only centered Restart button
+      const centeredRestart = { x: W / 2 - 75, y: H / 2 + 60, w: 150, h: 48 };
+      drawButton(centeredRestart, 'Restart', '#E87A3E', true);
+    }
+  }
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 3: YOUR GAME CODE - IMPLEMENT THESE FUNCTIONS                     ║
+  // ║  This is where your game logic goes. See requirements below.               ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+
+  // Colors from styleguide
+  const COLORS = {
+    bgPrimary: '#FAFAF7',
+    bgSurface: '#FFFFFF',
+    textPrimary: '#2B2B28',
+    textSecondary: '#5A5A54',
+    orange: '#E87A3E',
+    orangeHover: '#D66B31',
+    amber: '#F5A742',
+    cyan: '#4ECDC4',
+    success: '#6BBF59',
+    error: '#E85D4A',
+    borderSubtle: '#E6E6E0',
+    borderStrong: '#D4D4CC'
+  };
+
+  // Answer duck colors (distinct for each answer)
+  const ANSWER_DUCK_COLORS = ['#E87A3E', '#4ECDC4', '#F5A742', '#6BBF59'];
+  const DECOY_COLOR = '#8B6914';
+
+  // Audio context for sound effects
+  let audioCtx = null;
+
+  function initAudio() {
+    if (!audioCtx) {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    }
+  }
+
+  function playSound(type) {
+    if (!audioCtx) return;
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+
+    if (type === 'shoot') {
+      osc.frequency.value = 150;
+      gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
+      gain.gain.exponentialDecayTo = 0.01;
+      gain.gain.setTargetAtTime(0.01, audioCtx.currentTime, 0.05);
+      osc.start();
+      osc.stop(audioCtx.currentTime + 0.1);
+    } else if (type === 'correct') {
+      osc.frequency.value = 523;
+      gain.gain.setValueAtTime(0.2, audioCtx.currentTime);
+      osc.start();
+      setTimeout(() => {
+        osc.frequency.value = 659;
+      }, 100);
+      setTimeout(() => {
+        osc.frequency.value = 784;
+      }, 200);
+      osc.stop(audioCtx.currentTime + 0.35);
+      gain.gain.setTargetAtTime(0.01, audioCtx.currentTime + 0.25, 0.05);
+    } else if (type === 'wrong') {
+      osc.frequency.value = 200;
+      gain.gain.setValueAtTime(0.2, audioCtx.currentTime);
+      gain.gain.setTargetAtTime(0.01, audioCtx.currentTime + 0.2, 0.05);
+      osc.start();
+      osc.stop(audioCtx.currentTime + 0.3);
+    }
+  }
+
+  // Game state
+  let ducks = [];
+  let crosshair = { x: W / 2, y: H / 2 };
+  let shotParticles = [];
+  let hitParticles = [];
+  let gameTime = 0;
+  let entranceAnimTime = 0;
+
+  // Tier configuration (y positions and speeds)
+  const TIERS = [
+    { y: 100, speed: 120, direction: 1 },  // Top tier - slowest
+    { y: 220, speed: 180, direction: -1 }, // Middle tier - medium
+    { y: 340, speed: 240, direction: 1 }   // Bottom tier - fastest
+  ];
+
+  // Answer labels shown on ducks - with hoverable tooltip panel
+  const ANSWER_PANEL_Y = 440;
+  const ANSWER_PANEL_HEIGHT = 100;
+  let hoveredDuck = null;
+
+  function createDuck(tierIndex, x, isAnswer, answerIndex) {
+    const tier = TIERS[tierIndex];
+    return {
+      x: x,
+      y: tier.y,
+      tierIndex: tierIndex,
+      speed: tier.speed * tier.direction * (0.9 + Math.random() * 0.2),
+      isAnswer: isAnswer,
+      answerIndex: answerIndex,
+      color: isAnswer ? ANSWER_DUCK_COLORS[answerIndex] : DECOY_COLOR,
+      scale: 1,
+      alpha: 1,
+      hit: false,
+      wobble: Math.random() * Math.PI * 2,
+      entranceDelay: isAnswer ? answerIndex * 0.15 : Math.random() * 0.5
+    };
+  }
+
+  function initGame() {
+    ducks = [];
+    shotParticles = [];
+    hitParticles = [];
+    gameTime = 0;
+    entranceAnimTime = 0;
+    crosshair = { x: W / 2, y: H / 2 };
+
+    // Create answer ducks (one per answer, distributed across tiers)
+    QUESTION.choices.forEach((choice, i) => {
+      const tierIndex = i % 3;
+      const startX = i < 2 ? -50 - i * 200 : W + 50 + (i - 2) * 200;
+      ducks.push(createDuck(tierIndex, startX, true, i));
+    });
+
+    // Create decoy ducks (8-10 decoys spread across tiers)
+    for (let i = 0; i < 9; i++) {
+      const tierIndex = i % 3;
+      const startX = Math.random() * W;
+      ducks.push(createDuck(tierIndex, startX, false, -1));
+    }
+  }
+
+  function updateGame(dt) {
+    if (gameState !== 'playing') return;
+
+    gameTime += dt;
+    entranceAnimTime += dt;
+
+    // Update ducks
+    ducks.forEach(duck => {
+      if (duck.hit) return;
+
+      // Entrance animation
+      if (entranceAnimTime < duck.entranceDelay + 0.3) {
+        const t = Math.max(0, (entranceAnimTime - duck.entranceDelay) / 0.3);
+        duck.scale = t * (1 + Math.sin(t * Math.PI) * 0.2);
+        duck.alpha = t;
+      } else {
+        duck.scale = 1;
+        duck.alpha = 1;
+      }
+
+      // Move duck
+      duck.x += duck.speed * dt;
+
+      // Wobble animation
+      duck.wobble += dt * 4;
+
+      // Wrap around screen
+      const tier = TIERS[duck.tierIndex];
+      if (tier.direction > 0 && duck.x > W + 60) {
+        duck.x = -60;
+      } else if (tier.direction < 0 && duck.x < -60) {
+        duck.x = W + 60;
+      }
+    });
+
+    // Update shot particles
+    shotParticles = shotParticles.filter(p => {
+      p.life -= dt;
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.alpha = p.life / p.maxLife;
+      return p.life > 0;
+    });
+
+    // Update hit particles
+    hitParticles = hitParticles.filter(p => {
+      p.vy += 400 * dt;
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.rotation += p.rotationSpeed * dt;
+      p.alpha -= dt * 2;
+      return p.alpha > 0;
+    });
+  }
+
+  function drawDuck(duck) {
+    if (duck.hit || duck.alpha <= 0) return;
+
+    ctx.save();
+    ctx.translate(duck.x, duck.y);
+    ctx.scale(duck.scale, duck.scale);
+    ctx.globalAlpha = duck.alpha;
+
+    // Wobble
+    const wobbleY = Math.sin(duck.wobble) * 3;
+    ctx.translate(0, wobbleY);
+
+    // Duck body (oval)
+    ctx.fillStyle = duck.color;
+    ctx.beginPath();
+    ctx.ellipse(0, 0, 30, 22, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Duck outline
+    ctx.strokeStyle = '#2B2B28';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    // Duck head
+    ctx.fillStyle = duck.color;
+    ctx.beginPath();
+    ctx.arc(25, -10, 14, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+
+    // Eye
+    ctx.fillStyle = '#FFFFFF';
+    ctx.beginPath();
+    ctx.arc(30, -12, 5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#2B2B28';
+    ctx.beginPath();
+    ctx.arc(31, -12, 2.5, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Beak
+    ctx.fillStyle = '#FF9500';
+    ctx.beginPath();
+    ctx.moveTo(38, -8);
+    ctx.lineTo(48, -6);
+    ctx.lineTo(38, -2);
+    ctx.closePath();
+    ctx.fill();
+
+    // Wing
+    ctx.fillStyle = duck.isAnswer ? shadeColor(duck.color, -20) : '#6B5010';
+    ctx.beginPath();
+    ctx.ellipse(-5, 5, 15, 10, -0.2, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Answer letter on answer ducks
+    if (duck.isAnswer) {
+      ctx.fillStyle = '#FFFFFF';
+      ctx.font = "bold 16px 'Nunito Sans', sans-serif";
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      const letter = String.fromCharCode(65 + duck.answerIndex);
+      ctx.fillText(letter, 0, 0);
+    }
+
+    ctx.restore();
+  }
+
+  function shadeColor(color, percent) {
+    const num = parseInt(color.replace('#', ''), 16);
+    const amt = Math.round(2.55 * percent);
+    const R = Math.min(255, Math.max(0, (num >> 16) + amt));
+    const G = Math.min(255, Math.max(0, (num >> 8 & 0x00FF) + amt));
+    const B = Math.min(255, Math.max(0, (num & 0x0000FF) + amt));
+    return '#' + (0x1000000 + R * 0x10000 + G * 0x100 + B).toString(16).slice(1);
+  }
+
+  function drawBackground() {
+    // Sky gradient
+    const gradient = ctx.createLinearGradient(0, 0, 0, H);
+    gradient.addColorStop(0, '#87CEEB');
+    gradient.addColorStop(0.6, '#E0F0FF');
+    gradient.addColorStop(1, '#6BBF59');
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, W, H);
+
+    // Clouds
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
+    drawCloud(100, 50, 1);
+    drawCloud(400, 80, 0.8);
+    drawCloud(600, 40, 1.2);
+
+    // Tier separator lines (shooting gallery rails)
+    ctx.strokeStyle = '#8B4513';
+    ctx.lineWidth = 6;
+    TIERS.forEach(tier => {
+      ctx.beginPath();
+      ctx.moveTo(0, tier.y + 35);
+      ctx.lineTo(W, tier.y + 35);
+      ctx.stroke();
+    });
+
+    // Wood panels on sides
+    ctx.fillStyle = '#8B4513';
+    ctx.fillRect(0, 0, 15, H);
+    ctx.fillRect(W - 15, 0, 15, H);
+
+    // Decorative bolts
+    ctx.fillStyle = '#5C3317';
+    for (let y = 50; y < H; y += 80) {
+      ctx.beginPath();
+      ctx.arc(7.5, y, 5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(W - 7.5, y, 5, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  function drawCloud(x, y, scaleVal) {
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.scale(scaleVal, scaleVal);
+    ctx.beginPath();
+    ctx.arc(0, 0, 25, 0, Math.PI * 2);
+    ctx.arc(25, -5, 20, 0, Math.PI * 2);
+    ctx.arc(50, 0, 25, 0, Math.PI * 2);
+    ctx.arc(25, 10, 18, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  function drawAnswerPanel() {
+    // Background panel with stacked answer boxes
+    ctx.fillStyle = 'rgba(43, 43, 40, 0.95)';
+    ctx.fillRect(0, ANSWER_PANEL_Y, W, ANSWER_PANEL_HEIGHT);
+
+    // Border top
+    ctx.strokeStyle = COLORS.borderStrong;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(0, ANSWER_PANEL_Y);
+    ctx.lineTo(W, ANSWER_PANEL_Y);
+    ctx.stroke();
+
+    // 2x2 grid layout for answers
+    const boxWidth = 340;
+    const boxHeight = 42;
+    const startX = (W - boxWidth * 2 - 20) / 2;
+    const startY = ANSWER_PANEL_Y + 8;
+    const gap = 8;
+
+    QUESTION.choices.forEach((choice, i) => {
+      const col = i % 2;
+      const row = Math.floor(i / 2);
+      const x = startX + col * (boxWidth + 20);
+      const y = startY + row * (boxHeight + gap);
+
+      // Box background
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.1)';
+      ctx.beginPath();
+      ctx.roundRect(x, y, boxWidth, boxHeight, 8);
+      ctx.fill();
+
+      // Color indicator circle with letter
+      ctx.fillStyle = ANSWER_DUCK_COLORS[i];
+      ctx.beginPath();
+      ctx.arc(x + 20, y + boxHeight / 2, 14, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.fillStyle = '#FFFFFF';
+      ctx.font = "bold 14px 'Nunito Sans', sans-serif";
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(String.fromCharCode(65 + i), x + 20, y + boxHeight / 2);
+
+      // Answer text
+      ctx.fillStyle = '#F5F5F0';
+      ctx.font = "400 14px 'Nunito', sans-serif";
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
+
+      // Draw text with wrapping to fit in box
+      const textX = x + 42;
+      const maxTextWidth = boxWidth - 50;
+      const text = choice.text;
+
+      // Measure and wrap text
+      const words = text.split(' ');
+      let line1 = '';
+      let line2 = '';
+      let onLine1 = true;
+
+      for (const word of words) {
+        const testLine = (onLine1 ? line1 : line2) + word + ' ';
+        if (ctx.measureText(testLine).width > maxTextWidth) {
+          if (onLine1) {
+            onLine1 = false;
+            line2 = word + ' ';
+          } else {
+            line2 += word + ' ';
+          }
+        } else {
+          if (onLine1) {
+            line1 = testLine;
+          } else {
+            line2 = testLine;
+          }
+        }
+      }
+
+      if (line2) {
+        ctx.fillText(line1.trim(), textX, y + boxHeight / 2 - 8);
+        ctx.fillText(line2.trim(), textX, y + boxHeight / 2 + 8);
+      } else {
+        ctx.fillText(line1.trim(), textX, y + boxHeight / 2);
+      }
+    });
+  }
+
+  function drawCrosshair() {
+    ctx.save();
+    ctx.translate(crosshair.x, crosshair.y);
+
+    // Outer circle
+    ctx.strokeStyle = COLORS.error;
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(0, 0, 25, 0, Math.PI * 2);
+    ctx.stroke();
+
+    // Inner circle
+    ctx.beginPath();
+    ctx.arc(0, 0, 5, 0, Math.PI * 2);
+    ctx.stroke();
+
+    // Crosshair lines
+    ctx.beginPath();
+    ctx.moveTo(-35, 0);
+    ctx.lineTo(-10, 0);
+    ctx.moveTo(10, 0);
+    ctx.lineTo(35, 0);
+    ctx.moveTo(0, -35);
+    ctx.lineTo(0, -10);
+    ctx.moveTo(0, 10);
+    ctx.lineTo(0, 35);
+    ctx.stroke();
+
+    ctx.restore();
+  }
+
+  function drawParticles() {
+    // Shot particles (muzzle flash)
+    shotParticles.forEach(p => {
+      ctx.globalAlpha = p.alpha;
+      ctx.fillStyle = p.color;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+      ctx.fill();
+    });
+    ctx.globalAlpha = 1;
+
+    // Hit particles (feathers)
+    hitParticles.forEach(p => {
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rotation);
+      ctx.globalAlpha = p.alpha;
+      ctx.fillStyle = p.color;
+      ctx.beginPath();
+      ctx.ellipse(0, 0, p.size, p.size / 3, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    });
+  }
+
+  function drawGame() {
+    drawBackground();
+
+    // Draw ducks (sorted by tier for proper layering)
+    const sortedDucks = [...ducks].sort((a, b) => a.tierIndex - b.tierIndex);
+    sortedDucks.forEach(drawDuck);
+
+    drawParticles();
+    drawAnswerPanel();
+    drawCrosshair();
+  }
+
+  function shoot(x, y) {
+    initAudio();
+    playSound('shoot');
+
+    // Create muzzle flash particles
+    for (let i = 0; i < 8; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const speed = 100 + Math.random() * 150;
+      shotParticles.push({
+        x: x,
+        y: y,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed,
+        size: 3 + Math.random() * 4,
+        color: Math.random() > 0.5 ? '#FFD700' : '#FFA500',
+        life: 0.2 + Math.random() * 0.1,
+        maxLife: 0.3,
+        alpha: 1
+      });
+    }
+
+    // Check for duck hits
+    for (const duck of ducks) {
+      if (duck.hit) continue;
+
+      const dx = x - duck.x;
+      const dy = y - duck.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+
+      if (dist < 40) {
+        duck.hit = true;
+
+        // Create hit particles (feathers)
+        for (let i = 0; i < 15; i++) {
+          const angle = Math.random() * Math.PI * 2;
+          const speed = 150 + Math.random() * 200;
+          hitParticles.push({
+            x: duck.x,
+            y: duck.y,
+            vx: Math.cos(angle) * speed,
+            vy: Math.sin(angle) * speed - 100,
+            size: 6 + Math.random() * 8,
+            color: duck.color,
+            rotation: Math.random() * Math.PI * 2,
+            rotationSpeed: (Math.random() - 0.5) * 10,
+            alpha: 1
+          });
+        }
+
+        if (duck.isAnswer) {
+          const choice = QUESTION.choices[duck.answerIndex];
+          setTimeout(() => {
+            playSound(choice.is_correct ? 'correct' : 'wrong');
+            engine.end(choice.is_correct, choice.explanation);
+          }, 300);
+        }
+        break;
+      }
+    }
+  }
+
+  function handleInput(e) {
+    if (gameState !== 'playing') return;
+    // No keyboard input needed - mouse/click only
+  }
+
+  // Mouse tracking for crosshair
+  canvas.addEventListener('mousemove', (e) => {
+    if (gameState !== 'playing') return;
+    const pos = screenToLogical(e.clientX, e.clientY);
+    crosshair.x = pos.x;
+    crosshair.y = pos.y;
+  });
+
+  // Click to shoot
+  canvas.addEventListener('click', (e) => {
+    if (gameState !== 'playing') return;
+    const pos = screenToLogical(e.clientX, e.clientY);
+    shoot(pos.x, pos.y);
+  });
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 4: GAME LOOP - DO NOT MODIFY                                      ║
+  // ║  Standard loop with responsive scaling and DPR support.                    ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  let lastTime = performance.now();
+
+  function gameLoop(now) {
+    const dt = Math.min((now - lastTime) / 1000, 0.05); // Cap at 50ms
+    lastTime = now;
+
+    // Apply transform for logical coordinate system
+    ctx.setTransform(scale * dpr, 0, 0, scale * dpr, 0, 0);
+
+    if (gameState === 'playing') {
+      updateGame(dt);
+      drawGame();
+    } else {
+      drawGame(); // Draw game state behind overlay
+      drawEndScreen(dt);
+    }
+
+    // Reset transform for next frame
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+    requestAnimationFrame(gameLoop);
+  }
+
+  // Input handlers
+  document.addEventListener('keydown', (e) => {
+    if (gameState === 'ended' && (e.code === 'KeyR')) {
+      // Restart game
+      gameState = 'playing';
+      gameResult = null;
+      gameExplanation = '';
+      confettiParticles = [];
+      initGame();
+      return;
+    }
+    handleInput(e);
+  });
+
+  document.addEventListener('keyup', (e) => {
+    // Optional: handle key release in your handleInput
+  });
+
+  // Canvas click handler for end screen buttons
+  canvas.addEventListener('click', (e) => {
+    if (gameState !== 'ended') return;
+
+    const { x, y } = screenToLogical(e.clientX, e.clientY);
+
+    if (gameResult) {
+      // Correct answer: check both buttons
+      if (pointInRect(x, y, restartButton)) {
+        gameState = 'playing';
+        gameResult = null;
+        gameExplanation = '';
+        confettiParticles = [];
+        initGame();
+        return;
+      }
+      if (pointInRect(x, y, nextButton)) {
+        // Notify parent to go to next question
+        if (window.parent && window.parent !== window) {
+          window.parent.postMessage({ type: 'quiz-next' }, '*');
+        }
+        return;
+      }
+    } else {
+      // Wrong answer: check centered restart button
+      const centeredRestart = { x: W / 2 - 75, y: H / 2 + 60, w: 150, h: 48 };
+      if (pointInRect(x, y, centeredRestart)) {
+        gameState = 'playing';
+        gameResult = null;
+        gameExplanation = '';
+        confettiParticles = [];
+        initGame();
+        return;
+      }
+    }
+  });
+
+  // Handle resize
+  window.addEventListener('resize', resizeCanvas);
+
+  // Initialize
+  resizeCanvas();
+  initGame();
+  requestAnimationFrame(gameLoop);
+  </script>
+</body>
+</html>

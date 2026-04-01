@@ -1,0 +1,1009 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Game Template</title>
+  <link href="https://fonts.googleapis.com/css2?family=Belanosima:wght@400;600;700&family=Nunito+Sans:wght@400;500;600;700&family=Nunito:wght@400;500;600&display=swap" rel="stylesheet">
+  <!--
+  +==============================================================================+
+  |  GAME FACTORY TEMPLATE                                                        |
+  |  This template enforces critical invariants. Follow the section markers.      |
+  +==============================================================================+
+  -->
+  <style>
+    /* ===================================================================
+       BASE STYLES - Can be extended, not removed
+       =================================================================== */
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+    }
+    body {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      background: #1a1a2e;
+      font-family: system-ui, -apple-system, sans-serif;
+    }
+    #gameCanvas {
+      background: #16213e;
+      border-radius: 8px;
+      display: block;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+  <!-- ===================================================================
+       CANVAS - Sized dynamically to fill available space
+       =================================================================== -->
+  <canvas id="gameCanvas"></canvas>
+
+  <script>
+  // +========================================================================+
+  // |  SECTION 1: QUESTION PLACEHOLDER - DO NOT MODIFY FORMAT                    |
+  // |  Platform replaces this at runtime. Use these exact 60-char answers.       |
+  // +========================================================================+
+  const QUESTION = {
+    type: "mcq",
+    prompt: "Sample question text",
+    choices: [
+      { text: "This is sample answer A which is long enough to test text overflow", is_correct: true, explanation: "Why A is correct" },
+      { text: "This is sample answer B which is long enough to test text overflow", is_correct: false, explanation: "Why B is wrong" },
+      { text: "This is sample answer C which is long enough to test text overflow", is_correct: false, explanation: "Why C is wrong" },
+      { text: "This is sample answer D which is long enough to test text overflow", is_correct: false, explanation: "Why D is wrong" }
+    ],
+    isLastQuestion: false
+  };
+
+  // +========================================================================+
+  // |  SECTION 2: ENGINE CORE - DO NOT MODIFY                                    |
+  // |  Standard engine interface and end screen. This is sacred.                 |
+  // +========================================================================+
+  const canvas = document.getElementById('gameCanvas');
+  const ctx = canvas.getContext('2d');
+
+  // Logical dimensions (game code works in this coordinate space)
+  const W = 720, H = 540;
+
+  // Scaling state (computed on resize)
+  let scale = 1;
+  let dpr = 1;
+
+  let gameState = 'playing'; // 'playing' | 'ended'
+  let gameResult = null;     // true (correct) | false (wrong)
+  let gameExplanation = '';
+  let endScreenTime = 0;
+  let confettiParticles = [];
+
+  // End screen button bounds (logical coordinates)
+  const restartButton = { x: W / 2 - 170, y: H / 2 + 60, w: 150, h: 48 };
+  const nextButton = { x: W / 2 + 20, y: H / 2 + 60, w: 150, h: 48 };
+
+  /** Check if point is inside rectangle */
+  function pointInRect(px, py, rect) {
+    return px >= rect.x && px <= rect.x + rect.w &&
+           py >= rect.y && py <= rect.y + rect.h;
+  }
+
+  /** Draw a styled button */
+  function drawButton(rect, label, color, pulse) {
+    const p = pulse ? 1 + Math.sin(endScreenTime * 4) * 0.03 : 1;
+    ctx.save();
+    ctx.translate(rect.x + rect.w / 2, rect.y + rect.h / 2);
+    ctx.scale(p, p);
+    ctx.translate(-(rect.x + rect.w / 2), -(rect.y + rect.h / 2));
+
+    // Button background
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.roundRect(rect.x, rect.y, rect.w, rect.h, 12);
+    ctx.fill();
+
+    // Button text
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = 'bold 18px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, rect.x + rect.w / 2, rect.y + rect.h / 2);
+
+    ctx.restore();
+  }
+
+  /**
+   * Resize canvas to fill available space with proper DPR scaling.
+   * Maintains logical coordinate system (720x540).
+   */
+  function resizeCanvas() {
+    dpr = window.devicePixelRatio || 1;
+
+    // Get available space
+    const availW = window.innerWidth;
+    const availH = window.innerHeight;
+
+    // Calculate scale to fit logical space (720x540) in available space
+    const scaleX = availW / W;
+    const scaleY = availH / H;
+    scale = Math.min(scaleX, scaleY);
+
+    // Physical canvas buffer (DPR-scaled for crisp rendering)
+    canvas.width = W * scale * dpr;
+    canvas.height = H * scale * dpr;
+
+    // CSS display size
+    canvas.style.width = (W * scale) + 'px';
+    canvas.style.height = (H * scale) + 'px';
+  }
+
+  /**
+   * Convert screen coordinates to logical coordinates.
+   * Use this for mouse/click events to get positions in 720x540 space.
+   */
+  function screenToLogical(screenX, screenY) {
+    const rect = canvas.getBoundingClientRect();
+    return {
+      x: (screenX - rect.left) * (W / rect.width),
+      y: (screenY - rect.top) * (H / rect.height)
+    };
+  }
+
+  const engine = {
+    /** Call this to end the game. DO NOT draw your own end screen. */
+    end(isCorrect, explanation) {
+      if (gameState === 'ended') return;
+      gameState = 'ended';
+      gameResult = isCorrect;
+      gameExplanation = explanation || '';
+      endScreenTime = 0;
+
+      // Spawn confetti for correct answers
+      if (isCorrect) {
+        for (let i = 0; i < 50; i++) {
+          confettiParticles.push({
+            x: W / 2,
+            y: H / 2,
+            vx: (Math.random() - 0.5) * 600,
+            vy: -Math.random() * 400 - 100,
+            size: 4 + Math.random() * 6,
+            color: ['#FFD700', '#FF6B6B', '#4ECDC4', '#95E1D3', '#F38181'][Math.floor(Math.random() * 5)],
+            rotation: Math.random() * Math.PI * 2,
+            rotationSpeed: (Math.random() - 0.5) * 10
+          });
+        }
+      }
+
+      // Notify parent frame
+      if (window.parent && window.parent !== window) {
+        window.parent.postMessage({
+          type: 'quiz-end',
+          isCorrect: isCorrect,
+          explanation: explanation || ''
+        }, '*');
+      }
+    }
+  };
+
+  /** STANDARD END SCREEN - DO NOT MODIFY */
+  function drawEndScreen(dt) {
+    endScreenTime += dt;
+
+    // Update confetti
+    confettiParticles = confettiParticles.filter(p => {
+      p.vy += 800 * dt; // gravity
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.rotation += p.rotationSpeed * dt;
+      p.vx *= 0.99;
+      return p.y < H + 50;
+    });
+
+    // Dark overlay
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
+    ctx.fillRect(0, 0, W, H);
+
+    // Draw confetti
+    confettiParticles.forEach(p => {
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rotation);
+      ctx.fillStyle = p.color;
+      ctx.fillRect(-p.size / 2, -p.size / 4, p.size, p.size / 2);
+      ctx.restore();
+    });
+
+    // Result emoji
+    ctx.font = '72px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(gameResult ? '🎉' : '😢', W / 2, H / 2 - 50);
+
+    // Result text
+    ctx.fillStyle = gameResult ? '#4ADE80' : '#F87171';
+    ctx.font = 'bold 36px system-ui, sans-serif';
+    ctx.fillText(gameResult ? 'Correct!' : 'Wrong!', W / 2, H / 2 + 20);
+
+    // Buttons
+    if (gameResult) {
+      // Correct: show both Restart and Next/Finish
+      drawButton(restartButton, 'Restart', '#E87A3E', true);
+      const nextLabel = QUESTION.isLastQuestion ? 'Finish' : 'Next';
+      drawButton(nextButton, nextLabel, '#4ECDC4', true);
+    } else {
+      // Wrong: show only centered Restart button
+      const centeredRestart = { x: W / 2 - 75, y: H / 2 + 60, w: 150, h: 48 };
+      drawButton(centeredRestart, 'Restart', '#E87A3E', true);
+    }
+  }
+
+  // +========================================================================+
+  // |  SECTION 3: YOUR GAME CODE - IMPLEMENT THESE FUNCTIONS                     |
+  // |  This is where your game logic goes. See requirements below.               |
+  // +========================================================================+
+
+  // === COLORS ===
+  const COLORS = {
+    bgPrimary: '#FAFAF7',
+    bgSurface: '#FFFFFF',
+    textPrimary: '#2B2B28',
+    textSecondary: '#5A5A54',
+    orange: '#E87A3E',
+    orangeHover: '#D66B31',
+    amber: '#F5A742',
+    cyan: '#4ECDC4',
+    cyanLight: '#E8F9F8',
+    success: '#6BBF59',
+    error: '#E85D4A',
+    borderSubtle: '#E6E6E0',
+    borderStrong: '#D4D4CC'
+  };
+
+  // Beam colors for each of the 4 beams
+  const BEAM_COLORS = ['#E87A3E', '#4ECDC4', '#F5A742', '#6BBF59'];
+  const BEAM_GLOW_COLORS = ['rgba(232,122,62,0.4)', 'rgba(78,205,196,0.4)', 'rgba(245,167,66,0.4)', 'rgba(107,191,89,0.4)'];
+  const BEAM_HIGHLIGHT_COLORS = ['rgba(232,122,62,0.7)', 'rgba(78,205,196,0.7)', 'rgba(245,167,66,0.7)', 'rgba(107,191,89,0.7)'];
+
+  // Pattern types for each beam
+  const PATTERN_TYPES = ['circles', 'diamonds', 'waves', 'stars'];
+
+  // === GAME STATE ===
+  let beams = [];
+  let patterns = [];
+  let hoveredIndex = -1;
+  let selectedIndex = -1;
+  let gameTime = 0;
+  let entranceProgress = 0;
+  let selectionAnim = 0;
+  let shakeAnim = { active: false, time: 0, index: -1 };
+  let correctAnim = { active: false, time: 0, index: -1 };
+  let gameParticles = [];
+  let mousePos = { x: -1, y: -1 };
+
+  // Reduced motion check
+  const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  // Audio context for sound effects
+  let audioCtx = null;
+  function getAudioCtx() {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    return audioCtx;
+  }
+
+  function playClickSound() {
+    try {
+      const ctx = getAudioCtx();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.frequency.setValueAtTime(600, ctx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(800, ctx.currentTime + 0.05);
+      gain.gain.setValueAtTime(0.15, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.1);
+      osc.start(ctx.currentTime);
+      osc.stop(ctx.currentTime + 0.1);
+    } catch(e) {}
+  }
+
+  function playCorrectSound() {
+    try {
+      const ctx = getAudioCtx();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(523, ctx.currentTime);
+      osc.frequency.setValueAtTime(659, ctx.currentTime + 0.1);
+      osc.frequency.setValueAtTime(784, ctx.currentTime + 0.2);
+      gain.gain.setValueAtTime(0.2, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.4);
+      osc.start(ctx.currentTime);
+      osc.stop(ctx.currentTime + 0.4);
+    } catch(e) {}
+  }
+
+  function playWrongSound() {
+    try {
+      const ctx = getAudioCtx();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(300, ctx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(150, ctx.currentTime + 0.3);
+      gain.gain.setValueAtTime(0.12, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);
+      osc.start(ctx.currentTime);
+      osc.stop(ctx.currentTime + 0.3);
+    } catch(e) {}
+  }
+
+  // Word-wrap helper for canvas text
+  function wrapText(text, maxWidth, font) {
+    ctx.font = font;
+    const words = text.split(' ');
+    const lines = [];
+    let currentLine = '';
+    for (const word of words) {
+      const testLine = currentLine ? currentLine + ' ' + word : word;
+      if (ctx.measureText(testLine).width > maxWidth && currentLine) {
+        lines.push(currentLine);
+        currentLine = word;
+      } else {
+        currentLine = testLine;
+      }
+    }
+    if (currentLine) lines.push(currentLine);
+    return lines;
+  }
+
+  function initGame() {
+    gameTime = 0;
+    entranceProgress = 0;
+    hoveredIndex = -1;
+    selectedIndex = -1;
+    selectionAnim = 0;
+    shakeAnim = { active: false, time: 0, index: -1 };
+    correctAnim = { active: false, time: 0, index: -1 };
+    gameParticles = [];
+
+    // Crystal surface area (bottom portion of canvas)
+    const crystalY = 240;
+    const crystalH = 280;
+    const patternW = 155;
+    const patternH = 170;
+    const gap = 12;
+    const totalW = patternW * 4 + gap * 3;
+    const startX = (W - totalW) / 2;
+
+    // Setup beams and patterns
+    beams = [];
+    patterns = [];
+
+    for (let i = 0; i < 4; i++) {
+      const px = startX + i * (patternW + gap);
+      const py = crystalY + 30;
+
+      // Beam origin (top of canvas, spread across)
+      const beamOriginX = px + patternW / 2;
+      const beamOriginY = 20;
+
+      beams.push({
+        originX: beamOriginX,
+        originY: beamOriginY,
+        targetX: px + patternW / 2,
+        targetY: py + patternH / 2,
+        color: BEAM_COLORS[i],
+        glowColor: BEAM_GLOW_COLORS[i],
+        highlightColor: BEAM_HIGHLIGHT_COLORS[i],
+        patternType: PATTERN_TYPES[i],
+        alpha: 0,
+        scale: 0
+      });
+
+      patterns.push({
+        x: px,
+        y: py,
+        w: patternW,
+        h: patternH,
+        color: BEAM_COLORS[i],
+        glowColor: BEAM_GLOW_COLORS[i],
+        highlightColor: BEAM_HIGHLIGHT_COLORS[i],
+        patternType: PATTERN_TYPES[i],
+        choice: QUESTION.choices[i],
+        alpha: 0,
+        scale: 0,
+        hoverScale: 1,
+        offsetX: 0
+      });
+    }
+  }
+
+  function updateGame(dt) {
+    if (gameState !== 'playing') return;
+
+    gameTime += dt;
+
+    // Entrance animation (staggered)
+    if (!prefersReducedMotion) {
+      entranceProgress = Math.min(entranceProgress + dt * 2.5, 1);
+      for (let i = 0; i < 4; i++) {
+        const stagger = i * 0.12;
+        const t = Math.max(0, Math.min(1, (entranceProgress - stagger) / 0.6));
+        // Spring easing
+        const spring = t < 1 ? t * (1 + Math.sin(t * Math.PI * 2) * 0.15 * (1 - t)) : 1;
+        beams[i].alpha = t;
+        beams[i].scale = spring;
+        patterns[i].alpha = t;
+        patterns[i].scale = spring;
+      }
+    } else {
+      for (let i = 0; i < 4; i++) {
+        beams[i].alpha = 1;
+        beams[i].scale = 1;
+        patterns[i].alpha = 1;
+        patterns[i].scale = 1;
+      }
+    }
+
+    // Hover animation
+    for (let i = 0; i < 4; i++) {
+      const targetScale = (hoveredIndex === i) ? 1.06 : 1;
+      patterns[i].hoverScale += (targetScale - patterns[i].hoverScale) * dt * 12;
+    }
+
+    // Shake animation (wrong answer)
+    if (shakeAnim.active) {
+      shakeAnim.time += dt;
+      const decay = 1 - Math.min(shakeAnim.time / 0.4, 1);
+      patterns[shakeAnim.index].offsetX = Math.sin(shakeAnim.time * Math.PI * 10) * 8 * decay;
+      if (shakeAnim.time >= 0.4) {
+        patterns[shakeAnim.index].offsetX = 0;
+        shakeAnim.active = false;
+      }
+    }
+
+    // Correct animation (pulse)
+    if (correctAnim.active) {
+      correctAnim.time += dt;
+      if (correctAnim.time >= 0.5) {
+        correctAnim.active = false;
+      }
+    }
+
+    // Update particles
+    gameParticles = gameParticles.filter(p => {
+      p.vy += 400 * dt;
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.rotation += p.rotationSpeed * dt;
+      p.alpha -= dt * 1.5;
+      return p.alpha > 0 && p.y < H + 20;
+    });
+
+    // Handle selection result
+    if (selectedIndex >= 0 && selectionAnim > 0) {
+      selectionAnim -= dt;
+      if (selectionAnim <= 0) {
+        const choice = QUESTION.choices[selectedIndex];
+        engine.end(choice.is_correct, choice.explanation);
+      }
+    }
+  }
+
+  function drawCrystalSurface() {
+    // Crystal surface background
+    const surfY = 230;
+    const surfH = 300;
+
+    // Gradient background for crystal surface
+    const grad = ctx.createLinearGradient(0, surfY, 0, surfY + surfH);
+    grad.addColorStop(0, 'rgba(250,250,247,0.05)');
+    grad.addColorStop(0.3, 'rgba(250,250,247,0.08)');
+    grad.addColorStop(1, 'rgba(250,250,247,0.02)');
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.roundRect(30, surfY, W - 60, surfH, 16);
+    ctx.fill();
+
+    // Subtle crystal texture lines
+    ctx.strokeStyle = 'rgba(250,250,247,0.04)';
+    ctx.lineWidth = 1;
+    for (let i = 0; i < 8; i++) {
+      ctx.beginPath();
+      ctx.moveTo(60 + i * 85, surfY);
+      ctx.lineTo(60 + i * 85 + 30, surfY + surfH);
+      ctx.stroke();
+    }
+  }
+
+  function drawBeam(index) {
+    const beam = beams[index];
+    if (beam.alpha <= 0) return;
+
+    const isHovered = hoveredIndex === index;
+    const isSelected = selectedIndex === index;
+    const glowIntensity = isHovered ? 0.6 : 0.25;
+    const beamWidth = isHovered ? 28 : 16;
+    const pulsePhase = gameTime * 2 + index * 1.5;
+    const pulse = 1 + Math.sin(pulsePhase) * 0.15;
+
+    ctx.save();
+    ctx.globalAlpha = beam.alpha;
+
+    // Beam glow
+    const beamGrad = ctx.createLinearGradient(beam.originX, beam.originY, beam.targetX, beam.targetY);
+    beamGrad.addColorStop(0, isHovered ? beam.highlightColor : beam.glowColor);
+    beamGrad.addColorStop(0.5, isHovered ? beam.highlightColor : beam.glowColor);
+    beamGrad.addColorStop(1, 'rgba(0,0,0,0)');
+
+    ctx.strokeStyle = beamGrad;
+    ctx.lineWidth = beamWidth * pulse;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(beam.originX, beam.originY);
+    ctx.lineTo(beam.targetX, beam.targetY - 40);
+    ctx.stroke();
+
+    // Beam core (bright center line)
+    ctx.strokeStyle = beam.color;
+    ctx.lineWidth = 3 * pulse;
+    ctx.globalAlpha = beam.alpha * (isHovered ? 0.9 : 0.5);
+    ctx.beginPath();
+    ctx.moveTo(beam.originX, beam.originY);
+    ctx.lineTo(beam.targetX, beam.targetY - 40);
+    ctx.stroke();
+
+    // Light source at origin
+    ctx.globalAlpha = beam.alpha;
+    const sourceGrad = ctx.createRadialGradient(beam.originX, beam.originY, 0, beam.originX, beam.originY, 18 * pulse);
+    sourceGrad.addColorStop(0, beam.color);
+    sourceGrad.addColorStop(0.5, isHovered ? beam.highlightColor : beam.glowColor);
+    sourceGrad.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = sourceGrad;
+    ctx.beginPath();
+    ctx.arc(beam.originX, beam.originY, 18 * pulse, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.restore();
+  }
+
+  function drawPattern(index) {
+    const pat = patterns[index];
+    if (pat.alpha <= 0) return;
+
+    const isHovered = hoveredIndex === index;
+    const isSelected = selectedIndex === index;
+    const choice = pat.choice;
+
+    ctx.save();
+
+    // Apply entrance + hover scale
+    const centerX = pat.x + pat.w / 2 + pat.offsetX;
+    const centerY = pat.y + pat.h / 2;
+    const finalScale = pat.scale * pat.hoverScale;
+
+    // Correct answer pulse
+    let correctPulse = 1;
+    if (correctAnim.active && correctAnim.index === index) {
+      const t = correctAnim.time / 0.5;
+      correctPulse = 1 + Math.sin(t * Math.PI) * 0.08;
+    }
+
+    ctx.translate(centerX, centerY);
+    ctx.scale(finalScale * correctPulse, finalScale * correctPulse);
+    ctx.translate(-centerX, -centerY);
+    ctx.globalAlpha = pat.alpha;
+
+    // Pattern background with glow
+    const bgColor = isHovered ? 'rgba(250,250,247,0.12)' : 'rgba(250,250,247,0.06)';
+    const borderColor = isSelected
+      ? (choice.is_correct ? COLORS.success : COLORS.error)
+      : (isHovered ? pat.color : 'rgba(250,250,247,0.1)');
+
+    // Draw pattern card
+    ctx.fillStyle = bgColor;
+    ctx.beginPath();
+    ctx.roundRect(pat.x + pat.offsetX, pat.y, pat.w, pat.h, 12);
+    ctx.fill();
+
+    ctx.strokeStyle = borderColor;
+    ctx.lineWidth = isHovered ? 2.5 : 1.5;
+    ctx.beginPath();
+    ctx.roundRect(pat.x + pat.offsetX, pat.y, pat.w, pat.h, 12);
+    ctx.stroke();
+
+    // Glow effect when hovered
+    if (isHovered) {
+      ctx.shadowColor = pat.color;
+      ctx.shadowBlur = 20;
+      ctx.strokeStyle = pat.color;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.roundRect(pat.x + pat.offsetX, pat.y, pat.w, pat.h, 12);
+      ctx.stroke();
+      ctx.shadowBlur = 0;
+    }
+
+    // Draw the pattern shape
+    const patCenterX = pat.x + pat.w / 2 + pat.offsetX;
+    const patCenterY = pat.y + 50;
+    const patTime = gameTime * 1.5 + index;
+
+    ctx.save();
+    drawPatternShape(pat.patternType, patCenterX, patCenterY, pat.color, patTime, isHovered);
+    ctx.restore();
+
+    // Answer text area
+    const textY = pat.y + pat.h - 65;
+    const textX = pat.x + pat.offsetX + 8;
+    const textMaxW = pat.w - 16;
+
+    // Text background
+    ctx.fillStyle = isHovered ? 'rgba(250,250,247,0.1)' : 'rgba(250,250,247,0.05)';
+    ctx.beginPath();
+    ctx.roundRect(pat.x + pat.offsetX + 4, textY - 6, pat.w - 8, 60, 8);
+    ctx.fill();
+
+    // Answer text (wrapped)
+    const font = "400 14px 'Nunito', sans-serif";
+    ctx.font = font;
+    ctx.fillStyle = isHovered ? '#FAFAF7' : 'rgba(250,250,247,0.8)';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+
+    const lines = wrapText(choice.text, textMaxW, font);
+    const lineHeight = 16;
+    for (let l = 0; l < lines.length; l++) {
+      ctx.fillText(lines[l], textX, textY + l * lineHeight);
+    }
+
+    // Choice label (A, B, C, D)
+    const labels = ['A', 'B', 'C', 'D'];
+    ctx.font = "600 14px 'Nunito Sans', sans-serif";
+    ctx.fillStyle = pat.color;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+
+    // Label badge
+    ctx.fillStyle = pat.color;
+    ctx.globalAlpha = pat.alpha * 0.2;
+    ctx.beginPath();
+    ctx.arc(pat.x + pat.offsetX + 18, pat.y + 14, 11, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalAlpha = pat.alpha;
+    ctx.fillStyle = pat.color;
+    ctx.fillText(labels[index], pat.x + pat.offsetX + 18, pat.y + 14);
+
+    ctx.restore();
+  }
+
+  function drawPatternShape(type, cx, cy, color, time, isHovered) {
+    const size = isHovered ? 30 : 26;
+    ctx.strokeStyle = color;
+    ctx.fillStyle = color;
+
+    switch(type) {
+      case 'circles': {
+        // Concentric circles pattern
+        for (let r = 0; r < 3; r++) {
+          const radius = (r + 1) * (size / 3) + Math.sin(time + r) * 2;
+          ctx.globalAlpha = isHovered ? 0.8 - r * 0.2 : 0.5 - r * 0.15;
+          ctx.lineWidth = isHovered ? 2.5 : 1.5;
+          ctx.beginPath();
+          ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+          ctx.stroke();
+        }
+        // Center dot
+        ctx.globalAlpha = isHovered ? 1 : 0.6;
+        ctx.beginPath();
+        ctx.arc(cx, cy, 3, 0, Math.PI * 2);
+        ctx.fill();
+        break;
+      }
+      case 'diamonds': {
+        // Rotating diamond pattern
+        for (let d = 0; d < 3; d++) {
+          const s = (d + 1) * (size / 3);
+          const rot = time * 0.3 + d * 0.5;
+          ctx.globalAlpha = isHovered ? 0.8 - d * 0.2 : 0.5 - d * 0.15;
+          ctx.lineWidth = isHovered ? 2.5 : 1.5;
+          ctx.save();
+          ctx.translate(cx, cy);
+          ctx.rotate(rot);
+          ctx.beginPath();
+          ctx.moveTo(0, -s);
+          ctx.lineTo(s, 0);
+          ctx.lineTo(0, s);
+          ctx.lineTo(-s, 0);
+          ctx.closePath();
+          ctx.stroke();
+          ctx.restore();
+        }
+        break;
+      }
+      case 'waves': {
+        // Sine wave pattern
+        for (let w = 0; w < 3; w++) {
+          const yOff = (w - 1) * 14;
+          ctx.globalAlpha = isHovered ? 0.8 - w * 0.15 : 0.5 - w * 0.12;
+          ctx.lineWidth = isHovered ? 2.5 : 1.5;
+          ctx.beginPath();
+          for (let x = -size; x <= size; x += 2) {
+            const y = Math.sin((x / size) * Math.PI * 2 + time + w) * 10;
+            if (x === -size) ctx.moveTo(cx + x, cy + yOff + y);
+            else ctx.lineTo(cx + x, cy + yOff + y);
+          }
+          ctx.stroke();
+        }
+        break;
+      }
+      case 'stars': {
+        // Star pattern
+        for (let s = 0; s < 2; s++) {
+          const starSize = (s + 1) * (size / 2.2);
+          const rot = time * 0.4 + s * Math.PI / 4;
+          ctx.globalAlpha = isHovered ? 0.8 - s * 0.25 : 0.5 - s * 0.15;
+          ctx.lineWidth = isHovered ? 2.5 : 1.5;
+          ctx.save();
+          ctx.translate(cx, cy);
+          ctx.rotate(rot);
+          ctx.beginPath();
+          for (let p = 0; p < 5; p++) {
+            const angle = (p * 4 * Math.PI) / 5 - Math.PI / 2;
+            const px = Math.cos(angle) * starSize;
+            const py = Math.sin(angle) * starSize;
+            if (p === 0) ctx.moveTo(px, py);
+            else ctx.lineTo(px, py);
+          }
+          ctx.closePath();
+          ctx.stroke();
+          ctx.restore();
+        }
+        break;
+      }
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  function drawGame() {
+    // Dark background with subtle gradient
+    const bgGrad = ctx.createLinearGradient(0, 0, 0, H);
+    bgGrad.addColorStop(0, '#0d0d1a');
+    bgGrad.addColorStop(0.4, '#151528');
+    bgGrad.addColorStop(1, '#1a1a30');
+    ctx.fillStyle = bgGrad;
+    ctx.fillRect(0, 0, W, H);
+
+    // Ambient stars in background
+    ctx.fillStyle = 'rgba(250,250,247,0.3)';
+    for (let i = 0; i < 30; i++) {
+      const sx = ((i * 137 + 50) % W);
+      const sy = ((i * 89 + 20) % 200);
+      const ss = 0.5 + Math.sin(gameTime * 0.8 + i) * 0.5;
+      ctx.globalAlpha = 0.2 + ss * 0.3;
+      ctx.beginPath();
+      ctx.arc(sx, sy, 1 + ss, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+
+    // Title
+    ctx.font = "700 28px 'Belanosima', sans-serif";
+    ctx.fillStyle = '#FAFAF7';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('Light Beams', W / 2, 195);
+
+    // Subtitle
+    ctx.font = "400 14px 'Nunito', sans-serif";
+    ctx.fillStyle = 'rgba(250,250,247,0.5)';
+    ctx.fillText('Select a glowing pattern', W / 2, 218);
+
+    // Crystal surface
+    drawCrystalSurface();
+
+    // Draw beams (behind patterns)
+    for (let i = 0; i < 4; i++) {
+      drawBeam(i);
+    }
+
+    // Draw patterns (on crystal surface)
+    for (let i = 0; i < 4; i++) {
+      drawPattern(i);
+    }
+
+    // Draw game particles
+    gameParticles.forEach(p => {
+      ctx.save();
+      ctx.globalAlpha = p.alpha;
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rotation);
+      ctx.fillStyle = p.color;
+      ctx.fillRect(-p.size / 2, -p.size / 4, p.size, p.size / 2);
+      ctx.restore();
+    });
+  }
+
+  function getPatternAtPoint(lx, ly) {
+    for (let i = 0; i < patterns.length; i++) {
+      const p = patterns[i];
+      if (lx >= p.x && lx <= p.x + p.w && ly >= p.y && ly <= p.y + p.h) {
+        return i;
+      }
+    }
+    return -1;
+  }
+
+  function spawnSelectionParticles(index) {
+    const pat = patterns[index];
+    const cx = pat.x + pat.w / 2;
+    const cy = pat.y + pat.h / 2;
+    const colors = ['#E87A3E', '#F5A742', '#4ECDC4', '#6BBF59'];
+    for (let i = 0; i < 20; i++) {
+      gameParticles.push({
+        x: cx,
+        y: cy,
+        vx: (Math.random() - 0.5) * 300,
+        vy: -Math.random() * 200 - 50,
+        color: colors[Math.floor(Math.random() * colors.length)],
+        size: 4 + Math.random() * 5,
+        rotation: Math.random() * Math.PI * 2,
+        rotationSpeed: (Math.random() - 0.5) * 8,
+        alpha: 1
+      });
+    }
+  }
+
+  // Track mouse movement for hover
+  canvas.addEventListener('mousemove', (e) => {
+    if (gameState !== 'playing' || selectedIndex >= 0) return;
+    const { x, y } = screenToLogical(e.clientX, e.clientY);
+    mousePos = { x, y };
+    hoveredIndex = getPatternAtPoint(x, y);
+  });
+
+  canvas.addEventListener('mouseleave', () => {
+    hoveredIndex = -1;
+  });
+
+  // Click handler for answer selection
+  canvas.addEventListener('click', (e) => {
+    if (gameState !== 'playing' || selectedIndex >= 0) return;
+    const { x, y } = screenToLogical(e.clientX, e.clientY);
+    const index = getPatternAtPoint(x, y);
+    if (index >= 0) {
+      selectedIndex = index;
+      selectionAnim = 0.5;
+      playClickSound();
+
+      const choice = QUESTION.choices[index];
+      if (choice.is_correct) {
+        correctAnim = { active: true, time: 0, index: index };
+        spawnSelectionParticles(index);
+        setTimeout(() => playCorrectSound(), 100);
+      } else {
+        shakeAnim = { active: true, time: 0, index: index };
+        setTimeout(() => playWrongSound(), 100);
+      }
+    }
+  });
+
+  function handleInput(e) {
+    if (gameState !== 'playing' || selectedIndex >= 0) return;
+    // Number keys 1-4 select answers
+    const keyMap = { 'Digit1': 0, 'Digit2': 1, 'Digit3': 2, 'Digit4': 3 };
+    if (keyMap[e.code] !== undefined) {
+      const index = keyMap[e.code];
+      selectedIndex = index;
+      selectionAnim = 0.5;
+      playClickSound();
+
+      const choice = QUESTION.choices[index];
+      if (choice.is_correct) {
+        correctAnim = { active: true, time: 0, index: index };
+        spawnSelectionParticles(index);
+        setTimeout(() => playCorrectSound(), 100);
+      } else {
+        shakeAnim = { active: true, time: 0, index: index };
+        setTimeout(() => playWrongSound(), 100);
+      }
+    }
+  }
+
+  // +========================================================================+
+  // |  SECTION 4: GAME LOOP - DO NOT MODIFY                                      |
+  // |  Standard loop with responsive scaling and DPR support.                    |
+  // +========================================================================+
+  let lastTime = performance.now();
+
+  function gameLoop(now) {
+    const dt = Math.min((now - lastTime) / 1000, 0.05); // Cap at 50ms
+    lastTime = now;
+
+    // Apply transform for logical coordinate system
+    ctx.setTransform(scale * dpr, 0, 0, scale * dpr, 0, 0);
+
+    if (gameState === 'playing') {
+      updateGame(dt);
+      drawGame();
+    } else {
+      drawGame(); // Draw game state behind overlay
+      drawEndScreen(dt);
+    }
+
+    // Reset transform for next frame
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+    requestAnimationFrame(gameLoop);
+  }
+
+  // Input handlers
+  document.addEventListener('keydown', (e) => {
+    if (gameState === 'ended' && (e.code === 'KeyR')) {
+      // Restart game
+      gameState = 'playing';
+      gameResult = null;
+      gameExplanation = '';
+      confettiParticles = [];
+      initGame();
+      return;
+    }
+    handleInput(e);
+  });
+
+  document.addEventListener('keyup', (e) => {
+    // Optional: handle key release in your handleInput
+  });
+
+  // Canvas click handler for end screen buttons
+  canvas.addEventListener('click', (e) => {
+    if (gameState !== 'ended') return;
+
+    const { x, y } = screenToLogical(e.clientX, e.clientY);
+
+    if (gameResult) {
+      // Correct answer: check both buttons
+      if (pointInRect(x, y, restartButton)) {
+        gameState = 'playing';
+        gameResult = null;
+        gameExplanation = '';
+        confettiParticles = [];
+        initGame();
+        return;
+      }
+      if (pointInRect(x, y, nextButton)) {
+        // Notify parent to go to next question
+        if (window.parent && window.parent !== window) {
+          window.parent.postMessage({ type: 'quiz-next' }, '*');
+        }
+        return;
+      }
+    } else {
+      // Wrong answer: check centered restart button
+      const centeredRestart = { x: W / 2 - 75, y: H / 2 + 60, w: 150, h: 48 };
+      if (pointInRect(x, y, centeredRestart)) {
+        gameState = 'playing';
+        gameResult = null;
+        gameExplanation = '';
+        confettiParticles = [];
+        initGame();
+        return;
+      }
+    }
+  });
+
+  // Handle resize
+  window.addEventListener('resize', resizeCanvas);
+
+  // Initialize
+  resizeCanvas();
+  initGame();
+  requestAnimationFrame(gameLoop);
+  </script>
+</body>
+</html>

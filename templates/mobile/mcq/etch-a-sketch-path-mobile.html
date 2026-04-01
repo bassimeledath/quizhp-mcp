@@ -1,0 +1,1050 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <link href="https://fonts.googleapis.com/css2?family=Belanosima:wght@400;600;700&family=Nunito+Sans:wght@400;500;600;700&family=Nunito:wght@400;500;600&display=swap" rel="stylesheet">
+  <title>Etch-a-Sketch Path</title>
+  <!--
+  ╔══════════════════════════════════════════════════════════════════════════════╗
+  ║  ETCH-A-SKETCH PATH GAME - MOBILE                                            ║
+  ║  Draw a path from center to answer targets using knob controls               ║
+  ╚══════════════════════════════════════════════════════════════════════════════╝
+  -->
+  <style>
+    /* ═══════════════════════════════════════════════════════════════════════════
+       BASE STYLES - Can be extended, not removed
+       ═══════════════════════════════════════════════════════════════════════════ */
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      touch-action: none; /* Prevent default touch behaviors */
+      -webkit-touch-callout: none;
+      -webkit-user-select: none;
+      user-select: none;
+    }
+    body {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      background: #1a1a2e;
+      font-family: 'Nunito Sans', system-ui, -apple-system, sans-serif;
+    }
+    #gameCanvas {
+      background: #16213e;
+      /* Canvas fills viewport via JS, these are fallbacks */
+      width: 100vw;
+      height: 100vh;
+    }
+  </style>
+</head>
+<body>
+  <!-- ═══════════════════════════════════════════════════════════════════════════
+       CANVAS - Sized dynamically to fill viewport
+       ═══════════════════════════════════════════════════════════════════════════ -->
+  <canvas id="gameCanvas"></canvas>
+
+  <script>
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 1: QUESTION PLACEHOLDER - DO NOT MODIFY FORMAT                    ║
+  // ║  Platform replaces this at runtime. Use these exact 60-char answers.       ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  const QUESTION = {
+    type: "mcq",
+    prompt: "Sample question text",
+    choices: [
+      { text: "This is sample answer A which is long enough to test text overflow", is_correct: true, explanation: "Why A is correct" },
+      { text: "This is sample answer B which is long enough to test text overflow", is_correct: false, explanation: "Why B is wrong" },
+      { text: "This is sample answer C which is long enough to test text overflow", is_correct: false, explanation: "Why C is wrong" },
+      { text: "This is sample answer D which is long enough to test text overflow", is_correct: false, explanation: "Why D is wrong" }
+    ],
+    isLastQuestion: false
+  };
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 2: ENGINE CORE (MOBILE) - DO NOT MODIFY                           ║
+  // ║  Non-uniform scaling (fills container), touch input, tap-to-restart.       ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  const canvas = document.getElementById('gameCanvas');
+  const ctx = canvas.getContext('2d');
+
+  // Logical dimensions (game code works in this coordinate space)
+  const W = 360, H = 640;
+
+  // Scaling state (computed on resize)
+  let scaleX = 1;
+  let scaleY = 1;
+  let aspectRatio = 1;  // scaleX/scaleY - use for proportional shapes
+
+  // Game state
+  let gameState = 'playing'; // 'playing' | 'ended'
+  let gameResult = null;     // true (correct) | false (wrong)
+  let gameExplanation = '';
+  let endScreenTime = 0;
+  let confettiParticles = [];
+
+  // End screen button bounds (logical coordinates)
+  const restartButton = { x: 20, y: H / 2 + 50, w: 155, h: 56 };
+  const nextButton = { x: 185, y: H / 2 + 50, w: 155, h: 56 };
+  // Centered restart button for wrong answers
+  const centeredRestartButton = { x: W / 2 - 100, y: H / 2 + 50, w: 200, h: 56 };
+
+  /** Draw a styled button with aspect-ratio aware text */
+  function drawMobileButton(rect, label, color, pulse) {
+    const textAdj = getTextScaleAdjustment();
+    const p = pulse ? 1 + Math.sin(endScreenTime * 4) * 0.03 : 1;
+
+    ctx.save();
+    ctx.translate(rect.x + rect.w / 2, rect.y + rect.h / 2);
+    ctx.scale(p, p);
+    ctx.translate(-(rect.x + rect.w / 2), -(rect.y + rect.h / 2));
+
+    // Button background
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.roundRect(rect.x, rect.y, rect.w, rect.h, 12);
+    ctx.fill();
+
+    // Button text (aspect-ratio aware)
+    ctx.save();
+    ctx.translate(rect.x + rect.w / 2, rect.y + rect.h / 2);
+    ctx.scale(textAdj / aspectRatio, textAdj);
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = 'bold 18px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, 0, 0);
+    ctx.restore();
+
+    ctx.restore();
+  }
+
+  /**
+   * Resize canvas to fill viewport completely (no letterboxing).
+   * Uses non-uniform scaling - game code works in 360×640 logical space.
+   * Use aspectRatio to draw proportionally correct shapes.
+   */
+  function resizeCanvas() {
+    const dpr = window.devicePixelRatio || 1;
+
+    // Physical canvas size (actual pixels)
+    canvas.width = window.innerWidth * dpr;
+    canvas.height = window.innerHeight * dpr;
+
+    // CSS size (fills viewport)
+    canvas.style.width = window.innerWidth + 'px';
+    canvas.style.height = window.innerHeight + 'px';
+
+    // Non-uniform scaling to fill entire canvas
+    scaleX = canvas.width / W;
+    scaleY = canvas.height / H;
+
+    // Aspect ratio for proportional shape drawing
+    // >1 means container is wider than logical space
+    // <1 means container is taller than logical space
+    aspectRatio = scaleX / scaleY;
+
+    // Recalculate text sizing on resize (implement this in SECTION 3)
+    if (typeof recalculateTextSizing === 'function') {
+      recalculateTextSizing();
+    }
+  }
+
+  // === ASPECT-RATIO-AWARE TEXT WITH CLAMPED SCALING ===
+  // Text gets stretched by non-uniform scaling, so we compensate.
+  // Also clamp the effective scale to keep text legible at all sizes.
+  const TEXT_SCALE_MIN = 0.75;
+  const TEXT_SCALE_MAX = 1.4;
+
+  function getTextScaleAdjustment() {
+    const baseScale = window.innerHeight / H;
+    const clampedScale = Math.min(TEXT_SCALE_MAX, Math.max(TEXT_SCALE_MIN, baseScale));
+    return clampedScale / baseScale;
+  }
+
+  /**
+   * Draw text with aspect-ratio compensation and clamped scaling.
+   * Use this instead of raw ctx.fillText() to prevent text stretching.
+   * Default font is 16px (minimum for answer text). Use 18-20px for better readability.
+   */
+  function drawText(text, x, y, options = {}) {
+    const { font = "500 16px system-ui, sans-serif", color = '#F5F5F0', align = 'center', baseline = 'middle' } = options;
+    ctx.save();
+    ctx.translate(x, y);
+    const adj = getTextScaleAdjustment();
+    ctx.scale(adj / aspectRatio, adj);
+    ctx.font = font;
+    ctx.fillStyle = color;
+    ctx.textAlign = align;
+    ctx.textBaseline = baseline;
+    ctx.fillText(text, 0, 0);
+    ctx.restore();
+  }
+
+  /**
+   * Convert screen coordinates to logical coordinates.
+   * Use this in handleTouch to get positions in 360×640 space.
+   */
+  function screenToLogical(screenX, screenY) {
+    const dpr = window.devicePixelRatio || 1;
+    const rect = canvas.getBoundingClientRect();
+    const canvasX = (screenX - rect.left) * dpr;
+    const canvasY = (screenY - rect.top) * dpr;
+    return {
+      x: canvasX / scaleX,
+      y: canvasY / scaleY
+    };
+  }
+
+  /**
+   * Check if a point is inside a rectangle (logical coordinates).
+   */
+  function pointInRect(px, py, rect) {
+    return px >= rect.x && px <= rect.x + rect.w &&
+           py >= rect.y && py <= rect.y + rect.h;
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // TEXT UTILITIES - Dynamic wrapping and font sizing
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  /**
+   * Wrap text to fit within a maximum width (in logical coordinates).
+   * Accounts for canvas transforms applied by drawText().
+   *
+   * @param {string} text - The text to wrap
+   * @param {number} maxWidth - Maximum width in logical coordinates
+   * @param {string} font - CSS font string (e.g., "16px 'Nunito', sans-serif")
+   * @param {number} maxLines - Maximum number of lines (default 3)
+   * @returns {string[]} Array of text lines
+   */
+  function wrapText(text, maxWidth, font, maxLines = 3) {
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.font = font;
+    const adj = getTextScaleAdjustment();
+    const maxRawWidth = maxWidth * aspectRatio / adj;
+    const words = text.split(' ');
+    const lines = [];
+    let currentLine = '';
+    words.forEach(word => {
+      const testLine = currentLine ? currentLine + ' ' + word : word;
+      if (ctx.measureText(testLine).width > maxRawWidth && currentLine) {
+        lines.push(currentLine);
+        currentLine = word;
+      } else {
+        currentLine = testLine;
+      }
+    });
+    if (currentLine) lines.push(currentLine);
+    ctx.restore();
+    return lines.slice(0, maxLines);
+  }
+
+  /**
+   * Find the optimal font size to fit content in available space.
+   * Tries font sizes from max to min until content fits.
+   *
+   * @param {Object} options
+   * @param {string[]} options.texts - Array of text strings to fit
+   * @param {number} options.maxWidth - Maximum width for text wrapping
+   * @param {number} options.availableHeight - Total height available for all texts
+   * @param {number} options.minFont - Minimum font size (default 12)
+   * @param {number} options.maxFont - Maximum font size (default 18)
+   * @param {number} options.itemPadding - Vertical padding per text item (default 4)
+   * @param {string} options.fontFamily - Font family (default "'Nunito Sans', sans-serif")
+   * @returns {{ fontSize: number, wrappedTexts: string[][] }} Optimal font size and pre-wrapped texts
+   */
+  function findOptimalFontSize(options) {
+    const {
+      texts,
+      maxWidth,
+      availableHeight,
+      minFont = 12,
+      maxFont = 18,
+      itemPadding = 4,
+      fontFamily = "'Nunito Sans', sans-serif"
+    } = options;
+
+    let bestFontSize = minFont;
+    let bestWrappedTexts = [];
+
+    for (let fontSize = maxFont; fontSize >= minFont; fontSize -= 0.5) {
+      const font = `${fontSize}px ${fontFamily}`;
+      const lineHeight = fontSize + 2;
+
+      let totalHeight = 0;
+      const wrappedTexts = [];
+
+      for (const text of texts) {
+        const lines = wrapText(text, maxWidth, font);
+        wrappedTexts.push(lines);
+        totalHeight += itemPadding + lines.length * lineHeight;
+      }
+
+      if (totalHeight <= availableHeight) {
+        bestFontSize = fontSize;
+        bestWrappedTexts = wrappedTexts;
+        break;
+      }
+
+      bestWrappedTexts = wrappedTexts;
+    }
+
+    return { fontSize: bestFontSize, wrappedTexts: bestWrappedTexts };
+  }
+
+  const engine = {
+    /** Call this to end the game. DO NOT draw your own end screen. */
+    end(isCorrect, explanation) {
+      if (gameState === 'ended') return;
+      gameState = 'ended';
+      gameResult = isCorrect;
+      gameExplanation = explanation || '';
+      endScreenTime = 0;
+
+      // Spawn confetti for correct answers
+      if (isCorrect) {
+        for (let i = 0; i < 50; i++) {
+          confettiParticles.push({
+            x: W / 2,
+            y: H / 2,
+            vx: (Math.random() - 0.5) * 400,
+            vy: -Math.random() * 300 - 80,
+            size: 4 + Math.random() * 6,
+            color: ['#FFD700', '#FF6B6B', '#4ECDC4', '#95E1D3', '#F38181'][Math.floor(Math.random() * 5)],
+            rotation: Math.random() * Math.PI * 2,
+            rotationSpeed: (Math.random() - 0.5) * 10
+          });
+        }
+      }
+
+      // Notify parent frame
+      if (window.parent && window.parent !== window) {
+        window.parent.postMessage({
+          type: 'quiz-end',
+          isCorrect: isCorrect,
+          explanation: explanation || ''
+        }, '*');
+      }
+    }
+  };
+
+  /** STANDARD END SCREEN (MOBILE) - DO NOT MODIFY */
+  function drawEndScreen(dt) {
+    endScreenTime += dt;
+
+    // Update confetti
+    confettiParticles = confettiParticles.filter(p => {
+      p.vy += 600 * dt; // gravity
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.rotation += p.rotationSpeed * dt;
+      p.vx *= 0.99;
+      return p.y < H + 50;
+    });
+
+    // Dark overlay
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
+    ctx.fillRect(0, 0, W, H);
+
+    // Draw confetti
+    confettiParticles.forEach(p => {
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rotation);
+      ctx.fillStyle = p.color;
+      ctx.fillRect(-p.size / 2, -p.size / 4, p.size, p.size / 2);
+      ctx.restore();
+    });
+
+    // Result emoji (aspect-ratio aware)
+    const textAdj = getTextScaleAdjustment();
+    ctx.save();
+    ctx.translate(W / 2, H / 2 - 80);
+    ctx.scale(textAdj / aspectRatio, textAdj);
+    ctx.font = '64px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(gameResult ? '🎉' : '😢', 0, 0);
+    ctx.restore();
+
+    // Result text (aspect-ratio aware)
+    ctx.save();
+    ctx.translate(W / 2, H / 2 - 10);
+    ctx.scale(textAdj / aspectRatio, textAdj);
+    ctx.fillStyle = gameResult ? '#4ADE80' : '#F87171';
+    ctx.font = 'bold 32px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(gameResult ? 'Correct!' : 'Wrong!', 0, 0);
+    ctx.restore();
+
+    // Buttons
+    if (gameResult) {
+      // Correct: show both Restart and Next/Finish
+      drawMobileButton(restartButton, 'Restart', '#E87A3E', true);
+      const nextLabel = QUESTION.isLastQuestion ? 'Finish' : 'Next';
+      drawMobileButton(nextButton, nextLabel, '#4ECDC4', true);
+    } else {
+      // Wrong: show only centered Restart button
+      drawMobileButton(centeredRestartButton, 'Restart', '#E87A3E', true);
+    }
+  }
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 3: YOUR GAME CODE - IMPLEMENT THESE FUNCTIONS                     ║
+  // ║  Etch-a-Sketch with knob controls to draw path to answer targets           ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+
+  // === GAME STATE ===
+  let cursor = { x: 0, y: 0 };
+  let path = [];
+  let targets = [];
+  let obstacles = [];
+  let leftKnob = { x: 0, y: 0, r: 35, active: false, touchId: null, startAngle: 0, currentAngle: 0 };
+  let rightKnob = { x: 0, y: 0, r: 35, active: false, touchId: null, startAngle: 0, currentAngle: 0 };
+  let screenBounds = { x: 0, y: 0, w: 0, h: 0 };
+  let animTime = 0;
+  let targetHitboxes = [];
+  let wrappedAnswers = [];
+  let answerFontSize = 14;
+  let entranceProgress = 0; // For entrance animation
+  let gameParticles = []; // For ambient particles
+
+  // Audio context for sound effects
+  let audioCtx = null;
+  function getAudioContext() {
+    if (!audioCtx) {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    return audioCtx;
+  }
+
+  function playSound(type) {
+    try {
+      const ctx = getAudioContext();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+
+      if (type === 'correct') {
+        osc.frequency.setValueAtTime(523.25, ctx.currentTime);
+        osc.frequency.setValueAtTime(659.25, ctx.currentTime + 0.1);
+        osc.frequency.setValueAtTime(783.99, ctx.currentTime + 0.2);
+        gain.gain.setValueAtTime(0.3, ctx.currentTime);
+        gain.gain.exponentialDecayTo && gain.gain.exponentialDecayTo(0.01, ctx.currentTime + 0.4);
+        osc.start(ctx.currentTime);
+        osc.stop(ctx.currentTime + 0.4);
+      } else if (type === 'wrong') {
+        osc.frequency.setValueAtTime(200, ctx.currentTime);
+        osc.frequency.setValueAtTime(150, ctx.currentTime + 0.15);
+        gain.gain.setValueAtTime(0.3, ctx.currentTime);
+        osc.start(ctx.currentTime);
+        osc.stop(ctx.currentTime + 0.3);
+      } else if (type === 'draw') {
+        osc.frequency.setValueAtTime(880, ctx.currentTime);
+        gain.gain.setValueAtTime(0.05, ctx.currentTime);
+        gain.gain.exponentialDecayTo && gain.gain.exponentialDecayTo(0.001, ctx.currentTime + 0.05);
+        osc.start(ctx.currentTime);
+        osc.stop(ctx.currentTime + 0.05);
+      }
+    } catch (e) {
+      // Audio not available
+    }
+  }
+
+  function recalculateTextSizing() {
+    if (!targets || targets.length === 0) return;
+
+    // Calculate wrapped text for each target - small labels for corners
+    const texts = QUESTION.choices.map(c => c.text);
+    const { fontSize, wrappedTexts } = findOptimalFontSize({
+      texts: texts,
+      maxWidth: 70, // Small width for corner labels
+      availableHeight: 200,
+      minFont: 14, // Minimum 14px per styleguide
+      maxFont: 16,
+      fontFamily: "'Nunito', sans-serif"
+    });
+
+    wrappedAnswers = wrappedTexts;
+    answerFontSize = fontSize;
+  }
+
+  function initGame() {
+    // Etch-a-sketch screen area (classic red frame look)
+    const frameMargin = 15;
+    const knobAreaHeight = 100;
+    screenBounds = {
+      x: frameMargin + 10,
+      y: frameMargin + 10,
+      w: W - (frameMargin + 10) * 2,
+      h: H - knobAreaHeight - (frameMargin + 10) * 2 - 20
+    };
+
+    // Start cursor in center of screen
+    cursor = {
+      x: screenBounds.x + screenBounds.w / 2,
+      y: screenBounds.y + screenBounds.h / 2
+    };
+    path = [{ x: cursor.x, y: cursor.y }];
+
+    // Knob positions
+    const knobY = H - 55;
+    leftKnob = { x: 70, y: knobY, r: 35, active: false, touchId: null, startAngle: 0, currentAngle: 0 };
+    rightKnob = { x: W - 70, y: knobY, r: 35, active: false, touchId: null, startAngle: 0, currentAngle: 0 };
+
+    // Target positions in corners with labels
+    const cornerPadding = 25;
+    const targetSize = 40;
+    targets = [
+      { // Top-left (Answer A)
+        x: screenBounds.x + cornerPadding,
+        y: screenBounds.y + cornerPadding,
+        w: targetSize,
+        h: targetSize,
+        choice: QUESTION.choices[0],
+        label: 'A'
+      },
+      { // Top-right (Answer B)
+        x: screenBounds.x + screenBounds.w - cornerPadding - targetSize,
+        y: screenBounds.y + cornerPadding,
+        w: targetSize,
+        h: targetSize,
+        choice: QUESTION.choices[1],
+        label: 'B'
+      },
+      { // Bottom-left (Answer C)
+        x: screenBounds.x + cornerPadding,
+        y: screenBounds.y + screenBounds.h - cornerPadding - targetSize,
+        w: targetSize,
+        h: targetSize,
+        choice: QUESTION.choices[2],
+        label: 'C'
+      },
+      { // Bottom-right (Answer D)
+        x: screenBounds.x + screenBounds.w - cornerPadding - targetSize,
+        y: screenBounds.y + screenBounds.h - cornerPadding - targetSize,
+        w: targetSize,
+        h: targetSize,
+        choice: QUESTION.choices[3],
+        label: 'D'
+      }
+    ];
+
+    // Create obstacles to navigate around
+    obstacles = [
+      // Horizontal barriers
+      { x: screenBounds.x + 60, y: screenBounds.y + screenBounds.h * 0.35, w: 80, h: 12 },
+      { x: screenBounds.x + screenBounds.w - 140, y: screenBounds.y + screenBounds.h * 0.35, w: 80, h: 12 },
+      { x: screenBounds.x + 60, y: screenBounds.y + screenBounds.h * 0.65, w: 80, h: 12 },
+      { x: screenBounds.x + screenBounds.w - 140, y: screenBounds.y + screenBounds.h * 0.65, w: 80, h: 12 },
+      // Vertical barriers
+      { x: screenBounds.x + screenBounds.w * 0.35, y: screenBounds.y + 50, w: 12, h: 60 },
+      { x: screenBounds.x + screenBounds.w * 0.65, y: screenBounds.y + 50, w: 12, h: 60 },
+      { x: screenBounds.x + screenBounds.w * 0.35, y: screenBounds.y + screenBounds.h - 110, w: 12, h: 60 },
+      { x: screenBounds.x + screenBounds.w * 0.65, y: screenBounds.y + screenBounds.h - 110, w: 12, h: 60 }
+    ];
+
+    animTime = 0;
+    entranceProgress = 0;
+    gameParticles = [];
+    recalculateTextSizing();
+  }
+
+  function updateGame(dt) {
+    if (gameState !== 'playing') return;
+
+    animTime += dt;
+
+    // Entrance animation (0 to 1 over 0.5 seconds)
+    if (entranceProgress < 1) {
+      entranceProgress = Math.min(1, entranceProgress + dt * 2);
+    }
+
+    // Update ambient particles
+    gameParticles = gameParticles.filter(p => {
+      p.y -= p.speed * dt;
+      p.x += Math.sin(animTime * 2 + p.offset) * 10 * dt;
+      p.alpha -= dt * 0.3;
+      return p.alpha > 0 && p.y > screenBounds.y;
+    });
+
+    // Occasionally spawn ambient particle
+    if (Math.random() < dt * 2) {
+      gameParticles.push({
+        x: screenBounds.x + Math.random() * screenBounds.w,
+        y: screenBounds.y + screenBounds.h,
+        speed: 20 + Math.random() * 30,
+        size: 2 + Math.random() * 3,
+        alpha: 0.3 + Math.random() * 0.3,
+        offset: Math.random() * Math.PI * 2
+      });
+    }
+
+    // Check if cursor reached any target
+    for (let i = 0; i < targets.length; i++) {
+      const t = targets[i];
+      const cx = cursor.x;
+      const cy = cursor.y;
+
+      if (cx >= t.x && cx <= t.x + t.w && cy >= t.y && cy <= t.y + t.h) {
+        if (t.choice.is_correct) {
+          playSound('correct');
+        } else {
+          playSound('wrong');
+        }
+        engine.end(t.choice.is_correct, t.choice.explanation);
+        return;
+      }
+    }
+  }
+
+  function drawGame() {
+    // Clear with warm background
+    ctx.fillStyle = '#FAFAF7';
+    ctx.fillRect(0, 0, W, H);
+
+    // Draw classic red etch-a-sketch frame
+    const frameMargin = 8;
+    ctx.fillStyle = '#E85D4A'; // Error red for the frame
+    ctx.beginPath();
+    ctx.roundRect(frameMargin, frameMargin, W - frameMargin * 2, H - frameMargin * 2, 20);
+    ctx.fill();
+
+    // Inner frame shadow
+    ctx.fillStyle = '#C74A3A';
+    ctx.beginPath();
+    ctx.roundRect(frameMargin + 5, frameMargin + 5, W - (frameMargin + 5) * 2, H - (frameMargin + 5) * 2, 16);
+    ctx.fill();
+
+    // Etch-a-sketch screen (gray-green classic look)
+    ctx.fillStyle = '#B8C4A8';
+    ctx.fillRect(screenBounds.x, screenBounds.y, screenBounds.w, screenBounds.h);
+
+    // Screen inner shadow
+    ctx.strokeStyle = '#8A9A7A';
+    ctx.lineWidth = 3;
+    ctx.strokeRect(screenBounds.x + 1.5, screenBounds.y + 1.5, screenBounds.w - 3, screenBounds.h - 3);
+
+    // Draw ambient particles
+    gameParticles.forEach(p => {
+      ctx.globalAlpha = p.alpha;
+      ctx.fillStyle = '#9AAA8A';
+      ctx.beginPath();
+      ctx.ellipse(p.x, p.y, p.size, p.size * aspectRatio, 0, 0, Math.PI * 2);
+      ctx.fill();
+    });
+    ctx.globalAlpha = 1;
+
+    // Draw obstacles
+    ctx.fillStyle = '#6A7A5A';
+    obstacles.forEach(obs => {
+      ctx.fillRect(obs.x, obs.y, obs.w, obs.h);
+    });
+
+    // Draw targets with pulsing animation and entrance
+    const pulse = 1 + Math.sin(animTime * 3) * 0.1;
+    targets.forEach((t, i) => {
+      // Staggered entrance animation
+      const entranceDelay = i * 0.1;
+      const targetEntrance = Math.max(0, Math.min(1, (entranceProgress - entranceDelay) * 2));
+      // Spring easing for entrance
+      const springScale = targetEntrance < 1
+        ? targetEntrance * (1 + Math.sin(targetEntrance * Math.PI * 2) * 0.2 * (1 - targetEntrance))
+        : 1;
+      const finalScale = pulse * springScale;
+
+      if (finalScale <= 0) return; // Don't draw if not visible yet
+
+      ctx.save();
+      ctx.translate(t.x + t.w / 2, t.y + t.h / 2);
+      ctx.scale(finalScale, finalScale * aspectRatio);
+
+      // Target circle
+      ctx.fillStyle = '#E87A3E'; // Orange primary
+      ctx.beginPath();
+      ctx.arc(0, 0, t.w / 2 - 4, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Target border
+      ctx.strokeStyle = '#C46532';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+
+      ctx.restore();
+
+      // Draw label letter
+      drawText(t.label, t.x + t.w / 2, t.y + t.h / 2, {
+        font: "bold 18px 'Belanosima', sans-serif",
+        color: '#FFFFFF'
+      });
+
+      // Draw answer text below/beside target
+      const lines = wrappedAnswers[i] || [t.choice.text.substring(0, 15)];
+      let textX, textY, align;
+
+      // Position text based on corner
+      if (i === 0) { // Top-left
+        textX = t.x;
+        textY = t.y + t.h + 8;
+        align = 'left';
+      } else if (i === 1) { // Top-right
+        textX = t.x + t.w;
+        textY = t.y + t.h + 8;
+        align = 'right';
+      } else if (i === 2) { // Bottom-left
+        textX = t.x;
+        textY = t.y - 8;
+        align = 'left';
+      } else { // Bottom-right
+        textX = t.x + t.w;
+        textY = t.y - 8;
+        align = 'right';
+      }
+
+      const lineHeight = answerFontSize + 2;
+      lines.forEach((line, li) => {
+        const offsetY = i < 2 ? li * lineHeight : -((lines.length - 1 - li) * lineHeight);
+        drawText(line, textX, textY + offsetY, {
+          font: `${answerFontSize}px 'Nunito', sans-serif`,
+          color: '#2B2B28',
+          align: align
+        });
+      });
+    });
+
+    // Draw path (the continuous line)
+    if (path.length > 1) {
+      ctx.strokeStyle = '#2B2B28';
+      ctx.lineWidth = 2;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.beginPath();
+      ctx.moveTo(path[0].x, path[0].y);
+      for (let i = 1; i < path.length; i++) {
+        ctx.lineTo(path[i].x, path[i].y);
+      }
+      ctx.stroke();
+    }
+
+    // Draw cursor
+    ctx.fillStyle = '#2B2B28';
+    ctx.beginPath();
+    ctx.ellipse(cursor.x, cursor.y, 5, 5 * aspectRatio, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Draw knobs
+    drawKnob(leftKnob, 'H');
+    drawKnob(rightKnob, 'V');
+
+    // Draw "Etch A Sketch" branding area
+    drawText('ETCH-A-SKETCH', W / 2, H - 55, {
+      font: "bold 14px 'Belanosima', sans-serif",
+      color: '#FAFAF7'
+    });
+  }
+
+  function drawKnob(knob, label) {
+    ctx.save();
+    ctx.translate(knob.x, knob.y);
+
+    // Knob shadow
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
+    ctx.beginPath();
+    ctx.ellipse(3, 3 * aspectRatio, knob.r, knob.r * aspectRatio, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Knob base
+    const gradient = ctx.createRadialGradient(0, 0, 0, 0, 0, knob.r);
+    gradient.addColorStop(0, '#FFFFFF');
+    gradient.addColorStop(0.3, '#E0E0E0');
+    gradient.addColorStop(1, '#A0A0A0');
+    ctx.fillStyle = gradient;
+    ctx.beginPath();
+    ctx.ellipse(0, 0, knob.r, knob.r * aspectRatio, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Knob border
+    ctx.strokeStyle = '#505050';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    // Rotation indicator
+    const indicatorAngle = knob.currentAngle;
+    const indicatorR = knob.r - 10;
+    ctx.save();
+    ctx.scale(1, aspectRatio);
+    ctx.fillStyle = '#E87A3E';
+    ctx.beginPath();
+    ctx.arc(
+      Math.cos(indicatorAngle) * indicatorR,
+      Math.sin(indicatorAngle) * indicatorR / aspectRatio,
+      6,
+      0,
+      Math.PI * 2
+    );
+    ctx.fill();
+    ctx.restore();
+
+    ctx.restore();
+
+    // Label below knob
+    drawText(label, knob.x, knob.y + knob.r + 15, {
+      font: "bold 14px 'Nunito Sans', sans-serif",
+      color: '#FAFAF7'
+    });
+  }
+
+  function handleTouch(e, type) {
+    if (gameState !== 'playing') return;
+
+    const touches = e.touches || [];
+    const changedTouches = e.changedTouches || [];
+
+    if (type === 'start') {
+      for (const touch of changedTouches) {
+        const { x, y } = screenToLogical(touch.clientX, touch.clientY);
+
+        // Check if touching left knob
+        const distLeft = Math.sqrt(
+          Math.pow(x - leftKnob.x, 2) +
+          Math.pow((y - leftKnob.y) / aspectRatio, 2)
+        );
+        if (distLeft <= leftKnob.r && !leftKnob.active) {
+          leftKnob.active = true;
+          leftKnob.touchId = touch.identifier;
+          leftKnob.startAngle = Math.atan2(y - leftKnob.y, x - leftKnob.x);
+        }
+
+        // Check if touching right knob
+        const distRight = Math.sqrt(
+          Math.pow(x - rightKnob.x, 2) +
+          Math.pow((y - rightKnob.y) / aspectRatio, 2)
+        );
+        if (distRight <= rightKnob.r && !rightKnob.active) {
+          rightKnob.active = true;
+          rightKnob.touchId = touch.identifier;
+          rightKnob.startAngle = Math.atan2(y - rightKnob.y, x - rightKnob.x);
+        }
+      }
+    } else if (type === 'move') {
+      for (const touch of touches) {
+        const { x, y } = screenToLogical(touch.clientX, touch.clientY);
+
+        // Handle left knob rotation (horizontal movement)
+        if (leftKnob.active && touch.identifier === leftKnob.touchId) {
+          const angle = Math.atan2(y - leftKnob.y, x - leftKnob.x);
+          let delta = angle - leftKnob.startAngle;
+
+          // Normalize angle delta
+          while (delta > Math.PI) delta -= Math.PI * 2;
+          while (delta < -Math.PI) delta += Math.PI * 2;
+
+          // Move cursor horizontally
+          const speed = 80;
+          let newX = cursor.x + delta * speed;
+          newX = Math.max(screenBounds.x + 5, Math.min(screenBounds.x + screenBounds.w - 5, newX));
+
+          // Check obstacle collision for horizontal movement
+          let blocked = false;
+          for (const obs of obstacles) {
+            if (newX >= obs.x && newX <= obs.x + obs.w &&
+                cursor.y >= obs.y && cursor.y <= obs.y + obs.h) {
+              blocked = true;
+              break;
+            }
+          }
+
+          if (!blocked) {
+            cursor.x = newX;
+          }
+
+          leftKnob.startAngle = angle;
+          leftKnob.currentAngle += delta;
+        }
+
+        // Handle right knob rotation (vertical movement)
+        if (rightKnob.active && touch.identifier === rightKnob.touchId) {
+          const angle = Math.atan2(y - rightKnob.y, x - rightKnob.x);
+          let delta = angle - rightKnob.startAngle;
+
+          // Normalize angle delta
+          while (delta > Math.PI) delta -= Math.PI * 2;
+          while (delta < -Math.PI) delta += Math.PI * 2;
+
+          // Move cursor vertically
+          const speed = 80;
+          let newY = cursor.y + delta * speed;
+          newY = Math.max(screenBounds.y + 5, Math.min(screenBounds.y + screenBounds.h - 5, newY));
+
+          // Check obstacle collision for vertical movement
+          let blocked = false;
+          for (const obs of obstacles) {
+            if (cursor.x >= obs.x && cursor.x <= obs.x + obs.w &&
+                newY >= obs.y && newY <= obs.y + obs.h) {
+              blocked = true;
+              break;
+            }
+          }
+
+          if (!blocked) {
+            cursor.y = newY;
+          }
+
+          rightKnob.startAngle = angle;
+          rightKnob.currentAngle += delta;
+        }
+      }
+
+      // Add point to path if cursor moved
+      const lastPoint = path[path.length - 1];
+      if (Math.abs(cursor.x - lastPoint.x) > 1 || Math.abs(cursor.y - lastPoint.y) > 1) {
+        path.push({ x: cursor.x, y: cursor.y });
+      }
+    } else if (type === 'end') {
+      for (const touch of changedTouches) {
+        if (leftKnob.touchId === touch.identifier) {
+          leftKnob.active = false;
+          leftKnob.touchId = null;
+        }
+        if (rightKnob.touchId === touch.identifier) {
+          rightKnob.active = false;
+          rightKnob.touchId = null;
+        }
+      }
+    }
+  }
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 4: GAME LOOP - DO NOT MODIFY                                      ║
+  // ║  Standard loop with responsive scaling and touch handling.                 ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  let lastTime = performance.now();
+
+  function gameLoop(now) {
+    const dt = Math.min((now - lastTime) / 1000, 0.05); // Cap at 50ms
+    lastTime = now;
+
+    // Apply transform for logical coordinate system (non-uniform scaling)
+    ctx.setTransform(scaleX, 0, 0, scaleY, 0, 0);
+
+    if (gameState === 'playing') {
+      updateGame(dt);
+      drawGame();
+    } else {
+      drawGame(); // Draw game state behind overlay
+      drawEndScreen(dt);
+    }
+
+    // Reset transform for next frame
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+    requestAnimationFrame(gameLoop);
+  }
+
+  // Touch handlers
+  function onTouchStart(e) {
+    e.preventDefault();
+    if (gameState === 'ended') {
+      const touch = e.touches[0];
+      const { x, y } = screenToLogical(touch.clientX, touch.clientY);
+
+      if (gameResult) {
+        // Correct answer: check both buttons
+        if (pointInRect(x, y, restartButton)) {
+          gameState = 'playing';
+          gameResult = null;
+          gameExplanation = '';
+          confettiParticles = [];
+          initGame();
+          return;
+        }
+        if (pointInRect(x, y, nextButton)) {
+          // Notify parent to go to next question
+          if (window.parent && window.parent !== window) {
+            window.parent.postMessage({ type: 'quiz-next' }, '*');
+          }
+          return;
+        }
+      } else {
+        // Wrong answer: check centered restart button
+        if (pointInRect(x, y, centeredRestartButton)) {
+          gameState = 'playing';
+          gameResult = null;
+          gameExplanation = '';
+          confettiParticles = [];
+          initGame();
+          return;
+        }
+      }
+    }
+    handleTouch(e, 'start');
+  }
+
+  function onTouchMove(e) {
+    e.preventDefault();
+    handleTouch(e, 'move');
+  }
+
+  function onTouchEnd(e) {
+    e.preventDefault();
+    handleTouch(e, 'end');
+  }
+
+  canvas.addEventListener('touchstart', onTouchStart, { passive: false });
+  canvas.addEventListener('touchmove', onTouchMove, { passive: false });
+  canvas.addEventListener('touchend', onTouchEnd, { passive: false });
+
+  // Also support mouse for testing in browser
+  let mouseDown = false;
+  canvas.addEventListener('mousedown', (e) => {
+    mouseDown = true;
+    const fakeTouch = {
+      touches: [{ clientX: e.clientX, clientY: e.clientY, identifier: 0 }],
+      changedTouches: [{ clientX: e.clientX, clientY: e.clientY, identifier: 0 }]
+    };
+    onTouchStart(fakeTouch);
+  });
+
+  canvas.addEventListener('mousemove', (e) => {
+    if (mouseDown) {
+      const fakeTouch = {
+        touches: [{ clientX: e.clientX, clientY: e.clientY, identifier: 0 }],
+        changedTouches: [{ clientX: e.clientX, clientY: e.clientY, identifier: 0 }]
+      };
+      onTouchMove(fakeTouch);
+    }
+  });
+
+  canvas.addEventListener('mouseup', (e) => {
+    mouseDown = false;
+    const fakeTouch = {
+      touches: [],
+      changedTouches: [{ clientX: e.clientX, clientY: e.clientY, identifier: 0 }]
+    };
+    onTouchEnd(fakeTouch);
+  });
+
+  // Handle resize
+  window.addEventListener('resize', resizeCanvas);
+  window.addEventListener('orientationchange', () => {
+    setTimeout(resizeCanvas, 100); // Delay for orientation change to complete
+  });
+
+  // Prevent pull-to-refresh and overscroll
+  document.body.addEventListener('touchmove', (e) => e.preventDefault(), { passive: false });
+
+  // Initialize
+  resizeCanvas();
+  initGame();
+  requestAnimationFrame(gameLoop);
+  </script>
+</body>
+</html>

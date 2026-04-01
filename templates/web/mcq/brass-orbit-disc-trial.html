@@ -1,0 +1,987 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Brass Orbit Disc Trial</title>
+  <link href="https://fonts.googleapis.com/css2?family=Belanosima:wght@400;600;700&family=Nunito+Sans:wght@400;500;600;700&family=Nunito:wght@400;500;600&display=swap" rel="stylesheet">
+  <!--
+  ╔══════════════════════════════════════════════════════════════════════════════╗
+  ║  GAME FACTORY TEMPLATE                                                        ║
+  ║  This template enforces critical invariants. Follow the section markers.      ║
+  ╚══════════════════════════════════════════════════════════════════════════════╝
+  -->
+  <style>
+    /* ═══════════════════════════════════════════════════════════════════════════
+       BASE STYLES - Can be extended, not removed
+       ═══════════════════════════════════════════════════════════════════════════ */
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+    }
+    body {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      background: #0a1628;
+      font-family: 'Nunito Sans', system-ui, -apple-system, sans-serif;
+    }
+    #gameCanvas {
+      background: #0d1f3c;
+      border-radius: 8px;
+      display: block;
+    }
+  </style>
+</head>
+<body>
+  <!-- ═══════════════════════════════════════════════════════════════════════════
+       CANVAS - Sized dynamically to fill available space
+       ═══════════════════════════════════════════════════════════════════════════ -->
+  <canvas id="gameCanvas"></canvas>
+
+  <script>
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 1: QUESTION PLACEHOLDER - DO NOT MODIFY FORMAT                    ║
+  // ║  Platform replaces this at runtime. Use these exact 60-char answers.       ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  const QUESTION = {
+    type: "mcq",
+    prompt: "Sample question text",
+    choices: [
+      { text: "This is sample answer A which is long enough to test text overflow", is_correct: true, explanation: "Why A is correct" },
+      { text: "This is sample answer B which is long enough to test text overflow", is_correct: false, explanation: "Why B is wrong" },
+      { text: "This is sample answer C which is long enough to test text overflow", is_correct: false, explanation: "Why C is wrong" },
+      { text: "This is sample answer D which is long enough to test text overflow", is_correct: false, explanation: "Why D is wrong" }
+    ],
+    isLastQuestion: false
+  };
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 2: ENGINE CORE - DO NOT MODIFY                                    ║
+  // ║  Standard engine interface and end screen. This is sacred.                 ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  const canvas = document.getElementById('gameCanvas');
+  const ctx = canvas.getContext('2d');
+
+  // Logical dimensions (game code works in this coordinate space)
+  const W = 720, H = 540;
+
+  // Scaling state (computed on resize)
+  let scale = 1;
+  let dpr = 1;
+
+  let gameState = 'playing'; // 'playing' | 'ended'
+  let gameResult = null;     // true (correct) | false (wrong)
+  let gameExplanation = '';
+  let endScreenTime = 0;
+  let confettiParticles = [];
+
+  // End screen button bounds (logical coordinates)
+  const restartButton = { x: W / 2 - 170, y: H / 2 + 60, w: 150, h: 48 };
+  const nextButton = { x: W / 2 + 20, y: H / 2 + 60, w: 150, h: 48 };
+
+  /** Check if point is inside rectangle */
+  function pointInRect(px, py, rect) {
+    return px >= rect.x && px <= rect.x + rect.w &&
+           py >= rect.y && py <= rect.y + rect.h;
+  }
+
+  /** Draw a styled button */
+  function drawButton(rect, label, color, pulse) {
+    const p = pulse ? 1 + Math.sin(endScreenTime * 4) * 0.03 : 1;
+    ctx.save();
+    ctx.translate(rect.x + rect.w / 2, rect.y + rect.h / 2);
+    ctx.scale(p, p);
+    ctx.translate(-(rect.x + rect.w / 2), -(rect.y + rect.h / 2));
+
+    // Button background
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.roundRect(rect.x, rect.y, rect.w, rect.h, 12);
+    ctx.fill();
+
+    // Button text
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = "bold 18px 'Nunito Sans', sans-serif";
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, rect.x + rect.w / 2, rect.y + rect.h / 2);
+
+    ctx.restore();
+  }
+
+  /**
+   * Resize canvas to fill available space with proper DPR scaling.
+   * Maintains logical coordinate system (720×540).
+   */
+  function resizeCanvas() {
+    dpr = window.devicePixelRatio || 1;
+
+    // Get available space
+    const availW = window.innerWidth;
+    const availH = window.innerHeight;
+
+    // Calculate scale to fit logical space (720×540) in available space
+    const scaleX = availW / W;
+    const scaleY = availH / H;
+    scale = Math.min(scaleX, scaleY);
+
+    // Physical canvas buffer (DPR-scaled for crisp rendering)
+    canvas.width = W * scale * dpr;
+    canvas.height = H * scale * dpr;
+
+    // CSS display size
+    canvas.style.width = (W * scale) + 'px';
+    canvas.style.height = (H * scale) + 'px';
+  }
+
+  /**
+   * Convert screen coordinates to logical coordinates.
+   * Use this for mouse/click events to get positions in 720×540 space.
+   */
+  function screenToLogical(screenX, screenY) {
+    const rect = canvas.getBoundingClientRect();
+    return {
+      x: (screenX - rect.left) * (W / rect.width),
+      y: (screenY - rect.top) * (H / rect.height)
+    };
+  }
+
+  const engine = {
+    /** Call this to end the game. DO NOT draw your own end screen. */
+    end(isCorrect, explanation) {
+      if (gameState === 'ended') return;
+      gameState = 'ended';
+      gameResult = isCorrect;
+      gameExplanation = explanation || '';
+      endScreenTime = 0;
+
+      // Spawn confetti for correct answers
+      if (isCorrect) {
+        for (let i = 0; i < 50; i++) {
+          confettiParticles.push({
+            x: W / 2,
+            y: H / 2,
+            vx: (Math.random() - 0.5) * 600,
+            vy: -Math.random() * 400 - 100,
+            size: 4 + Math.random() * 6,
+            color: ['#FFD700', '#FF6B6B', '#4ECDC4', '#95E1D3', '#F38181'][Math.floor(Math.random() * 5)],
+            rotation: Math.random() * Math.PI * 2,
+            rotationSpeed: (Math.random() - 0.5) * 10
+          });
+        }
+      }
+
+      // Notify parent frame
+      if (window.parent && window.parent !== window) {
+        window.parent.postMessage({
+          type: 'quiz-end',
+          isCorrect: isCorrect,
+          explanation: explanation || ''
+        }, '*');
+      }
+    }
+  };
+
+  /** STANDARD END SCREEN - DO NOT MODIFY */
+  function drawEndScreen(dt) {
+    endScreenTime += dt;
+
+    // Update confetti
+    confettiParticles = confettiParticles.filter(p => {
+      p.vy += 800 * dt; // gravity
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.rotation += p.rotationSpeed * dt;
+      p.vx *= 0.99;
+      return p.y < H + 50;
+    });
+
+    // Dark overlay
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
+    ctx.fillRect(0, 0, W, H);
+
+    // Draw confetti
+    confettiParticles.forEach(p => {
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rotation);
+      ctx.fillStyle = p.color;
+      ctx.fillRect(-p.size / 2, -p.size / 4, p.size, p.size / 2);
+      ctx.restore();
+    });
+
+    // Result emoji
+    ctx.font = '72px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(gameResult ? '🎉' : '😢', W / 2, H / 2 - 50);
+
+    // Result text
+    ctx.fillStyle = gameResult ? '#4ADE80' : '#F87171';
+    ctx.font = "bold 36px 'Nunito Sans', sans-serif";
+    ctx.fillText(gameResult ? 'Correct!' : 'Wrong!', W / 2, H / 2 + 20);
+
+    // Buttons
+    if (gameResult) {
+      // Correct: show both Restart and Next/Finish
+      drawButton(restartButton, 'Restart', '#E87A3E', true);
+      const nextLabel = QUESTION.isLastQuestion ? 'Finish' : 'Next';
+      drawButton(nextButton, nextLabel, '#4ECDC4', true);
+    } else {
+      // Wrong: show only centered Restart button
+      const centeredRestart = { x: W / 2 - 75, y: H / 2 + 60, w: 150, h: 48 };
+      drawButton(centeredRestart, 'Restart', '#E87A3E', true);
+    }
+  }
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 3: YOUR GAME CODE - IMPLEMENT THESE FUNCTIONS                     ║
+  // ║  This is where your game logic goes. See requirements below.               ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+
+  // === COLORS ===
+  const COLORS = {
+    bgPrimary: '#0d1f3c',
+    bgDeep: '#061225',
+    brass: '#C4A35A',
+    brassLight: '#D4B86A',
+    brassDark: '#8B7340',
+    orange: '#E87A3E',
+    amber: '#F5A742',
+    cyan: '#4ECDC4',
+    success: '#6BBF59',
+    error: '#E85D4A',
+    textPrimary: '#F5F5F0',
+    textSecondary: '#A0A090',
+    blueprint: '#1a3a5c',
+    blueprintLine: '#2a5a8c',
+    phosphor: '#7FFFE0'
+  };
+
+  // === GAME STATE ===
+  let orreryAngle = 0; // Overall orrery rotation
+  let disc = null;
+  let throwAngle = -Math.PI / 4; // Starting angle (pointing to top-right basin)
+  let isAiming = true;
+  let basins = [];
+  let gears = [];
+  let particles = [];
+  let phosphorSpray = [];
+  let jammedArmIndex = -1;
+  let gameTime = 0;
+  let entranceProgress = 0;
+
+  // Audio context for sounds
+  let audioCtx = null;
+
+  function initAudio() {
+    if (!audioCtx) {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    }
+  }
+
+  function playSound(type) {
+    if (!audioCtx) return;
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+
+    if (type === 'throw') {
+      osc.frequency.setValueAtTime(220, audioCtx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(440, audioCtx.currentTime + 0.1);
+      gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.2);
+      osc.start();
+      osc.stop(audioCtx.currentTime + 0.2);
+    } else if (type === 'correct') {
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(523, audioCtx.currentTime);
+      osc.frequency.setValueAtTime(659, audioCtx.currentTime + 0.1);
+      osc.frequency.setValueAtTime(784, audioCtx.currentTime + 0.2);
+      gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.4);
+      osc.start();
+      osc.stop(audioCtx.currentTime + 0.4);
+    } else if (type === 'wrong') {
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(200, audioCtx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(100, audioCtx.currentTime + 0.3);
+      gain.gain.setValueAtTime(0.2, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.4);
+      osc.start();
+      osc.stop(audioCtx.currentTime + 0.4);
+    } else if (type === 'click') {
+      osc.type = 'square';
+      osc.frequency.setValueAtTime(800, audioCtx.currentTime);
+      gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.05);
+      osc.start();
+      osc.stop(audioCtx.currentTime + 0.05);
+    }
+  }
+
+  function initGame() {
+    initAudio();
+    orreryAngle = 0;
+    throwAngle = -Math.PI / 4;
+    isAiming = true;
+    disc = null;
+    jammedArmIndex = -1;
+    gameTime = 0;
+    entranceProgress = 0;
+    particles = [];
+    phosphorSpray = [];
+
+    // Create 4 orbit arm basins at different angles
+    basins = QUESTION.choices.map((choice, i) => {
+      const angle = (i * Math.PI / 2) + Math.PI / 4; // 45°, 135°, 225°, 315°
+      const orbitRadius = 160;
+      return {
+        choice,
+        index: i,
+        baseAngle: angle,
+        orbitRadius,
+        basinRadius: 35,
+        highlighted: false,
+        scale: 0,
+        pennantWave: Math.random() * Math.PI * 2
+      };
+    });
+
+    // Create parallax background gears
+    gears = [];
+    for (let i = 0; i < 6; i++) {
+      gears.push({
+        x: Math.random() * W,
+        y: Math.random() * H,
+        radius: 30 + Math.random() * 60,
+        teeth: Math.floor(8 + Math.random() * 12),
+        speed: (Math.random() - 0.5) * 0.3,
+        depth: 0.3 + Math.random() * 0.4
+      });
+    }
+  }
+
+  function updateGame(dt) {
+    if (gameState !== 'playing') return;
+
+    gameTime += dt;
+    entranceProgress = Math.min(1, gameTime / 0.8);
+
+    // Rotate orrery slowly (very slow rotation for fair gameplay)
+    if (jammedArmIndex === -1) {
+      orreryAngle += dt * 0.08;
+    }
+
+    // Update basin entrance animations
+    basins.forEach((basin, i) => {
+      const targetScale = 1;
+      const delay = i * 0.1;
+      const t = Math.max(0, Math.min(1, (gameTime - delay) / 0.4));
+      const spring = 1 + Math.sin(t * Math.PI * 2) * 0.2 * (1 - t);
+      basin.scale = t * spring;
+      basin.pennantWave += dt * 3;
+    });
+
+    // Update disc if thrown
+    if (disc && !disc.caught) {
+      disc.x += disc.vx * dt;
+      disc.y += disc.vy * dt;
+      disc.rotation += disc.rotationSpeed * dt;
+
+      // Check collision with basins
+      const centerX = W / 2;
+      const centerY = H / 2 - 20;
+
+      for (const basin of basins) {
+        if (basin.index === jammedArmIndex) continue;
+
+        const basinAngle = basin.baseAngle + orreryAngle;
+        const bx = centerX + Math.cos(basinAngle) * basin.orbitRadius;
+        const by = centerY + Math.sin(basinAngle) * basin.orbitRadius;
+
+        const dx = disc.x - bx;
+        const dy = disc.y - by;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+
+        if (dist < basin.basinRadius + 40) {
+          disc.caught = true;
+          disc.x = bx;
+          disc.y = by;
+
+          // Spawn celebration particles
+          for (let i = 0; i < 15; i++) {
+            particles.push({
+              x: bx,
+              y: by,
+              vx: (Math.random() - 0.5) * 200,
+              vy: (Math.random() - 0.5) * 200,
+              life: 1,
+              color: basin.choice.is_correct ? COLORS.success : COLORS.error,
+              size: 3 + Math.random() * 4
+            });
+          }
+
+          setTimeout(() => {
+            if (basin.choice.is_correct) {
+              playSound('correct');
+            } else {
+              playSound('wrong');
+            }
+            engine.end(basin.choice.is_correct, basin.choice.explanation);
+          }, 300);
+
+          return;
+        }
+      }
+
+      // Check if disc fell into gear moat (off screen or too far from center)
+      const distFromCenter = Math.sqrt((disc.x - centerX) ** 2 + (disc.y - centerY) ** 2);
+      if (disc.x < -50 || disc.x > W + 50 || disc.y < -50 || disc.y > H + 50 || distFromCenter > 280) {
+        // Missed! Phosphor spray and jam
+        for (let i = 0; i < 40; i++) {
+          phosphorSpray.push({
+            x: disc.x,
+            y: disc.y,
+            vx: (Math.random() - 0.5) * 300,
+            vy: -Math.random() * 200 - 50,
+            life: 1,
+            size: 2 + Math.random() * 4
+          });
+        }
+        jammedArmIndex = Math.floor(Math.random() * 4);
+        playSound('wrong');
+        disc = null;
+        isAiming = true;
+        throwAngle = -Math.PI / 4;
+      }
+    }
+
+    // Update particles
+    particles = particles.filter(p => {
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.vy += 300 * dt;
+      p.life -= dt * 2;
+      return p.life > 0;
+    });
+
+    // Update phosphor spray
+    phosphorSpray = phosphorSpray.filter(p => {
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.vy += 400 * dt;
+      p.life -= dt * 1.5;
+      return p.life > 0;
+    });
+
+    // Check basin highlighting for aiming
+    if (isAiming) {
+      const centerX = W / 2;
+      const centerY = H / 2 - 20;
+      const aimX = centerX + Math.cos(throwAngle) * 250;
+      const aimY = centerY + Math.sin(throwAngle) * 250;
+
+      basins.forEach(basin => {
+        const basinAngle = basin.baseAngle + orreryAngle;
+        const bx = centerX + Math.cos(basinAngle) * basin.orbitRadius;
+        const by = centerY + Math.sin(basinAngle) * basin.orbitRadius;
+        const dx = aimX - bx;
+        const dy = aimY - by;
+        basin.highlighted = Math.sqrt(dx * dx + dy * dy) < 60;
+      });
+    }
+  }
+
+  function drawGame() {
+    // Clear with deep background
+    ctx.fillStyle = COLORS.bgDeep;
+    ctx.fillRect(0, 0, W, H);
+
+    // Draw blueprint grid
+    ctx.strokeStyle = COLORS.blueprintLine;
+    ctx.lineWidth = 0.5;
+    ctx.globalAlpha = 0.3;
+    for (let x = 0; x < W; x += 40) {
+      ctx.beginPath();
+      ctx.moveTo(x, 0);
+      ctx.lineTo(x, H);
+      ctx.stroke();
+    }
+    for (let y = 0; y < H; y += 40) {
+      ctx.beginPath();
+      ctx.moveTo(0, y);
+      ctx.lineTo(W, y);
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+
+    // Draw parallax gears
+    gears.forEach(gear => {
+      ctx.save();
+      ctx.translate(gear.x, gear.y);
+      ctx.rotate(gameTime * gear.speed);
+      ctx.globalAlpha = gear.depth * 0.4;
+      drawGear(0, 0, gear.radius, gear.teeth, COLORS.brassDark);
+      ctx.restore();
+    });
+    ctx.globalAlpha = 1;
+
+    const centerX = W / 2;
+    const centerY = H / 2 - 20;
+
+    // Draw harbor mural hint (dark water)
+    ctx.fillStyle = '#0a1520';
+    ctx.beginPath();
+    ctx.ellipse(centerX, H + 80, 400, 150, 0, Math.PI, 0);
+    ctx.fill();
+
+    // Draw central orrery mechanism
+    drawOrreryCenter(centerX, centerY);
+
+    // Draw orbit rings
+    ctx.strokeStyle = COLORS.brass;
+    ctx.lineWidth = 3;
+    ctx.globalAlpha = 0.6;
+    ctx.beginPath();
+    ctx.arc(centerX, centerY, 160, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+
+    // Draw burnished rings sweeping
+    for (let i = 0; i < 3; i++) {
+      const ringAngle = orreryAngle * (0.5 + i * 0.3) + i * Math.PI / 3;
+      ctx.save();
+      ctx.translate(centerX, centerY);
+      ctx.rotate(ringAngle);
+      ctx.strokeStyle = COLORS.brassLight;
+      ctx.lineWidth = 2;
+      ctx.globalAlpha = 0.4;
+      ctx.beginPath();
+      ctx.arc(0, 0, 100 + i * 30, -0.3, 0.3);
+      ctx.stroke();
+      ctx.restore();
+    }
+    ctx.globalAlpha = 1;
+
+    // Draw orbit arms and basins
+    basins.forEach((basin, i) => {
+      if (basin.scale < 0.01) return;
+
+      const basinAngle = basin.baseAngle + orreryAngle;
+      const bx = centerX + Math.cos(basinAngle) * basin.orbitRadius;
+      const by = centerY + Math.sin(basinAngle) * basin.orbitRadius;
+
+      ctx.save();
+      ctx.translate(bx, by);
+      ctx.scale(basin.scale, basin.scale);
+
+      // Draw arm connecting to center
+      ctx.strokeStyle = i === jammedArmIndex ? COLORS.error : COLORS.brass;
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      const armLen = basin.orbitRadius;
+      ctx.lineTo(-Math.cos(basinAngle) * armLen * 0.6, -Math.sin(basinAngle) * armLen * 0.6);
+      ctx.stroke();
+
+      // Draw catch basin (ringed)
+      const isHighlighted = basin.highlighted;
+      ctx.fillStyle = isHighlighted ? COLORS.cyan : COLORS.blueprint;
+      ctx.strokeStyle = i === jammedArmIndex ? COLORS.error : (isHighlighted ? COLORS.cyan : COLORS.brass);
+      ctx.lineWidth = 3;
+
+      ctx.beginPath();
+      ctx.arc(0, 0, basin.basinRadius, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+
+      // Inner ring
+      ctx.strokeStyle = COLORS.brassLight;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(0, 0, basin.basinRadius - 8, 0, Math.PI * 2);
+      ctx.stroke();
+
+      // Draw pennant
+      const pennantHeight = 50;
+      const waveOffset = Math.sin(basin.pennantWave) * 5;
+      ctx.fillStyle = isHighlighted ? COLORS.amber : COLORS.orange;
+
+      ctx.beginPath();
+      ctx.moveTo(0, -basin.basinRadius - 5);
+      ctx.lineTo(-15, -basin.basinRadius - pennantHeight + waveOffset);
+      ctx.lineTo(15, -basin.basinRadius - pennantHeight + waveOffset - 3);
+      ctx.closePath();
+      ctx.fill();
+
+      // Pennant pole
+      ctx.strokeStyle = COLORS.brassDark;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(0, -basin.basinRadius);
+      ctx.lineTo(0, -basin.basinRadius - pennantHeight - 10);
+      ctx.stroke();
+
+      ctx.restore();
+
+      // Draw answer text box below/beside basin
+      drawAnswerText(basin.choice.text, bx, by, i, isHighlighted);
+    });
+
+    // Draw disc thrower position
+    const throwerX = centerX;
+    const throwerY = centerY;
+
+    // Draw aiming line
+    if (isAiming) {
+      const aimLen = 80;
+      ctx.strokeStyle = COLORS.cyan;
+      ctx.lineWidth = 2;
+      ctx.setLineDash([8, 4]);
+      ctx.beginPath();
+      ctx.moveTo(throwerX, throwerY);
+      ctx.lineTo(throwerX + Math.cos(throwAngle) * aimLen, throwerY + Math.sin(throwAngle) * aimLen);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      // Aiming reticle
+      const reticleX = throwerX + Math.cos(throwAngle) * aimLen;
+      const reticleY = throwerY + Math.sin(throwAngle) * aimLen;
+      ctx.strokeStyle = COLORS.amber;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(reticleX, reticleY, 8, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(reticleX - 12, reticleY);
+      ctx.lineTo(reticleX + 12, reticleY);
+      ctx.moveTo(reticleX, reticleY - 12);
+      ctx.lineTo(reticleX, reticleY + 12);
+      ctx.stroke();
+
+      // Draw disc at center ready to throw
+      drawDisc(throwerX, throwerY, 0);
+    }
+
+    // Draw flying disc
+    if (disc && !disc.caught) {
+      drawDisc(disc.x, disc.y, disc.rotation);
+    }
+
+    // Draw particles
+    particles.forEach(p => {
+      ctx.globalAlpha = p.life;
+      ctx.fillStyle = p.color;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+      ctx.fill();
+    });
+    ctx.globalAlpha = 1;
+
+    // Draw phosphor spray
+    phosphorSpray.forEach(p => {
+      ctx.globalAlpha = p.life * 0.8;
+      ctx.fillStyle = COLORS.phosphor;
+      ctx.shadowColor = COLORS.phosphor;
+      ctx.shadowBlur = 10;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+      ctx.fill();
+    });
+    ctx.shadowBlur = 0;
+    ctx.globalAlpha = 1;
+  }
+
+  function drawGear(x, y, radius, teeth, color) {
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    const toothDepth = radius * 0.15;
+    for (let i = 0; i < teeth; i++) {
+      const a1 = (i / teeth) * Math.PI * 2;
+      const a2 = ((i + 0.3) / teeth) * Math.PI * 2;
+      const a3 = ((i + 0.5) / teeth) * Math.PI * 2;
+      const a4 = ((i + 0.8) / teeth) * Math.PI * 2;
+
+      if (i === 0) {
+        ctx.moveTo(x + Math.cos(a1) * radius, y + Math.sin(a1) * radius);
+      }
+      ctx.lineTo(x + Math.cos(a2) * (radius + toothDepth), y + Math.sin(a2) * (radius + toothDepth));
+      ctx.lineTo(x + Math.cos(a3) * (radius + toothDepth), y + Math.sin(a3) * (radius + toothDepth));
+      ctx.lineTo(x + Math.cos(a4) * radius, y + Math.sin(a4) * radius);
+    }
+    ctx.closePath();
+    ctx.fill();
+
+    // Inner circle
+    ctx.fillStyle = COLORS.bgDeep;
+    ctx.beginPath();
+    ctx.arc(x, y, radius * 0.4, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  function drawOrreryCenter(x, y) {
+    // Central brass hub
+    ctx.save();
+    ctx.translate(x, y);
+
+    // Outer ring
+    ctx.fillStyle = COLORS.brass;
+    ctx.beginPath();
+    ctx.arc(0, 0, 30, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Inner mechanism
+    ctx.fillStyle = COLORS.brassDark;
+    ctx.beginPath();
+    ctx.arc(0, 0, 20, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Center jewel
+    ctx.fillStyle = COLORS.cyan;
+    ctx.shadowColor = COLORS.cyan;
+    ctx.shadowBlur = 8;
+    ctx.beginPath();
+    ctx.arc(0, 0, 8, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+
+    ctx.restore();
+  }
+
+  function drawDisc(x, y, rotation) {
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(rotation);
+
+    // Disc body
+    ctx.fillStyle = COLORS.brassLight;
+    ctx.beginPath();
+    ctx.ellipse(0, 0, 15, 15, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Inner ring detail
+    ctx.strokeStyle = COLORS.brass;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(0, 0, 10, 0, Math.PI * 2);
+    ctx.stroke();
+
+    // Center dot
+    ctx.fillStyle = COLORS.orange;
+    ctx.beginPath();
+    ctx.arc(0, 0, 4, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.restore();
+  }
+
+  function drawAnswerText(text, basinX, basinY, index, highlighted) {
+    // Position text boxes near their basins but offset to avoid overlap
+    const boxWidth = 160;
+    const boxHeight = 65;
+    const padding = 6;
+    const centerX = W / 2;
+    const centerY = H / 2 - 20;
+
+    // Offset direction based on basin position relative to center
+    const dx = basinX - centerX;
+    const dy = basinY - centerY;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    const offsetDist = 85;
+
+    let textX = basinX + (dx / dist) * offsetDist - boxWidth / 2;
+    let textY = basinY + (dy / dist) * offsetDist - boxHeight / 2;
+
+    // Clamp to screen bounds
+    textX = Math.max(5, Math.min(W - boxWidth - 5, textX));
+    textY = Math.max(5, Math.min(H - boxHeight - 5, textY));
+
+    // Background box
+    ctx.fillStyle = highlighted ? 'rgba(78, 205, 196, 0.25)' : 'rgba(13, 31, 60, 0.95)';
+    ctx.strokeStyle = highlighted ? COLORS.cyan : COLORS.brass;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.roundRect(textX, textY, boxWidth, boxHeight, 8);
+    ctx.fill();
+    ctx.stroke();
+
+    // Answer letter indicator
+    const letters = ['A', 'B', 'C', 'D'];
+    ctx.fillStyle = highlighted ? COLORS.amber : COLORS.orange;
+    ctx.font = "700 14px 'Nunito Sans', sans-serif";
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+    ctx.fillText(letters[index] + '.', textX + padding, textY + padding);
+
+    // Draw text with word wrapping
+    ctx.fillStyle = highlighted ? COLORS.cyan : COLORS.textPrimary;
+    ctx.font = "400 13px 'Nunito', sans-serif";
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+
+    wrapText(ctx, text, textX + padding + 18, textY + padding, boxWidth - padding * 2 - 18, 14);
+  }
+
+  function wrapText(ctx, text, x, y, maxWidth, lineHeight) {
+    const words = text.split(' ');
+    let line = '';
+    let currentY = y;
+    let lineCount = 0;
+    const maxLines = 4;
+
+    for (let i = 0; i < words.length; i++) {
+      const testLine = line + words[i] + ' ';
+      const metrics = ctx.measureText(testLine);
+      if (metrics.width > maxWidth && line !== '') {
+        ctx.fillText(line.trim(), x, currentY);
+        line = words[i] + ' ';
+        currentY += lineHeight;
+        lineCount++;
+        if (lineCount >= maxLines) {
+          break;
+        }
+      } else {
+        line = testLine;
+      }
+    }
+    if (lineCount < maxLines && line.trim()) {
+      ctx.fillText(line.trim(), x, currentY);
+    }
+  }
+
+  function handleInput(e) {
+    if (gameState !== 'playing') return;
+
+    const rotateSpeed = 0.08;
+
+    if (e.code === 'ArrowLeft' || e.code === 'KeyA') {
+      throwAngle -= rotateSpeed;
+      playSound('click');
+    } else if (e.code === 'ArrowRight' || e.code === 'KeyD') {
+      throwAngle += rotateSpeed;
+      playSound('click');
+    } else if (e.code === 'ArrowUp' || e.code === 'KeyW') {
+      throwAngle -= rotateSpeed;
+      playSound('click');
+    } else if (e.code === 'ArrowDown' || e.code === 'KeyS') {
+      throwAngle += rotateSpeed;
+      playSound('click');
+    } else if ((e.code === 'Space' || e.code === 'Enter') && isAiming) {
+      // Throw the disc!
+      const centerX = W / 2;
+      const centerY = H / 2 - 20;
+      const speed = 200;
+
+      disc = {
+        x: centerX,
+        y: centerY,
+        vx: Math.cos(throwAngle) * speed,
+        vy: Math.sin(throwAngle) * speed,
+        rotation: 0,
+        rotationSpeed: 8,
+        caught: false
+      };
+
+      isAiming = false;
+      playSound('throw');
+      e.preventDefault();
+    }
+  }
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 4: GAME LOOP - DO NOT MODIFY                                      ║
+  // ║  Standard loop with responsive scaling and DPR support.                    ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  let lastTime = performance.now();
+
+  function gameLoop(now) {
+    const dt = Math.min((now - lastTime) / 1000, 0.05); // Cap at 50ms
+    lastTime = now;
+
+    // Apply transform for logical coordinate system
+    ctx.setTransform(scale * dpr, 0, 0, scale * dpr, 0, 0);
+
+    if (gameState === 'playing') {
+      updateGame(dt);
+      drawGame();
+    } else {
+      drawGame(); // Draw game state behind overlay
+      drawEndScreen(dt);
+    }
+
+    // Reset transform for next frame
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+    requestAnimationFrame(gameLoop);
+  }
+
+  // Input handlers
+  document.addEventListener('keydown', (e) => {
+    if (gameState === 'ended' && (e.code === 'KeyR')) {
+      // Restart game
+      gameState = 'playing';
+      gameResult = null;
+      gameExplanation = '';
+      confettiParticles = [];
+      initGame();
+      return;
+    }
+    handleInput(e);
+  });
+
+  document.addEventListener('keyup', (e) => {
+    // Optional: handle key release in your handleInput
+  });
+
+  // Canvas click handler for end screen buttons
+  canvas.addEventListener('click', (e) => {
+    if (gameState !== 'ended') return;
+
+    const { x, y } = screenToLogical(e.clientX, e.clientY);
+
+    if (gameResult) {
+      // Correct answer: check both buttons
+      if (pointInRect(x, y, restartButton)) {
+        gameState = 'playing';
+        gameResult = null;
+        gameExplanation = '';
+        confettiParticles = [];
+        initGame();
+        return;
+      }
+      if (pointInRect(x, y, nextButton)) {
+        // Notify parent to go to next question
+        if (window.parent && window.parent !== window) {
+          window.parent.postMessage({ type: 'quiz-next' }, '*');
+        }
+        return;
+      }
+    } else {
+      // Wrong answer: check centered restart button
+      const centeredRestart = { x: W / 2 - 75, y: H / 2 + 60, w: 150, h: 48 };
+      if (pointInRect(x, y, centeredRestart)) {
+        gameState = 'playing';
+        gameResult = null;
+        gameExplanation = '';
+        confettiParticles = [];
+        initGame();
+        return;
+      }
+    }
+  });
+
+  // Handle resize
+  window.addEventListener('resize', resizeCanvas);
+
+  // Initialize
+  resizeCanvas();
+  initGame();
+  requestAnimationFrame(gameLoop);
+  </script>
+</body>
+</html>

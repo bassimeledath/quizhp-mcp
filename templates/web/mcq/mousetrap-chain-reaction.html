@@ -1,0 +1,1422 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mousetrap Chain Reaction</title>
+  <!--
+  ╔══════════════════════════════════════════════════════════════════════════════╗
+  ║  GAME FACTORY TEMPLATE                                                        ║
+  ║  This template enforces critical invariants. Follow the section markers.      ║
+  ╚══════════════════════════════════════════════════════════════════════════════╝
+  -->
+  <style>
+    /* ═══════════════════════════════════════════════════════════════════════════
+       BASE STYLES - Can be extended, not removed
+       ═══════════════════════════════════════════════════════════════════════════ */
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+    }
+    body {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      background: #1C1C1A;
+      font-family: system-ui, -apple-system, sans-serif;
+    }
+    #gameCanvas {
+      background: #2A2A27;
+      border-radius: 8px;
+      display: block;
+      cursor: default;
+    }
+  </style>
+</head>
+<body>
+  <!-- ═══════════════════════════════════════════════════════════════════════════
+       CANVAS - Sized dynamically to fill available space
+       ═══════════════════════════════════════════════════════════════════════════ -->
+  <canvas id="gameCanvas"></canvas>
+
+  <script>
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 1: QUESTION PLACEHOLDER - DO NOT MODIFY FORMAT                    ║
+  // ║  Platform replaces this at runtime. Use these exact 60-char answers.       ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  const QUESTION = {
+    type: "mcq",
+    prompt: "Sample question text",
+    choices: [
+      { text: "This is sample answer A which is long enough to test text overflow", is_correct: true, explanation: "Why A is correct" },
+      { text: "This is sample answer B which is long enough to test text overflow", is_correct: false, explanation: "Why B is wrong" },
+      { text: "This is sample answer C which is long enough to test text overflow", is_correct: false, explanation: "Why C is wrong" },
+      { text: "This is sample answer D which is long enough to test text overflow", is_correct: false, explanation: "Why D is wrong" }
+    ],
+    isLastQuestion: false
+  };
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 2: ENGINE CORE - DO NOT MODIFY                                    ║
+  // ║  Standard engine interface and end screen. This is sacred.                 ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  const canvas = document.getElementById('gameCanvas');
+  const ctx = canvas.getContext('2d');
+
+  // Logical dimensions (game code works in this coordinate space)
+  const W = 720, H = 540;
+
+  // Scaling state (computed on resize)
+  let scale = 1;
+  let dpr = 1;
+
+  let gameState = 'playing'; // 'playing' | 'ended'
+  let gameResult = null;     // true (correct) | false (wrong)
+  let gameExplanation = '';
+  let endScreenTime = 0;
+  let confettiParticles = [];
+
+  // End screen button bounds (logical coordinates)
+  const restartButton = { x: W / 2 - 170, y: H / 2 + 60, w: 150, h: 48 };
+  const nextButton = { x: W / 2 + 20, y: H / 2 + 60, w: 150, h: 48 };
+
+  /** Check if point is inside rectangle */
+  function pointInRect(px, py, rect) {
+    return px >= rect.x && px <= rect.x + rect.w &&
+           py >= rect.y && py <= rect.y + rect.h;
+  }
+
+  /** Draw a styled button */
+  function drawButton(rect, label, color, pulse) {
+    const p = pulse ? 1 + Math.sin(endScreenTime * 4) * 0.03 : 1;
+    ctx.save();
+    ctx.translate(rect.x + rect.w / 2, rect.y + rect.h / 2);
+    ctx.scale(p, p);
+    ctx.translate(-(rect.x + rect.w / 2), -(rect.y + rect.h / 2));
+
+    // Button background
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.roundRect(rect.x, rect.y, rect.w, rect.h, 12);
+    ctx.fill();
+
+    // Button text
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = 'bold 18px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, rect.x + rect.w / 2, rect.y + rect.h / 2);
+
+    ctx.restore();
+  }
+
+  /**
+   * Resize canvas to fill available space with proper DPR scaling.
+   * Maintains logical coordinate system (720×540).
+   */
+  function resizeCanvas() {
+    dpr = window.devicePixelRatio || 1;
+
+    // Get available space
+    const availW = window.innerWidth;
+    const availH = window.innerHeight;
+
+    // Calculate scale to fit logical space (720×540) in available space
+    const scaleX = availW / W;
+    const scaleY = availH / H;
+    scale = Math.min(scaleX, scaleY);
+
+    // Physical canvas buffer (DPR-scaled for crisp rendering)
+    canvas.width = W * scale * dpr;
+    canvas.height = H * scale * dpr;
+
+    // CSS display size
+    canvas.style.width = (W * scale) + 'px';
+    canvas.style.height = (H * scale) + 'px';
+  }
+
+  /**
+   * Convert screen coordinates to logical coordinates.
+   * Use this for mouse/click events to get positions in 720×540 space.
+   */
+  function screenToLogical(screenX, screenY) {
+    const rect = canvas.getBoundingClientRect();
+    return {
+      x: (screenX - rect.left) * (W / rect.width),
+      y: (screenY - rect.top) * (H / rect.height)
+    };
+  }
+
+  const engine = {
+    /** Call this to end the game. DO NOT draw your own end screen. */
+    end(isCorrect, explanation) {
+      if (gameState === 'ended') return;
+      gameState = 'ended';
+      gameResult = isCorrect;
+      gameExplanation = explanation || '';
+      endScreenTime = 0;
+
+      // Spawn confetti for correct answers
+      if (isCorrect) {
+        for (let i = 0; i < 50; i++) {
+          confettiParticles.push({
+            x: W / 2,
+            y: H / 2,
+            vx: (Math.random() - 0.5) * 600,
+            vy: -Math.random() * 400 - 100,
+            size: 4 + Math.random() * 6,
+            color: ['#FFD700', '#FF6B6B', '#4ECDC4', '#95E1D3', '#F38181'][Math.floor(Math.random() * 5)],
+            rotation: Math.random() * Math.PI * 2,
+            rotationSpeed: (Math.random() - 0.5) * 10
+          });
+        }
+      }
+
+      // Notify parent frame
+      if (window.parent && window.parent !== window) {
+        window.parent.postMessage({
+          type: 'quiz-end',
+          isCorrect: isCorrect,
+          explanation: explanation || ''
+        }, '*');
+      }
+    }
+  };
+
+  /** STANDARD END SCREEN - DO NOT MODIFY */
+  function drawEndScreen(dt) {
+    endScreenTime += dt;
+
+    // Update confetti
+    confettiParticles = confettiParticles.filter(p => {
+      p.vy += 800 * dt; // gravity
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.rotation += p.rotationSpeed * dt;
+      p.vx *= 0.99;
+      return p.y < H + 50;
+    });
+
+    // Dark overlay
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
+    ctx.fillRect(0, 0, W, H);
+
+    // Draw confetti
+    confettiParticles.forEach(p => {
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rotation);
+      ctx.fillStyle = p.color;
+      ctx.fillRect(-p.size / 2, -p.size / 4, p.size, p.size / 2);
+      ctx.restore();
+    });
+
+    // Result emoji
+    ctx.font = '72px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(gameResult ? '🎉' : '😢', W / 2, H / 2 - 50);
+
+    // Result text
+    ctx.fillStyle = gameResult ? '#4ADE80' : '#F87171';
+    ctx.font = 'bold 36px system-ui, sans-serif';
+    ctx.fillText(gameResult ? 'Correct!' : 'Wrong!', W / 2, H / 2 + 20);
+
+    // Buttons
+    if (gameResult) {
+      // Correct: show both Restart and Next/Finish
+      drawButton(restartButton, 'Restart', '#E87A3E', true);
+      const nextLabel = QUESTION.isLastQuestion ? 'Finish' : 'Next';
+      drawButton(nextButton, nextLabel, '#4ECDC4', true);
+    } else {
+      // Wrong: show only centered Restart button
+      const centeredRestart = { x: W / 2 - 75, y: H / 2 + 60, w: 150, h: 48 };
+      drawButton(centeredRestart, 'Restart', '#E87A3E', true);
+    }
+  }
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 3: YOUR GAME CODE - IMPLEMENT THESE FUNCTIONS                     ║
+  // ║  This is where your game logic goes. See requirements below.               ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+
+  // === COLORS (QuizHP Styleguide) ===
+  const COLORS = {
+    bgPrimary: '#FAFAF7',
+    bgSurface: '#FFFFFF',
+    bgDark: '#2A2A27',
+    textPrimary: '#2B2B28',
+    textSecondary: '#5A5A54',
+    textLight: '#F5F5F0',
+    orange: '#E87A3E',
+    orangeHover: '#D66B31',
+    amber: '#F5A742',
+    cyan: '#4ECDC4',
+    success: '#6BBF59',
+    error: '#E85D4A',
+    borderSubtle: '#E6E6E0',
+    borderStrong: '#D4D4CC',
+    peach: '#FFB89D',
+  };
+
+  // === WEB AUDIO SOUND EFFECTS ===
+  let audioCtx = null;
+  function getAudioCtx() {
+    if (!audioCtx) {
+      try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch(e) {}
+    }
+    return audioCtx;
+  }
+
+  function playTone(freq, duration, type, vol) {
+    const ac = getAudioCtx();
+    if (!ac) return;
+    const osc = ac.createOscillator();
+    const gain = ac.createGain();
+    osc.type = type || 'sine';
+    osc.frequency.setValueAtTime(freq, ac.currentTime);
+    gain.gain.setValueAtTime(vol || 0.15, ac.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ac.currentTime + duration);
+    osc.connect(gain);
+    gain.connect(ac.destination);
+    osc.start();
+    osc.stop(ac.currentTime + duration);
+  }
+
+  function playRampClick() {
+    playTone(800, 0.05, 'square', 0.06);
+  }
+
+  function playBallRelease() {
+    playTone(400, 0.15, 'sine', 0.12);
+    setTimeout(() => playTone(500, 0.1, 'sine', 0.08), 50);
+  }
+
+  function playBallRoll() {
+    const ac = getAudioCtx();
+    if (!ac) return;
+    const bufferSize = ac.sampleRate * 0.3;
+    const buffer = ac.createBuffer(1, bufferSize, ac.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < bufferSize; i++) {
+      data[i] = (Math.random() * 2 - 1) * 0.03 * (1 - i / bufferSize);
+    }
+    const source = ac.createBufferSource();
+    source.buffer = buffer;
+    const filter = ac.createBiquadFilter();
+    filter.type = 'bandpass';
+    filter.frequency.value = 1200;
+    filter.Q.value = 2;
+    source.connect(filter);
+    filter.connect(ac.destination);
+    source.start();
+  }
+
+  function playMetalHit() {
+    playTone(1200, 0.08, 'square', 0.1);
+    setTimeout(() => playTone(800, 0.12, 'triangle', 0.08), 30);
+  }
+
+  function playCageDrop() {
+    playTone(200, 0.3, 'sine', 0.15);
+    setTimeout(() => playTone(150, 0.2, 'sine', 0.1), 100);
+  }
+
+  function playCorrect() {
+    playTone(523, 0.12, 'sine', 0.12);
+    setTimeout(() => playTone(659, 0.12, 'sine', 0.12), 100);
+    setTimeout(() => playTone(784, 0.2, 'sine', 0.15), 200);
+  }
+
+  function playWrong() {
+    playTone(300, 0.15, 'sawtooth', 0.08);
+    setTimeout(() => playTone(250, 0.25, 'sawtooth', 0.06), 120);
+  }
+
+  // === GAME STATE ===
+  let rampAngle = 0;           // Current ramp angle in radians (-0.6 to 0.6)
+  let isDragging = false;      // Whether player is dragging the ramp
+  let dragStartAngle = 0;      // Angle when drag started
+  let dragStartX = 0;          // X position when drag started
+  let hoveringRamp = false;    // Whether mouse is over the ramp
+  let justFinishedDrag = false; // Prevent click immediately after drag
+
+  // Ball state
+  let ball = null;
+  let ballReleased = false;
+  let ballPath = [];           // Pre-computed path for the ball
+  let ballPathIndex = 0;
+  let ballSpeed = 0;
+  let selectedCage = -1;       // Which cage the ball ended up in
+  let cageDropping = false;    // Whether the cage is dropping
+  let cageDropTimer = 0;
+
+  // Chain reaction state
+  let chainPhase = 0;          // 0=waiting, 1=ball on path, 2=lever tilt, 3=cage drop
+  let chainTimer = 0;
+  let soundPlayed = {};        // Track which sounds have been played
+
+  // Contraption elements
+  let levers = [];
+  let cages = [];
+  let gears = [];
+
+  // Animation state
+  let entranceTimer = 0;
+  let entranceComplete = false;
+  let sparkParticles = [];
+  let time = 0;
+  let rampBreathOffset = 0;    // Subtle breathing for ramp
+
+  // Ramp pivot point
+  const RAMP_PIVOT = { x: 360, y: 180 };
+  const RAMP_LENGTH = 130;
+  const RAMP_THICKNESS = 12;
+
+  // Ball
+  const BALL_RADIUS = 9;
+
+  // The 4 cage positions at the bottom
+  const CAGE_POSITIONS = [
+    { x: 90, y: 430 },
+    { x: 270, y: 430 },
+    { x: 450, y: 430 },
+    { x: 630, y: 430 }
+  ];
+
+  // Path guide positions - funnel tops where ball can enter
+  const FUNNEL_TOPS = [
+    { x: 90, y: 275 },
+    { x: 270, y: 275 },
+    { x: 450, y: 275 },
+    { x: 630, y: 275 }
+  ];
+
+  /** Wrap text within a given width, returning an array of lines */
+  function wrapText(text, maxWidth, font) {
+    ctx.font = font;
+    const words = text.split(' ');
+    const lines = [];
+    let currentLine = words[0];
+
+    for (let i = 1; i < words.length; i++) {
+      const testLine = currentLine + ' ' + words[i];
+      if (ctx.measureText(testLine).width <= maxWidth) {
+        currentLine = testLine;
+      } else {
+        lines.push(currentLine);
+        currentLine = words[i];
+      }
+    }
+    lines.push(currentLine);
+    return lines;
+  }
+
+  /** Determine which cage the ramp angle maps to */
+  function getCageFromAngle(angle) {
+    // angle ranges from -0.6 to 0.6
+    // Divide into 4 zones
+    const normalized = (angle + 0.6) / 1.2; // 0 to 1
+    const index = Math.floor(normalized * 4);
+    return Math.max(0, Math.min(3, index));
+  }
+
+  /** Generate a smooth ball path from ramp end to the target cage */
+  function generateBallPath(targetCage) {
+    const path = [];
+    // Ball rolls off the downhill end of the ramp
+    const rampEndX = RAMP_PIVOT.x + Math.cos(rampAngle) * RAMP_LENGTH;
+    const rampEndY = RAMP_PIVOT.y + Math.sin(rampAngle) * RAMP_LENGTH;
+
+    // Phase 1: Ball arcs from ramp end to funnel top
+    const targetFunnel = FUNNEL_TOPS[targetCage];
+    const steps = 40;
+    for (let i = 0; i <= steps; i++) {
+      const t = i / steps;
+      const x = rampEndX + (targetFunnel.x - rampEndX) * t;
+      const baseY = rampEndY + (targetFunnel.y - rampEndY) * t;
+      // Parabolic arc - higher arc for longer distances
+      const dist = Math.abs(targetFunnel.x - rampEndX);
+      const arcHeight = -(40 + dist * 0.15) * Math.sin(t * Math.PI);
+      path.push({ x, y: baseY + arcHeight });
+    }
+
+    // Phase 2: Ball drops through tube with slight wobble
+    const tubeTop = targetFunnel.y + 10;
+    const tubeBottom = CAGE_POSITIONS[targetCage].y - 30;
+    const tubeSteps = 25;
+    for (let i = 1; i <= tubeSteps; i++) {
+      const t = i / tubeSteps;
+      // Accelerating fall
+      const easedT = t * t;
+      const x = targetFunnel.x + Math.sin(t * Math.PI * 4) * 4;
+      const y = tubeTop + (tubeBottom - tubeTop) * easedT;
+      path.push({ x, y });
+    }
+
+    // Phase 3: Ball lands on lever
+    path.push({ x: CAGE_POSITIONS[targetCage].x, y: CAGE_POSITIONS[targetCage].y - 20 });
+
+    return path;
+  }
+
+  /** Spawn spark particles */
+  function spawnSparks(x, y, count, color) {
+    for (let i = 0; i < count; i++) {
+      sparkParticles.push({
+        x, y,
+        vx: (Math.random() - 0.5) * 250,
+        vy: (Math.random() - 0.5) * 250 - 80,
+        life: 0.4 + Math.random() * 0.6,
+        maxLife: 0.4 + Math.random() * 0.6,
+        size: 2 + Math.random() * 4,
+        color: color || COLORS.amber
+      });
+    }
+  }
+
+  function initGame() {
+    rampAngle = 0;
+    isDragging = false;
+    hoveringRamp = false;
+    justFinishedDrag = false;
+    ballReleased = false;
+    ball = null;
+    ballPath = [];
+    ballPathIndex = 0;
+    ballSpeed = 0;
+    selectedCage = -1;
+    cageDropping = false;
+    cageDropTimer = 0;
+    chainPhase = 0;
+    chainTimer = 0;
+    soundPlayed = {};
+    entranceTimer = 0;
+    entranceComplete = false;
+    sparkParticles = [];
+    time = 0;
+    rampBreathOffset = 0;
+
+    // Initialize cages with answer data
+    cages = QUESTION.choices.map((choice, i) => ({
+      x: CAGE_POSITIONS[i].x,
+      y: CAGE_POSITIONS[i].y,
+      w: 155,
+      h: 100,
+      text: choice.text,
+      is_correct: choice.is_correct,
+      explanation: choice.explanation,
+      label: String.fromCharCode(65 + i),
+      dropOffset: 0,
+      highlighted: false,
+      scale: 0,
+      alpha: 0,
+      shakeX: 0,
+    }));
+
+    // Initialize gears (decorative)
+    gears = [
+      { x: 155, y: 130, radius: 22, angle: 0, speed: 1.2 },
+      { x: 565, y: 130, radius: 22, angle: 0, speed: -1.2 },
+      { x: 360, y: 80, radius: 16, angle: 0, speed: 1.8 },
+      { x: 250, y: 95, radius: 12, angle: 0, speed: -2.2 },
+      { x: 470, y: 95, radius: 12, angle: 0, speed: 2.2 },
+    ];
+
+    // Initialize levers at the bottom of each tube
+    levers = CAGE_POSITIONS.map((pos, i) => ({
+      x: pos.x,
+      y: pos.y - 25,
+      angle: 0,
+      triggered: false,
+    }));
+
+    canvas.style.cursor = 'default';
+  }
+
+  function updateGame(dt) {
+    if (gameState !== 'playing') return;
+
+    time += dt;
+    entranceTimer += dt;
+
+    // Breathing animation for ramp
+    rampBreathOffset = Math.sin(time * 2) * 0.005;
+
+    // Entrance animation
+    if (!entranceComplete) {
+      cages.forEach((cage, i) => {
+        const delay = 0.1 * i;
+        const t = Math.max(0, Math.min(1, (entranceTimer - delay) / 0.35));
+        // Spring easing
+        const spring = t < 1 ? (1 + Math.sin(t * Math.PI * 2) * 0.2 * (1 - t)) : 1;
+        cage.scale = t * spring;
+        cage.alpha = t;
+      });
+      if (entranceTimer > 0.8) entranceComplete = true;
+    }
+
+    // Update gear rotations
+    gears.forEach(g => {
+      g.angle += g.speed * dt;
+    });
+
+    // Highlight cage based on current ramp angle
+    if (!ballReleased) {
+      const targetCage = getCageFromAngle(rampAngle);
+      cages.forEach((cage, i) => {
+        cage.highlighted = (i === targetCage);
+      });
+    }
+
+    // Update spark particles
+    sparkParticles = sparkParticles.filter(p => {
+      p.life -= dt;
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.vy += 400 * dt;
+      return p.life > 0;
+    });
+
+    // Cage shake decay
+    cages.forEach(cage => {
+      cage.shakeX *= 0.9;
+    });
+
+    // Ball animation phases
+    if (ballReleased && ball) {
+      chainTimer += dt;
+
+      if (chainPhase === 1) {
+        // Ball following pre-computed path
+        ballSpeed += dt * 100;
+        ballPathIndex += ballSpeed * dt;
+
+        // Play rolling sound once
+        if (!soundPlayed.roll) {
+          soundPlayed.roll = true;
+          playBallRoll();
+        }
+
+        if (ballPathIndex >= ballPath.length - 1) {
+          ballPathIndex = ballPath.length - 1;
+          chainPhase = 2;
+          chainTimer = 0;
+          if (selectedCage >= 0 && selectedCage < levers.length) {
+            levers[selectedCage].triggered = true;
+          }
+          spawnSparks(ball.x, ball.y, 20, COLORS.orange);
+          playMetalHit();
+        }
+
+        const idx = Math.min(Math.floor(ballPathIndex), ballPath.length - 1);
+        const nextIdx = Math.min(idx + 1, ballPath.length - 1);
+        const frac = ballPathIndex - idx;
+        ball.x = ballPath[idx].x + (ballPath[nextIdx].x - ballPath[idx].x) * frac;
+        ball.y = ballPath[idx].y + (ballPath[nextIdx].y - ballPath[idx].y) * frac;
+
+        // Trail sparks
+        if (Math.random() < 0.4) {
+          spawnSparks(ball.x, ball.y, 1, COLORS.amber);
+        }
+      } else if (chainPhase === 2) {
+        // Lever tilting animation
+        if (selectedCage >= 0) {
+          const lever = levers[selectedCage];
+          lever.angle = Math.min(0.5, lever.angle + dt * 5);
+        }
+        if (chainTimer > 0.25) {
+          chainPhase = 3;
+          chainTimer = 0;
+          cageDropping = true;
+          playCageDrop();
+        }
+      } else if (chainPhase === 3) {
+        // Cage dropping
+        if (selectedCage >= 0) {
+          cageDropTimer += dt;
+          const cage = cages[selectedCage];
+          // Bounce effect on drop
+          const dropT = Math.min(cageDropTimer / 0.2, 1);
+          const bounce = dropT < 1
+            ? 18 * dropT + Math.sin(dropT * Math.PI) * 5
+            : 18 + Math.sin(Math.min((cageDropTimer - 0.2) * 8, Math.PI)) * 3;
+          cage.dropOffset = bounce;
+
+          if (cageDropTimer > 0.4 && !soundPlayed.result) {
+            soundPlayed.result = true;
+            spawnSparks(cage.x, cage.y + cage.dropOffset, 30, cage.is_correct ? COLORS.success : COLORS.error);
+            if (cage.is_correct) {
+              playCorrect();
+            } else {
+              playWrong();
+              // Shake the cage
+              cage.shakeX = 12;
+            }
+            engine.end(cage.is_correct, cage.explanation);
+          }
+        }
+      }
+    }
+  }
+
+  function drawGame() {
+    // Clear canvas with slight gradient
+    const bgGrad = ctx.createLinearGradient(0, 0, 0, H);
+    bgGrad.addColorStop(0, '#2E2E2B');
+    bgGrad.addColorStop(1, '#252522');
+    ctx.fillStyle = bgGrad;
+    ctx.fillRect(0, 0, W, H);
+
+    // Subtle grid pattern
+    ctx.strokeStyle = 'rgba(90, 90, 84, 0.08)';
+    ctx.lineWidth = 1;
+    for (let gx = 0; gx < W; gx += 30) {
+      ctx.beginPath();
+      ctx.moveTo(gx, 0);
+      ctx.lineTo(gx, H);
+      ctx.stroke();
+    }
+    for (let gy = 0; gy < H; gy += 30) {
+      ctx.beginPath();
+      ctx.moveTo(0, gy);
+      ctx.lineTo(W, gy);
+      ctx.stroke();
+    }
+
+    // Draw background frame
+    ctx.strokeStyle = '#424240';
+    ctx.lineWidth = 3;
+    ctx.strokeRect(20, 10, W - 40, H - 20);
+
+    // Draw corner brackets
+    ctx.strokeStyle = '#5A5A56';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(15, 30); ctx.lineTo(15, 10); ctx.lineTo(35, 10);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(W - 35, 10); ctx.lineTo(W - 15, 10); ctx.lineTo(W - 15, 30);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(15, H - 30); ctx.lineTo(15, H - 10); ctx.lineTo(35, H - 10);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(W - 35, H - 10); ctx.lineTo(W - 15, H - 10); ctx.lineTo(W - 15, H - 30);
+    ctx.stroke();
+
+    // Draw decorative gears
+    gears.forEach(g => {
+      drawGear(g.x, g.y, g.radius, g.angle, '#5A5A56');
+    });
+
+    // Draw decorative connecting rods between gears
+    ctx.strokeStyle = 'rgba(90, 90, 86, 0.4)';
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([3, 4]);
+    ctx.beginPath();
+    ctx.moveTo(gears[3].x, gears[3].y);
+    ctx.lineTo(gears[2].x, gears[2].y);
+    ctx.lineTo(gears[4].x, gears[4].y);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Draw vertical guide rails (tubes)
+    FUNNEL_TOPS.forEach((ft, i) => {
+      const cagePos = CAGE_POSITIONS[i];
+      const highlighted = cages[i] && cages[i].highlighted && !ballReleased;
+
+      // Tube glow when highlighted
+      if (highlighted) {
+        ctx.strokeStyle = 'rgba(78, 205, 196, 0.15)';
+        ctx.lineWidth = 16;
+        ctx.beginPath();
+        ctx.moveTo(ft.x, ft.y + 10);
+        ctx.lineTo(cagePos.x, cagePos.y - 30);
+        ctx.stroke();
+      }
+
+      // Tube walls
+      ctx.strokeStyle = highlighted ? 'rgba(78, 205, 196, 0.6)' : '#5A5A56';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(ft.x - 10, ft.y + 10);
+      ctx.lineTo(cagePos.x - 10, cagePos.y - 30);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(ft.x + 10, ft.y + 10);
+      ctx.lineTo(cagePos.x + 10, cagePos.y - 30);
+      ctx.stroke();
+
+      // Cross-braces on tubes
+      const tubeLen = cagePos.y - 30 - ft.y - 10;
+      for (let b = 0; b < 3; b++) {
+        const by = ft.y + 25 + b * (tubeLen / 3);
+        ctx.strokeStyle = 'rgba(90, 90, 86, 0.3)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(ft.x - 10, by);
+        ctx.lineTo(ft.x + 10, by);
+        ctx.stroke();
+      }
+    });
+
+    // Draw funnel tops
+    FUNNEL_TOPS.forEach((ft, i) => {
+      const highlighted = cages[i] && cages[i].highlighted && !ballReleased;
+      ctx.strokeStyle = highlighted ? COLORS.cyan : '#5A5A56';
+      ctx.lineWidth = highlighted ? 3 : 2;
+      ctx.beginPath();
+      ctx.moveTo(ft.x - 28, ft.y - 8);
+      ctx.lineTo(ft.x - 10, ft.y + 10);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(ft.x + 28, ft.y - 8);
+      ctx.lineTo(ft.x + 10, ft.y + 10);
+      ctx.stroke();
+
+      // Funnel rim
+      ctx.beginPath();
+      ctx.moveTo(ft.x - 28, ft.y - 8);
+      ctx.lineTo(ft.x + 28, ft.y - 8);
+      ctx.stroke();
+    });
+
+    // Draw curved guide paths from ramp to funnels
+    ctx.lineWidth = 1.5;
+    FUNNEL_TOPS.forEach((ft, i) => {
+      const highlighted = cages[i] && cages[i].highlighted && !ballReleased;
+      ctx.strokeStyle = highlighted ? 'rgba(78, 205, 196, 0.4)' : 'rgba(66, 66, 64, 0.5)';
+      ctx.setLineDash([4, 6]);
+      ctx.beginPath();
+      const startX = RAMP_PIVOT.x;
+      const startY = RAMP_PIVOT.y + 20;
+      const cpX = (startX + ft.x) / 2;
+      const cpY = Math.min(startY, ft.y) - 40;
+      ctx.moveTo(startX, startY);
+      ctx.quadraticCurveTo(cpX, cpY, ft.x, ft.y - 8);
+      ctx.stroke();
+    });
+    ctx.setLineDash([]);
+
+    // Draw levers
+    levers.forEach((lever, i) => {
+      ctx.save();
+      ctx.translate(lever.x, lever.y);
+      ctx.rotate(lever.triggered ? -lever.angle : 0);
+
+      // Lever arm
+      ctx.strokeStyle = lever.triggered ? COLORS.orange : '#8C8C84';
+      ctx.lineWidth = 4;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(-18, 0);
+      ctx.lineTo(18, 0);
+      ctx.stroke();
+      ctx.lineCap = 'butt';
+
+      // Pivot
+      ctx.fillStyle = lever.triggered ? COLORS.orange : '#8C8C84';
+      ctx.beginPath();
+      ctx.arc(0, 0, 4, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = '#363633';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+
+      // Small weight on lever end
+      ctx.fillStyle = lever.triggered ? COLORS.amber : '#6A6A64';
+      ctx.beginPath();
+      ctx.arc(16, 0, 3, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.restore();
+    });
+
+    // Draw ramp pivot mount
+    ctx.fillStyle = '#363633';
+    ctx.beginPath();
+    ctx.arc(RAMP_PIVOT.x, RAMP_PIVOT.y, 20, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#5A5A56';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    // Inner ring
+    ctx.strokeStyle = '#4A4A46';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.arc(RAMP_PIVOT.x, RAMP_PIVOT.y, 14, 0, Math.PI * 2);
+    ctx.stroke();
+
+    // Draw the pivoting ramp
+    const displayAngle = rampAngle + (isDragging ? 0 : rampBreathOffset);
+    ctx.save();
+    ctx.translate(RAMP_PIVOT.x, RAMP_PIVOT.y);
+    ctx.rotate(displayAngle);
+
+    // Ramp shadow
+    ctx.fillStyle = 'rgba(0,0,0,0.2)';
+    ctx.beginPath();
+    ctx.roundRect(-RAMP_LENGTH + 2, -RAMP_THICKNESS / 2 + 3, RAMP_LENGTH * 2, RAMP_THICKNESS, 4);
+    ctx.fill();
+
+    // Ramp body with wood grain effect
+    const rampGrad = ctx.createLinearGradient(-RAMP_LENGTH, -RAMP_THICKNESS/2, -RAMP_LENGTH, RAMP_THICKNESS/2);
+    rampGrad.addColorStop(0, '#A0782A');
+    rampGrad.addColorStop(0.3, '#8B6914');
+    rampGrad.addColorStop(0.7, '#7A5C10');
+    rampGrad.addColorStop(1, '#6B5210');
+    ctx.fillStyle = rampGrad;
+    ctx.beginPath();
+    ctx.roundRect(-RAMP_LENGTH, -RAMP_THICKNESS / 2, RAMP_LENGTH * 2, RAMP_THICKNESS, 4);
+    ctx.fill();
+
+    // Ramp border with hover glow
+    if (hoveringRamp && !ballReleased) {
+      ctx.shadowColor = COLORS.cyan;
+      ctx.shadowBlur = 10;
+    }
+    ctx.strokeStyle = hoveringRamp && !ballReleased ? COLORS.cyan : '#6B5210';
+    ctx.lineWidth = hoveringRamp && !ballReleased ? 2 : 1.5;
+    ctx.beginPath();
+    ctx.roundRect(-RAMP_LENGTH, -RAMP_THICKNESS / 2, RAMP_LENGTH * 2, RAMP_THICKNESS, 4);
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+
+    // Ramp edge markers
+    ctx.fillStyle = COLORS.orange;
+    ctx.beginPath();
+    ctx.arc(-RAMP_LENGTH + 6, 0, 4, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(RAMP_LENGTH - 6, 0, 4, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Ramp center grip lines
+    ctx.strokeStyle = 'rgba(160, 120, 42, 0.5)';
+    ctx.lineWidth = 1;
+    for (let g = -2; g <= 2; g++) {
+      ctx.beginPath();
+      ctx.moveTo(g * 8, -RAMP_THICKNESS / 2 + 2);
+      ctx.lineTo(g * 8, RAMP_THICKNESS / 2 - 2);
+      ctx.stroke();
+    }
+
+    ctx.restore();
+
+    // Draw pivot center bolt
+    ctx.fillStyle = '#8C8C84';
+    ctx.beginPath();
+    ctx.arc(RAMP_PIVOT.x, RAMP_PIVOT.y, 6, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#6A6A64';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(RAMP_PIVOT.x - 3, RAMP_PIVOT.y);
+    ctx.lineTo(RAMP_PIVOT.x + 3, RAMP_PIVOT.y);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(RAMP_PIVOT.x, RAMP_PIVOT.y - 3);
+    ctx.lineTo(RAMP_PIVOT.x, RAMP_PIVOT.y + 3);
+    ctx.stroke();
+
+    // Draw ball on ramp (if not released)
+    if (!ballReleased) {
+      // Ball sits on ramp surface, offset toward the lower end
+      const ballOffset = -30; // negative = toward left end of ramp
+      const bx = RAMP_PIVOT.x + Math.cos(displayAngle) * ballOffset;
+      const by = RAMP_PIVOT.y + Math.sin(displayAngle) * ballOffset - BALL_RADIUS - RAMP_THICKNESS / 2;
+      drawBall(bx, by);
+    } else if (ball) {
+      drawBall(ball.x, ball.y);
+    }
+
+    // Draw cages
+    cages.forEach((cage, i) => {
+      if (cage.alpha <= 0) return;
+
+      ctx.save();
+      ctx.globalAlpha = cage.alpha;
+      ctx.translate(cage.x + cage.shakeX, cage.y + cage.dropOffset);
+      ctx.scale(cage.scale, cage.scale);
+
+      const halfW = cage.w / 2;
+      const halfH = cage.h / 2;
+
+      const isHighlighted = cage.highlighted && !ballReleased;
+      const isSelected = (i === selectedCage && chainPhase >= 2);
+
+      // Cage glow
+      if (isHighlighted) {
+        ctx.shadowColor = COLORS.cyan;
+        ctx.shadowBlur = 12;
+      } else if (isSelected) {
+        ctx.shadowColor = cage.is_correct ? COLORS.success : COLORS.error;
+        ctx.shadowBlur = 15;
+      }
+
+      let bgColor = '#363633';
+      let borderColor = '#5A5A56';
+      if (isHighlighted) {
+        bgColor = '#2A3A37';
+        borderColor = COLORS.cyan;
+      }
+      if (isSelected) {
+        bgColor = cage.is_correct ? '#2A3A2A' : '#3A2A2A';
+        borderColor = cage.is_correct ? COLORS.success : COLORS.error;
+      }
+
+      // Cage background
+      ctx.fillStyle = bgColor;
+      ctx.beginPath();
+      ctx.roundRect(-halfW, -halfH, cage.w, cage.h, 8);
+      ctx.fill();
+
+      ctx.shadowBlur = 0;
+
+      // Cage border
+      ctx.strokeStyle = borderColor;
+      ctx.lineWidth = isHighlighted || isSelected ? 2.5 : 1.5;
+      ctx.beginPath();
+      ctx.roundRect(-halfW, -halfH, cage.w, cage.h, 8);
+      ctx.stroke();
+
+      // Cage bars on top
+      ctx.strokeStyle = borderColor;
+      ctx.lineWidth = 2;
+      const barY = -halfH;
+      for (let b = -3; b <= 3; b++) {
+        const barX = b * 14;
+        ctx.beginPath();
+        ctx.moveTo(barX, barY);
+        ctx.lineTo(barX, barY - 14);
+        ctx.stroke();
+      }
+      // Top bar connecting
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      ctx.moveTo(-42, barY - 14);
+      ctx.lineTo(42, barY - 14);
+      ctx.stroke();
+
+      // Small triangle cage top (trap door look)
+      ctx.fillStyle = borderColor;
+      ctx.beginPath();
+      ctx.moveTo(-5, barY - 14);
+      ctx.lineTo(5, barY - 14);
+      ctx.lineTo(0, barY - 20);
+      ctx.closePath();
+      ctx.fill();
+
+      // Answer label (A, B, C, D)
+      ctx.fillStyle = isHighlighted ? COLORS.cyan : (isSelected ? borderColor : COLORS.textLight);
+      ctx.font = 'bold 14px system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'top';
+      ctx.fillText(cage.label, 0, -halfH + 6);
+
+      // Answer text (wrapped)
+      ctx.fillStyle = COLORS.textLight;
+      ctx.font = '13px system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'top';
+      const lines = wrapText(cage.text, cage.w - 16, '13px system-ui, sans-serif');
+      const lineHeight = 16;
+      const textStartY = -halfH + 24;
+      lines.forEach((line, li) => {
+        if (li < 5) {
+          ctx.fillText(line, 0, textStartY + li * lineHeight);
+        }
+      });
+
+      ctx.restore();
+    });
+
+    // Draw spark particles
+    sparkParticles.forEach(p => {
+      const alpha = p.life / p.maxLife;
+      ctx.globalAlpha = alpha;
+      ctx.fillStyle = p.color;
+      const sz = p.size * alpha;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, sz, 0, Math.PI * 2);
+      ctx.fill();
+      // Particle glow
+      ctx.globalAlpha = alpha * 0.3;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, sz * 2, 0, Math.PI * 2);
+      ctx.fill();
+    });
+    ctx.globalAlpha = 1;
+
+    // Draw angle indicator arc
+    if (!ballReleased) {
+      ctx.save();
+      // Background arc
+      ctx.strokeStyle = 'rgba(78, 205, 196, 0.15)';
+      ctx.lineWidth = 6;
+      ctx.beginPath();
+      ctx.arc(RAMP_PIVOT.x, RAMP_PIVOT.y, 45, -0.6, 0.6);
+      ctx.stroke();
+
+      // Zone markers
+      ctx.strokeStyle = 'rgba(78, 205, 196, 0.25)';
+      ctx.lineWidth = 1;
+      for (let z = 0; z <= 4; z++) {
+        const a = -0.6 + z * 0.3;
+        ctx.beginPath();
+        ctx.moveTo(RAMP_PIVOT.x + Math.cos(a) * 40, RAMP_PIVOT.y + Math.sin(a) * 40);
+        ctx.lineTo(RAMP_PIVOT.x + Math.cos(a) * 50, RAMP_PIVOT.y + Math.sin(a) * 50);
+        ctx.stroke();
+      }
+
+      // Current angle indicator
+      ctx.strokeStyle = COLORS.cyan;
+      ctx.lineWidth = 4;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.arc(RAMP_PIVOT.x, RAMP_PIVOT.y, 45, rampAngle - 0.06, rampAngle + 0.06);
+      ctx.stroke();
+      ctx.lineCap = 'butt';
+
+      ctx.restore();
+    }
+
+    // Draw decorative bolts
+    drawBolt(50, 30);
+    drawBolt(W - 50, 30);
+    drawBolt(50, H - 30);
+    drawBolt(W - 50, H - 30);
+    drawBolt(W / 2 - 100, 20);
+    drawBolt(W / 2 + 100, 20);
+  }
+
+  /** Draw a metallic ball bearing */
+  function drawBall(x, y) {
+    // Ball shadow
+    ctx.fillStyle = 'rgba(0,0,0,0.3)';
+    ctx.beginPath();
+    ctx.ellipse(x + 2, y + 3, BALL_RADIUS * 0.9, BALL_RADIUS * 0.5, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Main ball
+    const gradient = ctx.createRadialGradient(x - 3, y - 3, 1, x, y, BALL_RADIUS);
+    gradient.addColorStop(0, '#D0D0E0');
+    gradient.addColorStop(0.4, '#A0A0B0');
+    gradient.addColorStop(0.8, '#606070');
+    gradient.addColorStop(1, '#404050');
+    ctx.fillStyle = gradient;
+    ctx.beginPath();
+    ctx.arc(x, y, BALL_RADIUS, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Rim
+    ctx.strokeStyle = 'rgba(80, 80, 90, 0.5)';
+    ctx.lineWidth = 0.5;
+    ctx.stroke();
+
+    // Specular highlight
+    ctx.fillStyle = 'rgba(255,255,255,0.5)';
+    ctx.beginPath();
+    ctx.arc(x - 3, y - 3, 3, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Secondary highlight
+    ctx.fillStyle = 'rgba(255,255,255,0.15)';
+    ctx.beginPath();
+    ctx.arc(x + 1, y + 2, 2, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  /** Draw a decorative gear */
+  function drawGear(x, y, radius, angle, color) {
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(angle);
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 2;
+
+    // Inner circle
+    ctx.beginPath();
+    ctx.arc(0, 0, radius * 0.4, 0, Math.PI * 2);
+    ctx.stroke();
+
+    // Outer with teeth
+    const teeth = 8;
+    ctx.beginPath();
+    for (let i = 0; i < teeth; i++) {
+      const a1 = (i / teeth) * Math.PI * 2;
+      const a2 = ((i + 0.25) / teeth) * Math.PI * 2;
+      const a3 = ((i + 0.5) / teeth) * Math.PI * 2;
+      const a4 = ((i + 0.75) / teeth) * Math.PI * 2;
+      ctx.lineTo(Math.cos(a1) * radius, Math.sin(a1) * radius);
+      ctx.lineTo(Math.cos(a2) * (radius + 7), Math.sin(a2) * (radius + 7));
+      ctx.lineTo(Math.cos(a3) * (radius + 7), Math.sin(a3) * (radius + 7));
+      ctx.lineTo(Math.cos(a4) * radius, Math.sin(a4) * radius);
+    }
+    ctx.closePath();
+    ctx.stroke();
+
+    // Spokes
+    ctx.lineWidth = 1;
+    for (let s = 0; s < 4; s++) {
+      const sa = (s / 4) * Math.PI * 2;
+      ctx.beginPath();
+      ctx.moveTo(Math.cos(sa) * radius * 0.4, Math.sin(sa) * radius * 0.4);
+      ctx.lineTo(Math.cos(sa) * radius * 0.85, Math.sin(sa) * radius * 0.85);
+      ctx.stroke();
+    }
+
+    // Center dot
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.arc(0, 0, 3, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.restore();
+  }
+
+  /** Draw a decorative bolt */
+  function drawBolt(x, y) {
+    ctx.fillStyle = '#5A5A56';
+    ctx.beginPath();
+    ctx.arc(x, y, 5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#424240';
+    ctx.lineWidth = 1.5;
+    // Phillips head
+    ctx.beginPath();
+    ctx.moveTo(x - 3, y);
+    ctx.lineTo(x + 3, y);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(x, y - 3);
+    ctx.lineTo(x, y + 3);
+    ctx.stroke();
+  }
+
+  /** Check if mouse is over the ramp */
+  function isOverRamp(mx, my) {
+    const dx = mx - RAMP_PIVOT.x;
+    const dy = my - RAMP_PIVOT.y;
+    const cosA = Math.cos(-rampAngle);
+    const sinA = Math.sin(-rampAngle);
+    const localX = dx * cosA - dy * sinA;
+    const localY = dx * sinA + dy * cosA;
+    return Math.abs(localX) < RAMP_LENGTH + 15 && Math.abs(localY) < 25;
+  }
+
+  // === Mouse/Input Handling ===
+  canvas.addEventListener('mousedown', (e) => {
+    if (gameState !== 'playing') return;
+    if (ballReleased) return;
+
+    const pos = screenToLogical(e.clientX, e.clientY);
+
+    if (isOverRamp(pos.x, pos.y)) {
+      isDragging = true;
+      justFinishedDrag = false;
+      dragStartAngle = rampAngle;
+      dragStartX = pos.x;
+      canvas.style.cursor = 'grabbing';
+    }
+  });
+
+  canvas.addEventListener('mousemove', (e) => {
+    if (gameState !== 'playing') return;
+    if (ballReleased) return;
+
+    const pos = screenToLogical(e.clientX, e.clientY);
+
+    if (isDragging) {
+      // Horizontal drag for more intuitive control
+      const deltaX = pos.x - dragStartX;
+      const newAngle = Math.max(-0.6, Math.min(0.6, dragStartAngle + deltaX * 0.004));
+      // Play subtle click when crossing zone boundary
+      const oldZone = getCageFromAngle(rampAngle);
+      const newZone = getCageFromAngle(newAngle);
+      if (oldZone !== newZone) {
+        playRampClick();
+      }
+      rampAngle = newAngle;
+    } else {
+      const overRamp = isOverRamp(pos.x, pos.y);
+      if (overRamp !== hoveringRamp) {
+        hoveringRamp = overRamp;
+        canvas.style.cursor = overRamp ? 'grab' : 'default';
+      }
+    }
+  });
+
+  canvas.addEventListener('mouseup', (e) => {
+    if (gameState !== 'playing') return;
+
+    if (isDragging) {
+      isDragging = false;
+      justFinishedDrag = true;
+      // Reset after a frame so click doesn't fire
+      setTimeout(() => { justFinishedDrag = false; }, 50);
+      canvas.style.cursor = hoveringRamp ? 'grab' : 'default';
+    }
+  });
+
+  canvas.addEventListener('click', (e) => {
+    if (gameState !== 'playing') return;
+    if (ballReleased) return;
+    if (justFinishedDrag) return;
+
+    const pos = screenToLogical(e.clientX, e.clientY);
+
+    // Click anywhere (except ramp) to release ball
+    if (!isOverRamp(pos.x, pos.y)) {
+      releaseBall();
+    }
+  });
+
+  function releaseBall() {
+    if (ballReleased) return;
+
+    ballReleased = true;
+    selectedCage = getCageFromAngle(rampAngle);
+
+    ballPath = generateBallPath(selectedCage);
+    ballPathIndex = 0;
+    ballSpeed = 50;
+
+    // Start ball at current position on ramp
+    const displayAngle = rampAngle;
+    ball = {
+      x: RAMP_PIVOT.x + Math.cos(displayAngle) * (-30),
+      y: RAMP_PIVOT.y + Math.sin(displayAngle) * (-30) - BALL_RADIUS - RAMP_THICKNESS / 2
+    };
+
+    chainPhase = 1;
+    chainTimer = 0;
+    cageDropTimer = 0;
+
+    canvas.style.cursor = 'default';
+
+    // Speed up gears for dramatic effect
+    gears.forEach(g => g.speed *= 3);
+
+    playBallRelease();
+  }
+
+  function handleInput(e) {
+    if (gameState !== 'playing') return;
+    if (ballReleased) return;
+
+    const step = 0.06;
+    if (e.code === 'ArrowLeft' || e.code === 'KeyA') {
+      const newAngle = Math.max(-0.6, rampAngle - step);
+      const oldZone = getCageFromAngle(rampAngle);
+      const newZone = getCageFromAngle(newAngle);
+      if (oldZone !== newZone) playRampClick();
+      rampAngle = newAngle;
+    } else if (e.code === 'ArrowRight' || e.code === 'KeyD') {
+      const newAngle = Math.min(0.6, rampAngle + step);
+      const oldZone = getCageFromAngle(rampAngle);
+      const newZone = getCageFromAngle(newAngle);
+      if (oldZone !== newZone) playRampClick();
+      rampAngle = newAngle;
+    } else if (e.code === 'Space' || e.code === 'Enter') {
+      e.preventDefault();
+      releaseBall();
+    }
+  }
+
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║  SECTION 4: GAME LOOP - DO NOT MODIFY                                      ║
+  // ║  Standard loop with responsive scaling and DPR support.                    ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
+  let lastTime = performance.now();
+
+  function gameLoop(now) {
+    const dt = Math.min((now - lastTime) / 1000, 0.05); // Cap at 50ms
+    lastTime = now;
+
+    // Apply transform for logical coordinate system
+    ctx.setTransform(scale * dpr, 0, 0, scale * dpr, 0, 0);
+
+    if (gameState === 'playing') {
+      updateGame(dt);
+      drawGame();
+    } else {
+      drawGame(); // Draw game state behind overlay
+      drawEndScreen(dt);
+    }
+
+    // Reset transform for next frame
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+    requestAnimationFrame(gameLoop);
+  }
+
+  // Input handlers
+  document.addEventListener('keydown', (e) => {
+    if (gameState === 'ended' && (e.code === 'KeyR')) {
+      // Restart game
+      gameState = 'playing';
+      gameResult = null;
+      gameExplanation = '';
+      confettiParticles = [];
+      initGame();
+      return;
+    }
+    handleInput(e);
+  });
+
+  document.addEventListener('keyup', (e) => {
+    // Optional: handle key release in your handleInput
+  });
+
+  // Canvas click handler for end screen buttons
+  canvas.addEventListener('click', (e) => {
+    if (gameState !== 'ended') return;
+
+    const { x, y } = screenToLogical(e.clientX, e.clientY);
+
+    if (gameResult) {
+      // Correct answer: check both buttons
+      if (pointInRect(x, y, restartButton)) {
+        gameState = 'playing';
+        gameResult = null;
+        gameExplanation = '';
+        confettiParticles = [];
+        initGame();
+        return;
+      }
+      if (pointInRect(x, y, nextButton)) {
+        // Notify parent to go to next question
+        if (window.parent && window.parent !== window) {
+          window.parent.postMessage({ type: 'quiz-next' }, '*');
+        }
+        return;
+      }
+    } else {
+      // Wrong answer: check centered restart button
+      const centeredRestart = { x: W / 2 - 75, y: H / 2 + 60, w: 150, h: 48 };
+      if (pointInRect(x, y, centeredRestart)) {
+        gameState = 'playing';
+        gameResult = null;
+        gameExplanation = '';
+        confettiParticles = [];
+        initGame();
+        return;
+      }
+    }
+  });
+
+  // Handle resize
+  window.addEventListener('resize', resizeCanvas);
+
+  // Initialize
+  resizeCanvas();
+  initGame();
+  requestAnimationFrame(gameLoop);
+  </script>
+</body>
+</html>
