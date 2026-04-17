@@ -11,6 +11,7 @@ import { GameInfoModal } from "./GameInfoModal";
 import { QuestionCard } from "./QuestionCard";
 import { LoadingSpinner } from "./LoadingSpinner";
 import { ExpandButton } from "./ExpandButton";
+import { ExpandableQuestionText } from "./ExpandableQuestionText";
 import type { ChoicePayload } from "../types";
 import { injectQuestionIntoTemplate } from "../lib/template-injector";
 
@@ -246,10 +247,14 @@ export function QuizContainer({
                   style={{ color: "var(--qz-text-secondary)", background: "var(--qz-bg-secondary)" }}>
                   {currentQuestionIndex + 1}/{questions.length}
                 </span>
-                <p className="flex-1 text-sm font-medium line-clamp-2"
-                  style={{ color: "var(--qz-text-primary)" }}>
-                  {currentQuestion.question}
-                </p>
+                <ExpandableQuestionText
+                  text={currentQuestion.question}
+                  maxLines={4}
+                  textClassName="text-sm font-medium"
+                  textStyle={{ color: "var(--qz-text-primary)" }}
+                  wrapperClassName="flex-1"
+                  chipAlign="start"
+                />
                 <button
                   onClick={() => requestDisplayMode("fullscreen")}
                   className="flex-shrink-0 p-1.5 rounded-md transition-colors"
@@ -324,10 +329,14 @@ export function QuizContainer({
               >
                 ←
               </button>
-              <p className="text-sm font-medium line-clamp-2 flex-1 text-center"
-                style={{ color: "var(--qz-text-primary)" }}>
-                {currentQuestion.question}
-              </p>
+              <ExpandableQuestionText
+                text={currentQuestion.question}
+                maxLines={4}
+                textClassName="text-sm font-medium text-center"
+                textStyle={{ color: "var(--qz-text-primary)" }}
+                wrapperClassName="flex-1"
+                chipAlign="center"
+              />
               <button
                 onClick={goToNextQuestion}
                 disabled={false}
